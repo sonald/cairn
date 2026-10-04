@@ -10,6 +10,8 @@ final class SidebarViewController: NSViewController,
 {
     var onOpenFile: ((URL) -> Void)?
     var onOpenFileInSecondary: ((URL) -> Void)?
+    /// “Open to the Side”: the split reference pane.
+    var onOpenFileToSide: ((URL) -> Void)?
     var onOpenFileInNewTab: ((URL) -> Void)?
     var onOpenOutline: ((UInt32) -> Void)?
     /// Opens the project's exclusion rules editor.
@@ -267,6 +269,13 @@ final class SidebarViewController: NSViewController,
         )
         openRight.target = self
         fileMenu.addItem(openRight)
+        let toSide = NSMenuItem(
+            title: localized("main.open.to.side"),
+            action: #selector(openFileToSide(_:)),
+            keyEquivalent: ""
+        )
+        toSide.target = self
+        fileMenu.addItem(toSide)
         fileOutlineView.menu = fileMenu
 
         configurePlaceholders()
@@ -712,6 +721,11 @@ final class SidebarViewController: NSViewController,
     @objc private func openFileInLeftReader(_ sender: Any?) {
         guard let file = contextMenuFile() else { return }
         onOpenFile?(file)
+    }
+
+    @objc private func openFileToSide(_ sender: Any?) {
+        guard let file = contextMenuFile() else { return }
+        onOpenFileToSide?(file)
     }
 
     @objc private func openFileInRightReader(_ sender: Any?) {

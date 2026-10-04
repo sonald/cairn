@@ -671,3 +671,8 @@
 "rules.saveFailed" = "无法保存规则：%@";
 "main.rules.fileExcluded" = "已排除 · 不参与索引";
 "main.rules.fileExcluded.help" = "项目排除规则把这个文件移出了索引和搜索；这里仍可阅读。";
+"main.open.to.side" = "在右侧打开";
+"app.menu.open.to.side" = "在右侧打开当前文件";
+"app.menu.close.split" = "关闭分屏";
+"main.split.projectOnly" = "只有项目内的文件可以在右侧打开";
+"main.split.tooNarrow" = "窗口太窄，放不下两个阅读区";

@@ -356,6 +356,17 @@ private func detachedValue<Value: Sendable>(
     }
 }
 
+/// What the split reference pane shows.
+public struct ReferencePaneState: Equatable, Sendable {
+    public var file: URL
+    public var byteOffset: UInt32
+
+    public init(file: URL, byteOffset: UInt32) {
+        self.file = file
+        self.byteOffset = byteOffset
+    }
+}
+
 public final class FileTreeNode: Sendable {
     public let url: URL
     public let name: String
@@ -521,6 +532,9 @@ public final class AppModel {
     public var highlightedNames = HighlightedNames()
     /// The open project's exclusion rules, from application data.
     public private(set) var pathRules = ProjectPathRules()
+    /// The split reference pane beside the reader: a project file and the
+    /// position being read there. Nil when the window shows one reader.
+    public var referencePane: ReferencePaneState?
     @ObservationIgnored private var pathRulesStore: ProjectPathRulesStore?
     package var bookmarkModel = BookmarkModel()
 
@@ -832,6 +846,7 @@ public final class AppModel {
         navigationHistory.reset()
         readingTrail.reset()
         highlightedNames.removeAll()
+        referencePane = nil
         resolutionExplanations.removeAll()
         relationTree.updateProjectState(projectState)
         selectedFile = nil
@@ -907,7 +922,12 @@ public final class AppModel {
             readingTrail: Self.persistedTrail(readingTrail),
             // R6.3: the tracking mode survives per window; the pin does not.
             contextTracking: contextWindow.tracking.rawValue,
-            highlights: highlightedNames.entries
+            highlights: highlightedNames.entries,
+            referencePane: referencePane.flatMap { pane in
+                Self.relativePath(of: pane.file, under: root).map {
+                    SessionCodec.ReferencePane(path: $0, byteOffset: pane.byteOffset)
+                }
+            }
         )
     }
 

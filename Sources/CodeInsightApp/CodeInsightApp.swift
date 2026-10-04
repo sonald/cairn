@@ -11387,6 +11387,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.jumpToTypeDefinitionAtCaret()
     }
 
+    @objc private func openToSide(_ sender: Any?) {
+        projectCommandTarget()?.openCurrentFileToSide()
+    }
+
+    @objc private func closeSplit(_ sender: Any?) {
+        projectCommandTarget()?.closeReference()
+    }
+
     @objc private func showExclusionRules(_ sender: Any?) {
         projectCommandTarget()?.showExclusionRules()
     }
@@ -11625,9 +11633,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         case #selector(clearHighlights(_:)):
             return target?.hasHighlights == true
         case #selector(goBack(_:)):
-            return model?.navigationHistory.canGoBack == true
+            return target?.canGoBack == true
         case #selector(goForward(_:)):
-            return model?.navigationHistory.canGoForward == true
+            return target?.canGoForward == true
+        case #selector(openToSide(_:)):
+            return target?.canOpenCurrentFileToSide == true
+        case #selector(closeSplit(_:)):
+            return target?.hasReferencePane == true
         case #selector(previousDiffHunk(_:)), #selector(nextDiffHunk(_:)):
             return !(model?.compare.diff?.hunks.isEmpty ?? true)
         case #selector(closeComparison(_:)):
@@ -11807,6 +11819,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .goNextDiffHunk: CommandAction(#selector(AppDelegate.nextDiffHunk(_:))),
         .navigateTypeDefinition: CommandAction(#selector(AppDelegate.jumpToTypeDefinition(_:))),
         .fileExclusionRules: CommandAction(#selector(AppDelegate.showExclusionRules(_:))),
+        .viewOpenToSide: CommandAction(#selector(AppDelegate.openToSide(_:))),
+        .viewCloseSplit: CommandAction(#selector(AppDelegate.closeSplit(_:))),
         .findToggleHighlight: CommandAction(#selector(AppDelegate.toggleHighlight(_:))),
         .findClearHighlights: CommandAction(#selector(AppDelegate.clearHighlights(_:))),
         .goMatchingBracket: CommandAction(#selector(AppDelegate.jumpToMatchingBracket(_:))),
@@ -12085,6 +12099,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
         appendMenuItem(for: .viewCloseComparison, to: viewMenu)
+        appendMenuItem(for: .viewOpenToSide, to: viewMenu)
+        appendMenuItem(for: .viewCloseSplit, to: viewMenu)
         viewMenu.addItem(.separator())
         let foldingItem = NSMenuItem(
             title: localized("app.menu.folding"),

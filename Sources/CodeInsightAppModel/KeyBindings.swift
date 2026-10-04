@@ -173,6 +173,8 @@ extension CommandID {
     public static let viewPresetCompare = CommandID(rawValue: "view.preset.compare")
     public static let viewPresetFocus = CommandID(rawValue: "view.preset.focus")
     public static let viewCloseComparison = CommandID(rawValue: "view.closeComparison")
+    public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
+    public static let viewCloseSplit = CommandID(rawValue: "view.closeSplit")
     public static let viewToggleFold = CommandID(rawValue: "view.toggleFold")
     public static let viewReadingHeightFull = CommandID(rawValue: "view.readingHeight.full")
     public static let viewReadingHeightStructure = CommandID(rawValue: "view.readingHeight.structure")
@@ -372,6 +374,10 @@ public extension KeyBindingScheme {
             def(.viewCloseComparison, .view, "app.menu.close.comparison", [
                 keyboard([.control, .command], .character("w")),
             ]),
+            def(.viewOpenToSide, .view, "app.menu.open.to.side", [
+                keyboard([.command], .character("\\")),
+            ]),
+            def(.viewCloseSplit, .view, "app.menu.close.split", []),
             def(.viewToggleFold, .view, "app.menu.toggle.fold", [
                 keyboard([.control, .command], .character("[")),
             ]),

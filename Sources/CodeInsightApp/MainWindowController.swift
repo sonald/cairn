@@ -522,9 +522,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.openInNewTab(url)
         }
         sidebarController.onOpenOutline = { [weak self] offset in
-            guard let self, let file = model.selectedFile else { return }
+            guard let self else { return }
+            if focusedPane == .reference, let pane = model.referencePane, isReferenceActive {
+                revealInReference(pane.file, byteOffset: offset)
+                return
+            }
+            guard let file = model.selectedFile else { return }
             navigate(to: file, byteOffset: offset, cause: .outline)
         }
+        sidebarController.onOpenFileToSide = { [weak self] url in self?.openReference(url) }
+        readerController.onOpenToSide = { [weak self] url in self?.openReference(url) }
         readerController.onOpenScope = sidebarController.onOpenOutline
         sidebarController.onEditExclusionRules = { [weak self] in self?.showExclusionRules() }
         readerController.onRevealPath = { [weak self] url in
@@ -532,19 +539,38 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             sidebarItem.isCollapsed = false
             sidebarController.revealPath(url)
         }
-        readerController.onTokenClick = { [weak self] offset, commandClick in
-            self?.handleReaderClick(offset: offset, commandClick: commandClick)
+        for reader in [readerController, secondaryReaderController] {
+            reader.onTokenClick = { [weak self, weak reader] offset, commandClick in
+                guard let self, let reader else { return }
+                handleReaderClick(offset: offset, commandClick: commandClick, from: reader)
+            }
+            reader.onTypeDefinitionClick = { [weak self, weak reader] offset in
+                guard let self, let reader else { return }
+                handleReaderTypeDefinition(offset: offset, from: reader)
+            }
+            reader.onShowRelation = { [weak self, weak reader] offset, direction in
+                guard let self, let reader else { return }
+                handleReaderRelation(offset: offset, direction: direction, from: reader)
+            }
         }
-        readerController.onTypeDefinitionClick = { [weak self] offset in
-            self?.handleReaderTypeDefinition(offset: offset)
+        secondaryReaderController.onOutlineChange = { [weak self] facets in
+            guard let self else { return }
+            referenceOutline = facets
+            if focusedPane == .reference { renderOutlineForFocus() }
         }
-        secondaryReaderController.onTypeDefinitionClick = { [weak self] offset in
-            self?.handleReaderTypeDefinition(offset: offset)
+        secondaryReaderController.onSelectionChange = { [weak self] offset in
+            guard let self, isReferenceActive, model.referencePane != nil else { return }
+            // Programmatic reveals report selections too; focus follows only
+            // user clicks and caret moves (onTokenClick, onCaretFollow).
+            model.referencePane?.byteOffset = offset
+            sidebarController.highlightOutline(at: offset)
+            model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
         for reader in [readerController, secondaryReaderController] {
             reader.onCaretFollow = { [weak self, weak reader] offset in
-                guard let reader else { return }
-                self?.handleReaderCaret(offset: offset, from: reader)
+                guard let self, let reader else { return }
+                noteFocus(reader === secondaryReaderController && isReferenceActive ? .reference : .primary)
+                handleReaderCaret(offset: offset, from: reader)
             }
         }
         for reader in [readerController, secondaryReaderController] {
@@ -568,6 +594,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         symbolDocCard.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
+            primaryOutline = facets
+            guard focusedPane == .primary else { return }
             sidebarController.setOutline(facets.map(OutlineNode.init(facet:)), file: model.selectedFile)
             if let offset = readerController.currentReadingPosition()?.byteOffset {
                 sidebarController.highlightOutline(at: offset)
@@ -638,9 +666,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.tabStrip.updateActiveReadingSetScroll(offset)
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
-        readerController.onShowRelation = { [weak self] offset, direction in
-            self?.handleReaderRelation(offset: offset, direction: direction)
-        }
         readerController.onCopyPathLine = { [weak model] file, line in
             guard let model else { return }
             let value = Self.pathLineText(
@@ -659,7 +684,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.showCompareCommitPicker()
         }
         secondaryReaderController.onCloseComparison = { [weak self] in
-            self?.closeComparison()
+            guard let self else { return }
+            if secondaryReaderController.isReferenceMode { closeReference() } else { closeComparison() }
         }
         secondaryReaderController.onPreviousDiffHunk = { [weak self] in
             self?.previousDiffHunk(nil)
@@ -680,7 +706,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.enclosingSlice(for: scope)
         }
         contextController.onOpen = { [weak self] candidate in
-            self?.open(candidate)
+            guard let self else { return }
+            // Q5.4: with the reference pane focused, Context opens there.
+            if focusedPane == .reference, isReferenceActive, let root = model.fileTree?.root,
+               !exactLocationIsInDependency(candidate.path) {
+                openReference(root.appendingPathComponent(candidate.path), byteOffset: candidate.targetByteOffset)
+                return
+            }
+            open(candidate)
         }
         relationController.onOpen = { [weak self] node in
             self?.open(node)
@@ -920,6 +953,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         model.highlightedNames = HighlightedNames(restoring: snapshot.highlights)
         renderHighlights()
+        model.referencePane = snapshot.referencePane.map {
+            ReferencePaneState(file: root.appendingPathComponent($0.path), byteOffset: $0.byteOffset)
+        }
+        referenceBack = []
+        referenceForward = []
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let restored = await model.restoreSession(
@@ -1810,7 +1848,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func selfTestReaderClick(offset: UInt32, commandClick: Bool) {
-        handleReaderClick(offset: offset, commandClick: commandClick)
+        handleReaderClick(offset: offset, commandClick: commandClick, from: readerController)
     }
 
     func selfTestReaderRelation(
@@ -1940,7 +1978,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var canCloseComparison: Bool {
-        model.compare.rightRevision != nil || !secondaryReaderItem.isCollapsed
+        model.compare.rightRevision != nil || (!secondaryReaderItem.isCollapsed && !isReferenceActive)
     }
 
     func closeComparison() {
@@ -2073,6 +2111,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contentSurfaceMode = nil
         updateContentSurfaceIfNeeded()
         updateContextVisibility()
+        if model.referencePane != nil { renderSecondaryReader() }
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
@@ -2443,7 +2482,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerCollapsed: readerGroupItem.isCollapsed,
             contextCollapsed: contextItem.isCollapsed,
             relationsCollapsed: relationItem.isCollapsed,
-            readerSplit: !secondaryReaderItem.isCollapsed,
+            readerSplit: !secondaryReaderItem.isCollapsed && !isReferenceActive,
             sidebarFraction: sidebarFraction,
             contextFraction: contextFraction,
             relationsFraction: relationsFraction,
@@ -2456,7 +2495,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerGroupItem.isCollapsed = layout.readerCollapsed
         contextItem.isCollapsed = layout.contextCollapsed
         relationItem.isCollapsed = layout.relationsCollapsed
-        secondaryReaderItem.isCollapsed = !layout.readerSplit
+        secondaryReaderItem.isCollapsed = !layout.readerSplit && !isReferenceActive
 
         // Keep auxiliary widths steady while the Reader takes available space.
         // The narrow-window adaptation above preserves its readable floor.
@@ -2854,9 +2893,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
         switch item.action {
         case #selector(goBack(_:)):
-            model.navigationHistory.canGoBack
+            canGoBack
         case #selector(goForward(_:)):
-            model.navigationHistory.canGoForward
+            canGoForward
         default:
             true
         }
@@ -3000,15 +3039,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
         }
         readerController.refreshTabs()
-        let compareFile = model.selectedFile.flatMap {
-            projectPath(for: $0) == nil ? nil : $0
-        }
-        secondaryReaderController.display(
-            model.compare.rightSnapshotID == nil ? nil : compareFile,
-            snapshotID: model.compare.rightSnapshotID,
-            source: model.compare.rightSource,
-            languageMode: compareFile.flatMap(model.languageMode(for:))
-        )
+        renderSecondaryReader()
         readerController.setDiffMarkers(model.compare.diff?.leftMarkers ?? [:])
         secondaryReaderController.setDiffMarkers(
             model.compare.diff?.rightMarkers ?? [:]
@@ -3736,12 +3767,31 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     @objc func goBack(_ sender: Any?) {
+        if historyTargetsReference {
+            stepReferenceHistory(backwards: true)
+            return
+        }
         guard let current = currentJumpRecord() else { return }
         model.goBack(from: current)
     }
 
     @objc func goForward(_ sender: Any?) {
+        if historyTargetsReference {
+            stepReferenceHistory(backwards: false)
+            return
+        }
         model.goForward()
+    }
+
+    /// Q5.5: Back and Forward act on the focused side.
+    private var historyTargetsReference: Bool { focusedPane == .reference && isReferenceActive }
+
+    var canGoBack: Bool {
+        historyTargetsReference ? !referenceBack.isEmpty : model.navigationHistory.canGoBack
+    }
+
+    var canGoForward: Bool {
+        historyTargetsReference ? !referenceForward.isEmpty : model.navigationHistory.canGoForward
     }
 
     private func openBookmark(_ record: BookmarkRecord) {
@@ -4034,7 +4084,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             return
         }
         lastLensCaret = (offset, reader)
-        guard let file = model.selectedFile,
+        guard let file = paneFile(for: reader),
               let path = projectPath(for: file),
               let document = reader.caretDocument
         else { return }
@@ -4060,8 +4110,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     /// P1.6: ⌘⇧+click / ⌃⌘J / context menu — jump to the type definition of
     /// the binding under the position; failures surface as a brief status.
-    private func handleReaderTypeDefinition(offset: UInt32) {
-        guard let file = model.selectedFile,
+    private func handleReaderTypeDefinition(offset: UInt32, from reader: ReaderViewController? = nil) {
+        let reader = reader ?? focusedReader
+        let inReference = reader === secondaryReaderController && isReferenceActive
+        guard let file = paneFile(for: reader),
               let path = projectPath(for: file)
         else { return }
         Task { [weak self] in
@@ -4073,11 +4125,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             await MainActor.run {
                 switch result {
                 case let .target(candidate):
-                    self.open(
-                        path: candidate.path,
-                        byteOffset: candidate.targetByteOffset,
-                        cause: .typeDefinition
-                    )
+                    if inReference, let root = self.model.fileTree?.root,
+                       !exactLocationIsInDependency(candidate.path) {
+                        self.openReference(
+                            root.appendingPathComponent(candidate.path),
+                            byteOffset: candidate.targetByteOffset
+                        )
+                    } else {
+                        self.open(
+                            path: candidate.path,
+                            byteOffset: candidate.targetByteOffset,
+                            cause: .typeDefinition
+                        )
+                    }
                 case let .failed(reason):
                     self.showTransientStatus(reason)
                 }
@@ -4145,6 +4205,180 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
+    // MARK: Split reference pane (Q5)
+
+    private enum Pane { case primary, reference }
+    private var focusedPane = Pane.primary
+    private var primaryOutline: [OutlineFacet] = []
+    private var referenceOutline: [OutlineFacet] = []
+    private var referenceBack: [ReferencePaneState] = []
+    private var referenceForward: [ReferencePaneState] = []
+    private static let minimumPaneWidth: CGFloat = 320
+
+    /// The reference pane shows while one is set, unless Compare or Focus owns the right side.
+    var isReferenceActive: Bool {
+        model.referencePane != nil && model.compare.rightRevision == nil
+            && panelPreset != .compare && panelPreset != .focus
+            && contentSurfaceMode == .source
+    }
+
+    var hasReferencePane: Bool { model.referencePane != nil }
+
+    /// The file a reader shows: the reference pane's own file on the right.
+    private func paneFile(for reader: ReaderViewController) -> URL? {
+        reader === secondaryReaderController && isReferenceActive ? model.referencePane?.file : model.selectedFile
+    }
+
+    /// Opens `file` in the reference pane, replacing what it shows (Q5.2).
+    func openReference(_ file: URL, byteOffset: UInt32? = nil) {
+        guard projectPath(for: file) != nil else {
+            showTransientStatus(localized("main.split.projectOnly"))
+            return
+        }
+        guard ensureRoomForSplit() else {
+            showTransientStatus(localized("main.split.tooNarrow"))
+            return
+        }
+        if model.compare.rightRevision != nil || panelPreset == .compare || panelPreset == .focus {
+            if model.compare.rightRevision != nil || panelPreset == .compare { model.clearCompare() }
+            applyPanelPreset(.reading, restoring: true)
+        }
+        let target = ReferencePaneState(file: file, byteOffset: byteOffset ?? 0)
+        if let current = model.referencePane, current != target {
+            referenceBack.append(current)
+            referenceForward.removeAll()
+        }
+        showReference(target)
+    }
+
+    /// `⌘\`: the current file at the current position, beside itself.
+    func openCurrentFileToSide() {
+        guard let file = model.selectedFile else { return }
+        openReference(file, byteOffset: readerController.currentSelectionByteOffset ?? 0)
+    }
+
+    var canOpenCurrentFileToSide: Bool {
+        model.selectedFile.flatMap { projectPath(for: $0) } != nil
+    }
+
+    func closeReference() {
+        guard model.referencePane != nil else { return }
+        model.referencePane = nil
+        referenceBack.removeAll()
+        referenceForward.removeAll()
+        noteFocus(.primary)
+        secondaryReaderController.setReferenceMode(false)
+        secondaryReaderController.display(nil)
+        if panelPreset != .compare { secondaryReaderItem.isCollapsed = true }
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+        render()
+    }
+
+    private func showReference(_ state: ReferencePaneState) {
+        model.referencePane = state
+        noteFocus(.reference)
+        render()
+        revealInReference(state.file, byteOffset: state.byteOffset)
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+    }
+
+    private func stepReferenceHistory(backwards: Bool) {
+        guard let current = model.referencePane,
+              let target = backwards ? referenceBack.popLast() : referenceForward.popLast()
+        else { return }
+        if backwards { referenceForward.append(current) } else { referenceBack.append(current) }
+        showReference(target)
+    }
+
+    private func revealInReference(_ file: URL, byteOffset: UInt32) {
+        secondaryReaderController.navigate(
+            to: file,
+            byteOffset: byteOffset,
+            snapshotID: model.currentSnapshotID,
+            source: readerSource(for: file),
+            languageMode: model.languageMode(for: file)
+        )
+    }
+
+    /// The right-hand reader is either Compare's other version or the split
+    /// reference pane; presets and compare changes re-run this.
+    private func renderSecondaryReader() {
+        if isReferenceActive, let pane = model.referencePane {
+            renderReference(pane)
+        } else {
+            let compareFile = model.selectedFile.flatMap {
+                projectPath(for: $0) == nil ? nil : $0
+            }
+            secondaryReaderController.setReferenceMode(false)
+            secondaryReaderController.display(
+                model.compare.rightSnapshotID == nil ? nil : compareFile,
+                snapshotID: model.compare.rightSnapshotID,
+                source: model.compare.rightSource,
+                languageMode: compareFile.flatMap(model.languageMode(for:))
+            )
+            if focusedPane == .reference { noteFocus(.primary) }
+        }
+        renderFocusIndicators()
+    }
+
+    private func renderReference(_ pane: ReferencePaneState) {
+        if secondaryReaderItem.isCollapsed { secondaryReaderItem.isCollapsed = false }
+        let needsReveal = secondaryReaderController.displayedFile?.standardizedFileURL
+            != pane.file.standardizedFileURL
+        secondaryReaderController.setReferenceMode(
+            true,
+            title: projectPath(for: pane.file) ?? pane.file.lastPathComponent
+        )
+        secondaryReaderController.setDiffMarkers([:])
+        if needsReveal {
+            window?.contentView?.layoutSubtreeIfNeeded()
+            revealInReference(pane.file, byteOffset: pane.byteOffset)
+        }
+        if let document = secondaryReaderController.caretDocument {
+            secondaryReaderController.setBookmarkMarkers(model.bookmarkMarkers(for: pane.file, document: document))
+        }
+    }
+
+    /// Q5.8: both readers need their minimum width; the sidebar yields first.
+    private func ensureRoomForSplit() -> Bool {
+        if isReferenceActive || !secondaryReaderItem.isCollapsed { return true }
+        let needed = Self.minimumPaneWidth * 2 + readerSplitController.splitView.dividerThickness
+        if readerSplitController.view.bounds.width >= needed { return true }
+        if !sidebarItem.isCollapsed {
+            sidebarItem.isCollapsed = true
+            window?.contentView?.layoutSubtreeIfNeeded()
+        }
+        return readerSplitController.view.bounds.width >= needed
+    }
+
+    /// Q5.3: the side the user last clicked, typed or moved the caret in.
+    private func noteFocus(_ pane: Pane) {
+        let pane = isReferenceActive ? pane : .primary
+        guard pane != focusedPane else { return }
+        focusedPane = pane
+        renderFocusIndicators()
+        renderOutlineForFocus()
+        renderHighlightChips()
+    }
+
+    private func renderFocusIndicators() {
+        let split = isReferenceActive
+        readerController.setFocusIndicator(split && focusedPane == .primary)
+        secondaryReaderController.setFocusIndicator(split && focusedPane == .reference)
+    }
+
+    private func renderOutlineForFocus() {
+        if focusedPane == .reference, let pane = model.referencePane {
+            sidebarController.setOutline(referenceOutline.map(OutlineNode.init(facet:)), file: pane.file)
+            sidebarController.highlightOutline(at: pane.byteOffset)
+        } else {
+            sidebarController.setOutline(primaryOutline.map(OutlineNode.init(facet:)), file: model.selectedFile)
+            if let offset = readerController.currentReadingPosition()?.byteOffset {
+                sidebarController.highlightOutline(at: offset)
+            }
+        }
+    }
+
     func jumpToTypeDefinitionAtCaret() {
         guard let offset = model.tabStrip.activeTab?.selectionByteOffset else {
             showTransientStatus(modelText("model.typehop.noType"))
@@ -4170,8 +4404,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    private func handleReaderClick(offset: UInt32, commandClick: Bool) {
-        guard let file = model.selectedFile,
+    private func handleReaderClick(offset: UInt32, commandClick: Bool, from reader: ReaderViewController) {
+        let inReference = reader === secondaryReaderController && isReferenceActive
+        guard reader === readerController || inReference else { return }
+        noteFocus(inReference ? .reference : .primary)
+        guard let file = paneFile(for: reader),
               let path = projectPath(for: file)
         else { return }
         if commandClick {
@@ -4182,7 +4419,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                         offset: offset
                       )
                 else { return }
-                self.open(candidate)
+                if inReference, let root = model.fileTree?.root,
+                   !exactLocationIsInDependency(candidate.path) {
+                    openReference(root.appendingPathComponent(candidate.path), byteOffset: candidate.targetByteOffset)
+                } else {
+                    self.open(candidate)
+                }
             }
         } else {
             model.contextWindow.tokenClicked(file: path, offset: offset)
@@ -4191,15 +4433,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func handleReaderRelation(
         offset: UInt32,
-        direction: RelationTreeModel.Direction
+        direction: RelationTreeModel.Direction,
+        from reader: ReaderViewController? = nil
     ) {
-        guard let file = model.selectedFile,
+        let reader = reader ?? readerController
+        guard reader === readerController || isReferenceActive,
+              let file = paneFile(for: reader),
               let path = projectPath(for: file)
         else { return }
         openRelationsPane()
         if direction == .references,
            case let .ready(session, _) = model.projectState,
-           let document = model.tabStrip.activeDocument,
+           let document = reader === readerController ? model.tabStrip.activeDocument : reader.caretDocument,
            let binding = document.localBinding(at: offset),
            let file = session.manifest.files.first(where: {
                session.paths.resolve($0.pathID) == path
@@ -4535,6 +4780,7 @@ private final class TabStripView: NSView {
     private weak var model: TabStripModel?
     private var onActivate: ((Int) -> Void)?
     private var onClose: ((Int) -> Void)?
+    var onOpenToSide: ((URL) -> Void)?
     private let scrollView = NSScrollView()
     private let tabs = NSStackView()
     private var displayedKeys: [String] = []
@@ -4645,6 +4891,11 @@ private final class TabStripView: NSView {
             keepOpen.tag = index
             keepOpen.isEnabled = tab.isPreview
             menu.addItem(keepOpen)
+            let toSide = NSMenuItem(title: localized("main.open.to.side"), action: #selector(openTabToSide(_:)), keyEquivalent: "")
+            toSide.target = self
+            toSide.tag = index
+            toSide.isEnabled = tab.fileURL != nil && onOpenToSide != nil
+            menu.addItem(toSide)
             button.menu = menu
             let close = NSButton(title: "", target: self, action: #selector(closeTab(_:)))
             close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
@@ -4686,6 +4937,12 @@ private final class TabStripView: NSView {
     @objc private func keepTabOpen(_ sender: NSMenuItem) {
         model?.keepOpen(sender.tag)
         refresh()
+    }
+
+    @objc private func openTabToSide(_ sender: NSMenuItem) {
+        guard let tabs = model?.tabs, tabs.indices.contains(sender.tag),
+              let file = tabs[sender.tag].fileURL else { return }
+        onOpenToSide?(file)
     }
 }
 
@@ -4807,6 +5064,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onViewReadingSetEvidence: ((Int) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
     var onCloseComparison: (() -> Void)?
+    /// Tab menu “Open to the Side”.
+    var onOpenToSide: ((URL) -> Void)? {
+        get { tabStripView.onOpenToSide }
+        set { tabStripView.onOpenToSide = newValue }
+    }
+    /// Split reference mode: the compare controls give way to the file path.
+    private(set) var isReferenceMode = false
+    private let referenceTitleLabel = NSTextField(labelWithString: "")
+    private let compareCloseButton = NSButton()
+    private var summaryHeightConstraint: NSLayoutConstraint?
+    private let focusBar = NSView()
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
     var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
@@ -5125,6 +5393,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             ])
             view = stack
         }
+        focusBar.wantsLayer = true
+        focusBar.isHidden = true
+        focusBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(focusBar)
+        NSLayoutConstraint.activate([
+            focusBar.topAnchor.constraint(equalTo: view.topAnchor),
+            focusBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            focusBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            focusBar.heightAnchor.constraint(equalToConstant: 2),
+        ])
         textView.onClick = { [weak self] characterIndex, modifiers in
             guard let self,
                   let offset = self.textView.byteOffset(
@@ -5844,7 +6122,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         nextHunkButton.action = #selector(nextDiffHunk(_:))
         nextHunkButton.setAccessibilityLabel(localized("main.next.diff.hunk"))
 
-        let closeButton = NSButton()
+        let closeButton = compareCloseButton
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
         closeButton.isBordered = false
         closeButton.target = self
@@ -5852,8 +6130,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         closeButton.toolTip = localized("main.close.comparison.w")
         closeButton.setAccessibilityLabel(localized("main.close.comparison"))
         let spacer = NSView()
+        referenceTitleLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        referenceTitleLabel.lineBreakMode = .byTruncatingHead
+        referenceTitleLabel.isHidden = true
+        referenceTitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let controls = NSStackView(views: [
-            compareVersionButton, spacer, previousHunkButton, nextHunkButton, closeButton,
+            compareVersionButton, referenceTitleLabel, spacer, previousHunkButton, nextHunkButton, closeButton,
         ])
         controls.orientation = .horizontal
         controls.alignment = .centerY
@@ -5887,7 +6169,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             summaryScroll.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 2),
             summaryScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             summaryScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            summaryScroll.heightAnchor.constraint(equalToConstant: 30),
+            {
+                let height = summaryScroll.heightAnchor.constraint(equalToConstant: 30)
+                summaryHeightConstraint = height
+                return height
+            }(),
             functionSummaryStack.leadingAnchor.constraint(
                 equalTo: summaryScroll.contentView.leadingAnchor
             ),
@@ -5942,6 +6228,32 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     func setExcludedByRules(_ excluded: Bool) {
         exclusionBadge.isHidden = !excluded
+    }
+
+    /// The 2pt accent edge that marks which reader drives Context and Outline.
+    func setFocusIndicator(_ visible: Bool) {
+        loadViewIfNeeded()
+        focusBar.isHidden = !visible
+        focusBar.layer?.backgroundColor = readerTheme.accentColor.cgColor
+    }
+
+    /// Switches the right-hand reader between Compare and the split
+    /// reference pane, whose header shows the file path and a close button.
+    func setReferenceMode(_ enabled: Bool, title: String = "") {
+        guard showsCompareControls else { return }
+        loadViewIfNeeded()
+        isReferenceMode = enabled
+        referenceTitleLabel.stringValue = title
+        referenceTitleLabel.toolTip = title
+        referenceTitleLabel.isHidden = !enabled
+        compareVersionButton.isHidden = enabled
+        previousHunkButton.isHidden = enabled
+        nextHunkButton.isHidden = enabled
+        functionSummaryStack.superview?.superview?.isHidden = enabled
+        summaryHeightConstraint?.constant = enabled ? 0 : 30
+        let closeTitle = enabled ? localized("app.menu.close.split") : localized("main.close.comparison")
+        compareCloseButton.toolTip = enabled ? closeTitle : localized("main.close.comparison.w")
+        compareCloseButton.setAccessibilityLabel(closeTitle)
     }
 
     var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {

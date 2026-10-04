@@ -23,6 +23,8 @@ package enum SessionCodec {
         package let contextTracking: String?
         /// Schema 4: names highlighted in fixed colors across the window.
         package let highlights: [HighlightedNames.Entry]
+        /// Schema 4: the split reference pane, a project-relative file and offset.
+        package let referencePane: ReferencePane?
 
         package init(
             projectRoot: String,
@@ -34,7 +36,8 @@ package enum SessionCodec {
             navigationHistory: NavigationState? = nil,
             readingTrail: TrailState? = nil,
             contextTracking: String? = nil,
-            highlights: [HighlightedNames.Entry] = []
+            highlights: [HighlightedNames.Entry] = [],
+            referencePane: ReferencePane? = nil
         ) {
             self.init(
                 projectRoot: projectRoot,
@@ -46,7 +49,8 @@ package enum SessionCodec {
                 navigationHistory: navigationHistory,
                 readingTrail: readingTrail,
                 contextTracking: contextTracking,
-                highlights: highlights
+                highlights: highlights,
+                referencePane: referencePane
             )
         }
 
@@ -60,10 +64,12 @@ package enum SessionCodec {
             navigationHistory: NavigationState? = nil,
             readingTrail: TrailState? = nil,
             contextTracking: String? = nil,
-            highlights: [HighlightedNames.Entry] = []
+            highlights: [HighlightedNames.Entry] = [],
+            referencePane: ReferencePane? = nil
         ) {
             self.contextTracking = contextTracking
             self.highlights = highlights
+            self.referencePane = referencePane
             self.projectRoot = projectRoot
             self.languages = languages
             self.revision = revision
@@ -111,6 +117,16 @@ package enum SessionCodec {
             self.selectionAnchor = selectionAnchor
             self.isPreview = isPreview
             self.activationRank = activationRank
+        }
+    }
+
+    package struct ReferencePane: Equatable, Sendable {
+        package let path: String
+        package let byteOffset: UInt32
+
+        package init(path: String, byteOffset: UInt32) {
+            self.path = path
+            self.byteOffset = byteOffset
         }
     }
 
@@ -489,7 +505,7 @@ package enum SessionCodec {
         )
     }
 
-    private static func validateProjectPath(_ path: String) throws {
+    fileprivate static func validateProjectPath(_ path: String) throws {
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
         guard !path.hasPrefix("/"),
               !components.isEmpty,
@@ -581,6 +597,7 @@ package enum SessionCodec {
         let readingTrail: TrailStateDTO?
         let contextTracking: String?
         let highlights: [HighlightDTO]?
+        let referencePane: ReferencePaneDTO?
 
         init(_ snapshot: Snapshot) {
             schemaVersion = 4
@@ -599,6 +616,9 @@ package enum SessionCodec {
             highlights = snapshot.highlights.isEmpty
                 ? nil
                 : snapshot.highlights.map { HighlightDTO(name: $0.name, slot: $0.slot) }
+            referencePane = snapshot.referencePane.map {
+                ReferencePaneDTO(path: $0.path, byteOffset: $0.byteOffset)
+            }
         }
 
         func snapshot() throws -> Snapshot {
@@ -656,12 +676,22 @@ package enum SessionCodec {
                     // Invalid or duplicate entries degrade to omission.
                     highlights: HighlightedNames(restoring: (highlights ?? []).map {
                         HighlightedNames.Entry(name: $0.name, slot: $0.slot)
-                    }).entries
+                    }).entries,
+                    // A bad pane degrades to no split instead of failing the session.
+                    referencePane: referencePane.flatMap { pane in
+                        (try? SessionCodec.validateProjectPath(pane.path)) == nil
+                            ? nil : ReferencePane(path: pane.path, byteOffset: pane.byteOffset)
+                    }
                 )
             default:
                 throw DecodeError.unsupportedSchemaVersion(schemaVersion)
             }
         }
+    }
+
+    private struct ReferencePaneDTO: Codable {
+        let path: String
+        let byteOffset: UInt32
     }
 
     private struct HighlightDTO: Codable {

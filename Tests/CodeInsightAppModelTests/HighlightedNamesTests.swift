@@ -47,3 +47,34 @@ func sessionCodecRoundTripsHighlightedNamesAndDropsInvalidEntries() throws {
     let v3 = try JSONSerialization.data(withJSONObject: object)
     #expect(try SessionCodec.decode(v3, maximumTabCount: 10, dependencyAllowed: { _ in false }).highlights.isEmpty)
 }
+
+@Test
+func sessionCodecRoundTripsTheSplitReferencePaneAndDropsUnsafePaths() throws {
+    func snapshot(_ pane: SessionCodec.ReferencePane?) -> SessionCodec.Snapshot {
+        SessionCodec.Snapshot(
+            projectRoot: "/tmp/project",
+            language: .rust,
+            revision: nil,
+            activeTabOrdinal: nil,
+            panelPreset: PanelPresetModel.reading.rawValue,
+            tabs: [],
+            referencePane: pane
+        )
+    }
+    let pane = SessionCodec.ReferencePane(path: "src/trait.rs", byteOffset: 42)
+    let data = try SessionCodec.encode(snapshot(pane), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    #expect(try SessionCodec.decode(data, maximumTabCount: 10, dependencyAllowed: { _ in false }).referencePane == pane)
+
+    // A pane outside the project degrades to no split; the rest still loads.
+    for unsafe in ["../outside.rs", "/etc/passwd", ""] {
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["referencePane"] = ["path": unsafe, "byteOffset": 0]
+        let tampered = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try SessionCodec.decode(tampered, maximumTabCount: 10, dependencyAllowed: { _ in true })
+        #expect(decoded.referencePane == nil, "\(unsafe)")
+        #expect(decoded.projectRoot == "/tmp/project")
+    }
+
+    let none = try SessionCodec.encode(snapshot(nil), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    #expect(String(decoding: none, as: UTF8.self).contains("referencePane") == false)
+}

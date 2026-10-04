@@ -671,3 +671,8 @@
 "rules.saveFailed" = "The rules could not be saved: %@";
 "main.rules.fileExcluded" = "Excluded · not indexed";
 "main.rules.fileExcluded.help" = "A project exclusion rule removes this file from the index and search; it stays readable here.";
+"main.open.to.side" = "Open to the Side";
+"app.menu.open.to.side" = "Open Current File to the Side";
+"app.menu.close.split" = "Close Split";
+"main.split.projectOnly" = "Only project files open to the side";
+"main.split.tooNarrow" = "The window is too narrow for two readers";
