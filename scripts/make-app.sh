@@ -78,6 +78,7 @@ if [[ -z "$NOTARY_PROFILE" && ( -n "$APPLE_ID" || -n "$TEAM_ID" || -n "$PASSWORD
 fi
 
 cd "$REPO_ROOT"
+bash scripts/check-toolchain.sh
 mkdir -p "$OUTPUT_DIR"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$REPO_ROOT/.build/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$REPO_ROOT/.build/swift-module-cache}"

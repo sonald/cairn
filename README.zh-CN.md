@@ -20,7 +20,7 @@
 
 ## 构建与运行
 
-需要 macOS 14+、Swift 6 和 Homebrew libgit2：
+应用支持 macOS 14+。构建统一使用 Xcode 27.0（27A266a）、随附的 Swift 6.4 和 Homebrew libgit2；本地检查与 CI 校验同一工具链，配置见[开发说明](docs/development.md)。
 
 ```bash
 brew install libgit2

@@ -25,9 +25,7 @@ for tool in "${required_tools[@]}"; do
 done
 
 echo "--- product toolchain ---"
-sw_vers
-xcodebuild -version
-swift --version
+bash scripts/check-toolchain.sh
 rust-analyzer --version
 pyright --version
 typescript-language-server --version

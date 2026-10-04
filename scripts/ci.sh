@@ -130,6 +130,7 @@ fi
 fi
 
 if [[ ${#filters[@]} -eq 0 ]]; then exit 0; fi
+bash scripts/check-toolchain.sh
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$PWD/.build/swift-module-cache}"
 swift_options=()

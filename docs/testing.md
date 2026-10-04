@@ -18,6 +18,8 @@
 
 ## 运行命令
 
+Swift 检查固定使用 Xcode 27.0（27A266a）及随附 Swift 6.4，本地与 CI 共用 `bash scripts/check-toolchain.sh`，选择方法见[开发说明](development.md)。仅 `static` 和帮助不要求 Xcode。工具链不符先终止，不把环境错误混入测试失败。固定版本不会消除宿主系统、字体、窗口服务或 LSP 的差异；远端通过必须由对应 Actions 完成结果确认。
+
 ```bash
 # 静态：本地化、shell 语法、模块边界和现有架构约束
 bash scripts/ci.sh static

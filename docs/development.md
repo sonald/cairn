@@ -4,15 +4,23 @@
 
 ## 构建与运行
 
-需要 macOS 14+、Swift 6 和 Homebrew libgit2。SwiftPM 默认使用 brew 模式：
+应用最低运行版本为 macOS 14；构建基线为 Xcode 27.0（27A266a）、随附 Swift 6.4（swiftlang-6.4.0.34.1）和 macOS SDK 27.0。构建机器需能运行该 Xcode。SwiftPM 默认使用 Homebrew libgit2：
 
 ```bash
 brew install libgit2
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+bash scripts/check-toolchain.sh
 swift build
 swift run codeinsight --help
 CAIRN_LIBGIT2=brew bash scripts/make-app.sh
 open .build/distribution/Cairn.app
 ```
+
+本地 Xcode 若安装在其他位置，调整 `DEVELOPER_DIR`，不必修改全局 `xcode-select`。`ci.sh` 的 Swift 测试、打包及产品门禁会先检查工具链；直接调用 `swift build/test` 时先手动执行上述检查。`Package.swift` 的 `swift-tools-version: 6.0` 是包工具最低要求，不会选择或安装 Swift 编译器。
+
+三个 Swift 工作流统一使用 `xcode-27` runner，并通过 `DEVELOPER_DIR` 显式选择 `/Applications/Xcode_27.0.app/Contents/Developer`；共享脚本校验 Xcode build、Swift 和 SDK，拒绝 PATH 中的其他 Swift。版本升级需同时修改工作流、检查脚本及本页，然后完成本地和远端验证。不要使用 `latest` 或依赖镜像默认值。
+
+2026-10-04 核对的 [GitHub 镜像清单](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md) 包含 27A266a；`xcode-27` 仍标为 preview。镜像更新或移除该版本时，检查会明确失败，需重新选择共同支持的版本。固定构建工具不等于验证 macOS 14 兼容性；旧系统运行仍需独立验收。
 
 应用自测二进制为 `.build/debug/codeinsight-app` 或 `.build/release/codeinsight-app`；验收产品交互时使用刚打包的 `Cairn.app`，确认没有误操作另一个旧版本实例。
 

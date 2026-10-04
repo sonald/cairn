@@ -27,7 +27,7 @@ Cairn（Swift package 名称 CodeInsight）是 macOS 14+ 的原生只读代码�
 - `CodeInsightAppModel`、`CodeInsightReaderCore`、`CodeInsightReaderUI`：应用状态、阅读逻辑、原生渲染。
 - `Tests/` 对应模块；`fixtures/`、`goldset/` 提供验证输入；`scripts/` 提供构建与验证命令；`site/` 是静态官网。
 
-使用 Swift 6 和 Homebrew libgit2（`brew install libgit2`），在仓库根目录执行：
+构建固定使用 Xcode 27.0（27A266a）及随附 Swift 6.4，先用 `bash scripts/check-toolchain.sh` 核对。安装 Homebrew libgit2（`brew install libgit2`），在仓库根目录执行：
 
 ```sh
 swift build

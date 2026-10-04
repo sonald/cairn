@@ -17,14 +17,17 @@ concurrency:
 
 jobs:
   checks:
-    runs-on: macos-15
+    runs-on: xcode-27
     timeout-minutes: 30
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
+      DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Verify pinned Xcode and Swift
+        run: bash scripts/check-toolchain.sh
       - name: Select affected domains
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -57,7 +60,7 @@ jobs:
                       domains.update({'engine', 'reader', 'app'})
                   else:
                       domains.update(all_domains)
-              elif path.startswith(('Package.', 'scripts/ci.sh', '.github/workflows/checks.yml')):
+              elif path.startswith(('Package.', 'scripts/ci.sh', 'scripts/check-toolchain.sh', '.github/workflows/checks.yml')):
                   domains.update(all_domains)
               elif path.startswith('fixtures/'):
                   domains.update({'reader', 'engine', 'app'})
