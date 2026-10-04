@@ -21,6 +21,8 @@ package enum SessionCodec {
         package let readingTrail: TrailState?
         /// R6.3: the lens tracking mode per window; the pin never persists.
         package let contextTracking: String?
+        /// Schema 4: names highlighted in fixed colors across the window.
+        package let highlights: [HighlightedNames.Entry]
 
         package init(
             projectRoot: String,
@@ -31,7 +33,8 @@ package enum SessionCodec {
             tabs: [Tab],
             navigationHistory: NavigationState? = nil,
             readingTrail: TrailState? = nil,
-            contextTracking: String? = nil
+            contextTracking: String? = nil,
+            highlights: [HighlightedNames.Entry] = []
         ) {
             self.init(
                 projectRoot: projectRoot,
@@ -42,7 +45,8 @@ package enum SessionCodec {
                 tabs: tabs,
                 navigationHistory: navigationHistory,
                 readingTrail: readingTrail,
-                contextTracking: contextTracking
+                contextTracking: contextTracking,
+                highlights: highlights
             )
         }
 
@@ -55,9 +59,11 @@ package enum SessionCodec {
             tabs: [Tab],
             navigationHistory: NavigationState? = nil,
             readingTrail: TrailState? = nil,
-            contextTracking: String? = nil
+            contextTracking: String? = nil,
+            highlights: [HighlightedNames.Entry] = []
         ) {
             self.contextTracking = contextTracking
+            self.highlights = highlights
             self.projectRoot = projectRoot
             self.languages = languages
             self.revision = revision
@@ -289,13 +295,13 @@ package enum SessionCodec {
             // check the version before treating the data as corrupt so
             // future snapshots are preserved rather than quarantined.
             if let probe = try? decoder.decode(VersionProbe.self, from: data),
-               !(1...3).contains(probe.schemaVersion)
+               !(1...4).contains(probe.schemaVersion)
             {
                 throw DecodeError.unsupportedSchemaVersion(probe.schemaVersion)
             }
             throw error
         }
-        guard (1...3).contains(envelope.schemaVersion) else {
+        guard (1...4).contains(envelope.schemaVersion) else {
             throw DecodeError.unsupportedSchemaVersion(envelope.schemaVersion)
         }
         // Validate stored fields before language selection can replace the outer copy.
@@ -574,9 +580,10 @@ package enum SessionCodec {
         let navigationHistory: NavigationStateDTO?
         let readingTrail: TrailStateDTO?
         let contextTracking: String?
+        let highlights: [HighlightDTO]?
 
         init(_ snapshot: Snapshot) {
-            schemaVersion = 3
+            schemaVersion = 4
             projectRoot = snapshot.projectRoot
             languages = snapshot.languages
             language = nil
@@ -589,6 +596,9 @@ package enum SessionCodec {
             )
             readingTrail = snapshot.readingTrail.map(TrailStateDTO.init)
             contextTracking = snapshot.contextTracking
+            highlights = snapshot.highlights.isEmpty
+                ? nil
+                : snapshot.highlights.map { HighlightDTO(name: $0.name, slot: $0.slot) }
         }
 
         func snapshot() throws -> Snapshot {
@@ -606,19 +616,19 @@ package enum SessionCodec {
                     panelPreset: panelPreset,
                     tabs: try decodeTabs()
                 )
-            case 2, 3:
+            case 2, 3, 4:
                 guard language == nil,
                       let languages
                 else { throw CodecError.invalid }
                 // Sanitize before validation layering takes effect: a bad
                 // edge or dangling reference degrades the navigation
                 // blocks instead of failing the whole snapshot.
-                let trail: TrailState? = if schemaVersion == 3 {
+                let trail: TrailState? = if schemaVersion >= 3 {
                     readingTrail.map { sanitized($0.state()) }
                 } else {
                     nil
                 }
-                let history: NavigationState? = if schemaVersion == 3 {
+                let history: NavigationState? = if schemaVersion >= 3 {
                     navigationHistory.map {
                         sanitized(
                             $0.state(),
@@ -628,7 +638,7 @@ package enum SessionCodec {
                 } else {
                     nil
                 }
-                let tracking: String? = if schemaVersion == 3 {
+                let tracking: String? = if schemaVersion >= 3 {
                     contextTracking
                 } else {
                     nil
@@ -642,12 +652,21 @@ package enum SessionCodec {
                     tabs: try decodeTabs(),
                     navigationHistory: history,
                     readingTrail: trail,
-                    contextTracking: tracking
+                    contextTracking: tracking,
+                    // Invalid or duplicate entries degrade to omission.
+                    highlights: HighlightedNames(restoring: (highlights ?? []).map {
+                        HighlightedNames.Entry(name: $0.name, slot: $0.slot)
+                    }).entries
                 )
             default:
                 throw DecodeError.unsupportedSchemaVersion(schemaVersion)
             }
         }
+    }
+
+    private struct HighlightDTO: Codable {
+        let name: String
+        let slot: UInt8
     }
 
     private struct NavigationStateDTO: Codable {

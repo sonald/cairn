@@ -120,6 +120,8 @@ public struct ReaderSettings: Equatable, Sendable {
     /// Show the symbol documentation card when the pointer rests on a symbol.
     /// Keyboard and ⌥-click requests work either way.
     public var hoverDocs: Bool
+    /// Name long blocks after their closing `}` (Rust, TypeScript).
+    public var blockEndAnnotations: Bool
 
     public init(
         lineHeightMultiple: Double = 1.3,
@@ -163,6 +165,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.lineNumbers = lineNumbers
         wrapLines = false
         hoverDocs = true
+        blockEndAnnotations = true
     }
 
     public init(defaults: UserDefaults) {
@@ -219,6 +222,9 @@ public struct ReaderSettings: Equatable, Sendable {
         hoverDocs = (defaults.object(forKey: Keys.hoverDocs) as? NSNumber)?
             .boolValue
             ?? true
+        blockEndAnnotations = (defaults.object(forKey: Keys.blockEndAnnotations) as? NSNumber)?
+            .boolValue
+            ?? true
         // Revision 2 (UI redesign): settings saved before it hold the old
         // defaults for every key; adopt the new ones once where unchanged.
         if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
@@ -250,6 +256,7 @@ public struct ReaderSettings: Equatable, Sendable {
         )
         validated.wrapLines = wrapLines
         validated.hoverDocs = hoverDocs
+        validated.blockEndAnnotations = blockEndAnnotations
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -286,6 +293,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
         defaults.set(validated.wrapLines, forKey: Keys.wrapLines)
         defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
+        defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
     }
 
     private enum Keys {
@@ -309,6 +317,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let lineNumbers = "reader.lineNumbers"
         static let wrapLines = "reader.wrapLines"
         static let hoverDocs = "reader.hoverDocs"
+        static let blockEndAnnotations = "reader.blockEndAnnotations"
     }
 }
 
@@ -326,6 +335,7 @@ public struct ReaderTheme: Equatable, Sendable {
     public let declarationEmphasisFontWeight: Double
     public let syntaxFormatting: Bool
     public let humanistComments: Bool
+    public let blockEndAnnotations: Bool
 
     public init(settings: ReaderSettings) {
         codeFont = settings.codeFont
@@ -341,6 +351,24 @@ public struct ReaderTheme: Equatable, Sendable {
         declarationEmphasisFontWeight = settings.declarationEmphasisFontWeight
         syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
+        blockEndAnnotations = settings.blockEndAnnotations
+    }
+
+    /// Number of colors a reader can assign to highlighted names.
+    public static let highlightSlotCount: UInt8 = 6
+
+    /// Background of highlighted-name slot `slot` (1...6). The amber family
+    /// stays reserved for the click occurrence highlight.
+    public func highlightRGB(slot: UInt8, isDark: Bool) -> UInt32 {
+        let index = Int((max(slot, 1) - 1) % Self.highlightSlotCount)
+        switch resolvedSelection(isDark: isDark) {
+        case .dark:
+            return [0x1E3B3A, 0x352C47, 0x2A3A22, 0x45282C, 0x23324A, 0x45321D][index]
+        case .siClassic:
+            return [0xBFEFEF, 0xE6D5FF, 0xCFF5C4, 0xFFD3DC, 0xCCE0FF, 0xFFDDB3][index]
+        case .auto, .light:
+            return [0xCDE6E4, 0xE3DAF0, 0xD8E8C8, 0xF2D6D9, 0xD3DEEF, 0xF4DCC2][index]
+        }
     }
 
     public func backgroundRGB(isDark: Bool) -> UInt32 {

@@ -151,6 +151,8 @@ extension CommandID {
     public static let findNext = CommandID(rawValue: "find.next")
     public static let findPrevious = CommandID(rawValue: "find.previous")
     public static let findInProject = CommandID(rawValue: "find.inProject")
+    public static let findToggleHighlight = CommandID(rawValue: "find.toggleHighlight")
+    public static let findClearHighlights = CommandID(rawValue: "find.clearHighlights")
 
     public static let goCommandPalette = CommandID(rawValue: "go.commandPalette")
     public static let goOpenSymbol = CommandID(rawValue: "go.openSymbol")
@@ -162,6 +164,8 @@ extension CommandID {
     public static let goPreviousDiffHunk = CommandID(rawValue: "go.previousDiffHunk")
     public static let goNextDiffHunk = CommandID(rawValue: "go.nextDiffHunk")
     public static let navigateTypeDefinition = CommandID(rawValue: "navigate.typeDefinition")
+    public static let goMatchingBracket = CommandID(rawValue: "go.matchingBracket")
+    public static let goSelectInsideBrackets = CommandID(rawValue: "go.selectInsideBrackets")
 
     public static let viewPresetReading = CommandID(rawValue: "view.preset.reading")
     public static let viewPresetRelations = CommandID(rawValue: "view.preset.relations")
@@ -310,6 +314,12 @@ public extension KeyBindingScheme {
             def(.findInProject, .find, "app.menu.find.in.project", [
                 keyboard([.command, .shift], .character("f")),
             ]),
+            def(.findToggleHighlight, .find, "app.menu.toggle.highlight", [
+                keyboard([.control, .command], .character("h")),
+            ]),
+            def(.findClearHighlights, .find, "app.menu.clear.highlights", [
+                keyboard([.control, .option, .command], .character("h")),
+            ]),
 
             def(.goCommandPalette, .go, "app.menu.command.palette", [
                 keyboard([.command, .shift], .character("p")),
@@ -341,6 +351,12 @@ public extension KeyBindingScheme {
             // K-R4 (P1): 跳到类型定义 — menu ⌃⌘J and the ⌘⇧+click gesture.
             def(.navigateTypeDefinition, .go, "app.menu.type.definition", [
                 keyboard([.control, .command], .character("j")),
+            ]),
+            def(.goMatchingBracket, .go, "app.menu.matching.bracket", [
+                keyboard([.control, .command], .character("m")),
+            ]),
+            def(.goSelectInsideBrackets, .go, "app.menu.select.inside.brackets", [
+                keyboard([.control, .shift, .command], .character("m")),
             ]),
 
             def(.viewPresetReading, .view, "app.menu.reading",

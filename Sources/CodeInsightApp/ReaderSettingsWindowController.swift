@@ -396,6 +396,8 @@ private struct ReaderSettingsView: View {
                     Toggle(localized("settings.lineNumbers"), isOn: $settings.lineNumbers)
                     Toggle(localized("settings.hoverDocs"), isOn: $settings.hoverDocs)
                         .help(localized("settings.hoverDocs.help"))
+                    Toggle(localized("settings.blockEndAnnotations"), isOn: $settings.blockEndAnnotations)
+                        .help(localized("settings.blockEndAnnotations.help"))
                     fontControls
 
                     DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {

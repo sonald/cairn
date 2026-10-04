@@ -8,6 +8,8 @@ struct DecorationRun: Equatable {
     var range: NSRange
     var syntax: HighlightKind?
     var occurrence = false
+    /// Highlighted-name color slot (1...6); its background wins over `occurrence`.
+    var highlightSlot: UInt8?
     /// nil when the run is not a local reference; true for a parameter.
     var parameterReference: Bool?
 }

@@ -529,6 +529,8 @@ public final class AppModel {
     public let resolutionExplanations = ResolutionExplanationStore()
     public let tabStrip = TabStripModel()
     public let symbolHover = SymbolHoverModel()
+    /// Names painted in fixed colors in every reader of this window.
+    public var highlightedNames = HighlightedNames()
     package var bookmarkModel = BookmarkModel()
 
     public var canTrustCurrentRepository: Bool {
@@ -834,6 +836,7 @@ public final class AppModel {
         navigationGeneration &+= 1
         navigationHistory.reset()
         readingTrail.reset()
+        highlightedNames.removeAll()
         resolutionExplanations.removeAll()
         relationTree.updateProjectState(projectState)
         selectedFile = nil
@@ -908,7 +911,8 @@ public final class AppModel {
             ),
             readingTrail: Self.persistedTrail(readingTrail),
             // R6.3: the tracking mode survives per window; the pin does not.
-            contextTracking: contextWindow.tracking.rawValue
+            contextTracking: contextWindow.tracking.rawValue,
+            highlights: highlightedNames.entries
         )
     }
 

@@ -49,6 +49,10 @@ public extension ReaderTheme {
         dynamicColor(occurrenceRGB(isDark:))
     }
 
+    func highlightColor(slot: UInt8) -> NSColor {
+        dynamicColor { isDark in highlightRGB(slot: slot, isDark: isDark) }
+    }
+
     var chromeColor: NSColor {
         dynamicColor(chromeRGB(isDark:))
     }
@@ -186,6 +190,12 @@ public final class RenderingAttributesCoordinator {
 
     private var spans: [HighlightSpan] = []
     private var occurrenceRanges: [NSRange] = []
+    /// Highlighted-name source ranges, sorted, with their color slots.
+    private var highlightRanges: [ByteRange] = []
+    private var highlightSlots: [UInt8] = []
+    private var highlightContentID: ContentID?
+    /// The clicked token; the background pass draws it, so no layer may fill it.
+    private var primaryDisplayRange: NSRange?
     private var document: ReaderDocument?
     private var map: DisplayMap?
     private var theme = ReaderTheme(settings: ReaderSettings())
@@ -202,6 +212,11 @@ public final class RenderingAttributesCoordinator {
 
     func update(document: ReaderDocument, map: DisplayMap, theme: ReaderTheme) {
         clearRangeCache()
+        if highlightContentID != document.contentID {
+            highlightRanges = []
+            highlightSlots = []
+            highlightContentID = nil
+        }
         spans = document.highlightSpans
         self.document = document
         self.map = map
@@ -214,9 +229,21 @@ public final class RenderingAttributesCoordinator {
 
     var hasRenderingAttributes: Bool { document != nil }
 
-    func setOccurrences(_ ranges: [NSRange]) {
+    /// Display ranges of the current click occurrence or find matches.
+    var occurrenceDisplayRanges: [NSRange] { occurrenceRanges }
+
+    func setHighlights(_ ranges: [(range: ByteRange, slot: UInt8)], contentID: ContentID?) {
+        clearRangeCache()
+        let sorted = ranges.sorted { $0.range.lowerBound < $1.range.lowerBound }
+        highlightRanges = sorted.map(\.range)
+        highlightSlots = sorted.map(\.slot)
+        highlightContentID = contentID
+    }
+
+    func setOccurrences(_ ranges: [NSRange], primary: NSRange? = nil) {
         clearRangeCache()
         occurrenceRanges = ranges
+        primaryDisplayRange = primary
         styledFragmentCount = 0
         referenceStyledFragmentCount = 0
         referenceAttributeRunCount = 0
@@ -227,6 +254,9 @@ public final class RenderingAttributesCoordinator {
         clearRangeCache()
         spans = []
         occurrenceRanges = []
+        highlightRanges = []
+        highlightSlots = []
+        highlightContentID = nil
         document = nil
         map = nil
         styledFragmentCount = 0
@@ -337,12 +367,40 @@ public final class RenderingAttributesCoordinator {
             visibleOccurrences.append(intersection)
         }
 
+        var visibleHighlights: [(range: NSRange, slot: UInt8)] = []
+        for sourceRange in sourceRanges where !highlightRanges.isEmpty {
+            var first = 0
+            var last = highlightRanges.count
+            while first < last {
+                let middle = first + (last - first) / 2
+                if highlightRanges[middle].upperBound <= sourceRange.lowerBound {
+                    first = middle + 1
+                } else {
+                    last = middle
+                }
+            }
+            for index in first..<highlightRanges.count {
+                let range = highlightRanges[index]
+                guard range.lowerBound < sourceRange.upperBound else { break }
+                guard let projected = map.project(byteRange: range) else { continue }
+                for globalRange in projected.visible where globalRange != primaryDisplayRange {
+                    let intersection = NSIntersectionRange(globalRange, fragmentNSRange)
+                    guard intersection.length > 0 else { continue }
+                    visibleHighlights.append((intersection, highlightSlots[index]))
+                }
+            }
+        }
+        visibleHighlights.sort { $0.range.location < $1.range.location }
+
         let styledRanges = DecorationComposer.compose([
             DecorationLayer(ranges: syntaxRanges.map(\.range)) { index, run in
                 run.syntax = syntaxRanges[index].kind
             },
             DecorationLayer(ranges: visibleOccurrences) { _, run in
                 run.occurrence = true
+            },
+            DecorationLayer(ranges: visibleHighlights.map(\.range)) { index, run in
+                run.highlightSlot = visibleHighlights[index].slot
             },
             DecorationLayer(ranges: referenceRanges.map(\.range)) { index, run in
                 run.parameterReference = referenceRanges[index].isParameter
@@ -389,7 +447,11 @@ public final class RenderingAttributesCoordinator {
             var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: foregroundColor,
             ]
-            if styled.occurrence {
+            if let slot = styled.highlightSlot {
+                if !styled.occurrence {
+                    attributes[.backgroundColor] = theme.highlightColor(slot: slot)
+                }
+            } else if styled.occurrence {
                 attributes[.backgroundColor] = theme.occurrenceColor
             }
             ReaderWorkCounters.record(\.renderingAttributeUpdatedUTF16Units, styled.range.length)
@@ -503,6 +565,17 @@ public final class ReaderTextView {
         }
     }
     private var occurrenceSelectionByteOffset: UInt32?
+    /// Highlighted names and their color slots, shared by the project window.
+    private var highlightedNames: [String: UInt8] = [:]
+    /// The bracket beside the caret and its partner, as source byte offsets.
+    private var bracketMatch: (bracket: UInt32, partner: UInt32?)?
+    private var caretByteOffset: UInt32?
+    private var blockEndAnnotations: [BlockEndAnnotation] = []
+    /// Label rects from the last background pass, for click and hover hits.
+    private var drawnBlockEndAnnotations: [(rect: NSRect, annotation: BlockEndAnnotation)] = []
+    /// Activating a block-end label: the header's byte offset. The host
+    /// records the jump so Back returns to the brace.
+    package var onBlockEndAnnotationActivate: ((UInt32) -> Void)?
     private var findMatchByteRanges: [ByteRange]?
     private var findSelectionIndex: Int?
     private var foldOverridesByScope: [FoldScopeKey: FoldOverrides] = [:]
@@ -674,7 +747,11 @@ public final class ReaderTextView {
             }
         }
         textView.hoverHandler = { [weak self] point in
-            self?.handleHover(at: point)
+            guard let self else { return }
+            let annotation = point.flatMap { self.blockEndAnnotation(at: $0) }
+            let tip = annotation?.header
+            if self.view.toolTip != tip { self.view.toolTip = tip }
+            self.handleHover(at: annotation == nil ? point : nil)
         }
         textView.escapeHandler = { [weak self] in
             guard let self else { return false }
@@ -689,6 +766,14 @@ public final class ReaderTextView {
             self.backgroundDrawCount += 1
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
+            self.drawHighlightRings(in: textView, dirtyRect: rect)
+            self.drawBracketMatch(in: textView, dirtyRect: rect)
+            self.drawBlockEndAnnotations(in: textView, dirtyRect: rect)
+        }
+        textView.annotationClickHandler = { [weak self] point in
+            guard let self, let hit = self.blockEndAnnotation(at: point) else { return false }
+            self.onBlockEndAnnotationActivate?(hit.headerOffset)
+            return true
         }
         textView.layoutCompleted = { [weak self] in
             guard let self, !self.readerWorkStopped, !self.isCommittingProjection, !self.isRestoringViewport,
@@ -791,6 +876,8 @@ public final class ReaderTextView {
                         self.identifierIndex = index
                         self.preparedAnalysisKey = key
                         self.identifierPreparationState = .ready
+                        self.refreshHighlights()
+                        self.refreshBracketMatch()
                         if let pending = self.pendingOccurrenceActivation,
                            pending == self.occurrenceSelectionByteOffset {
                             self.pendingOccurrenceActivation = nil
@@ -823,6 +910,254 @@ public final class ReaderTextView {
     private func preparedOccurrences(in document: ReaderDocument, at offset: UInt32) -> ArraySlice<ByteRange> {
         guard preparedAnalysisKey == document.analysisKey, let identifierIndex else { return [] }
         return identifierIndex.occurrences(at: offset)
+    }
+
+    /// The identifier index for the displayed document, once prepared.
+    private var preparedIdentifierIndex: IdentifierIndex? {
+        guard let document = displayedDocument, preparedAnalysisKey == document.analysisKey else { return nil }
+        return identifierIndex
+    }
+
+    // MARK: Highlighted names
+
+    /// Names to paint with their color slots. Matching is lexical: same
+    /// spelling outside strings and comments, like the click occurrence.
+    public func setHighlightedNames(_ names: [String: UInt8]) {
+        guard names != highlightedNames else { return }
+        highlightedNames = names
+        refreshHighlights()
+    }
+
+    /// The identifier at the caret, or at the active click occurrence.
+    public var identifierAtCaret: String? {
+        guard let index = preparedIdentifierIndex else { return nil }
+        if let offset = occurrenceSelectionByteOffset, let name = index.name(at: offset) { return name }
+        // Read the live selection: accessibility and programmatic moves
+        // never pass through the mouse/keyboard hooks that track the caret.
+        guard let offset = byteOffset(forCharacterIndex: view.selectedRange().location) ?? caretByteOffset
+        else { return nil }
+        return index.name(at: offset) ?? (offset > 0 ? index.name(at: offset - 1) : nil)
+    }
+
+    /// The identifier covering `byteOffset`, once identifiers are prepared.
+    public func identifier(atByteOffset byteOffset: UInt32) -> String? {
+        preparedIdentifierIndex?.name(at: byteOffset)
+    }
+
+    /// Occurrences of `name` in the displayed document; nil until prepared.
+    public func occurrenceCount(ofName name: String) -> Int? {
+        preparedIdentifierIndex?.occurrences(named: name).count
+    }
+
+    /// Moves to the next (or previous) occurrence of `name`, wrapping around.
+    @discardableResult
+    public func revealOccurrence(ofName name: String, backwards: Bool) -> Bool {
+        guard let ranges = preparedIdentifierIndex?.occurrences(named: name),
+              let first = ranges.first, let last = ranges.last
+        else { return false }
+        let caret = occurrenceSelectionByteOffset ?? caretByteOffset ?? 0
+        let target = backwards
+            ? (ranges.last { $0.lowerBound < caret } ?? last)
+            : (ranges.first { $0.lowerBound > caret } ?? first)
+        reveal(byteOffset: target.lowerBound)
+        activate(atByteOffset: target.lowerBound)
+        return true
+    }
+
+    private func refreshHighlights() {
+        var ranges: [(range: ByteRange, slot: UInt8)] = []
+        if let index = preparedIdentifierIndex {
+            for (name, slot) in highlightedNames {
+                ranges.append(contentsOf: index.occurrences(named: name).map { ($0, slot) })
+            }
+        }
+        renderingCoordinator.setHighlights(ranges, contentID: displayedDocument?.contentID)
+        guard let layoutManager = view.textLayoutManager, displayedDocument != nil else { return }
+        installRenderingValidator(in: layoutManager)
+        if let viewportRange = layoutManager.textViewportLayoutController.viewportRange {
+            // A menu command changes no selection, and TextKit keeps drawing
+            // the fragments it already rendered. Rebuilding just the viewport's
+            // fragments (same text, same geometry) makes the new fills appear.
+            layoutManager.invalidateLayout(for: viewportRange)
+            layoutManager.invalidateRenderingAttributes(for: viewportRange)
+            validateVisibleRenderingAttributes(in: layoutManager)
+        }
+        view.needsDisplay = true
+    }
+
+    /// When the clicked name is also highlighted its fill stays the
+    /// highlight color; a thin ring marks the clicked group instead.
+    private func drawHighlightRings(in textView: NSTextView, dirtyRect: NSRect) {
+        guard findMatchByteRanges == nil,
+              let offset = occurrenceSelectionByteOffset,
+              let name = preparedIdentifierIndex?.name(at: offset),
+              highlightedNames[name] != nil,
+              let viewport = viewportDisplayRange()
+        else { return }
+        guard let slot = highlightedNames[name] else { return }
+        let fill = theme.highlightColor(slot: slot)
+        let ring = theme.foregroundColor.withAlphaComponent(0.55)
+        for range in renderingCoordinator.occurrenceDisplayRanges
+        where NSIntersectionRange(range, viewport).length > 0 {
+            for segment in ReaderViewportGeometry.visibleRects(
+                forDisplayRange: range, in: textView, clipTo: textView.visibleRect
+            ) where segment.intersects(dirtyRect) {
+                let path = NSBezierPath(
+                    roundedRect: segment.insetBy(dx: -0.5, dy: 0.5), xRadius: 2.5, yRadius: 2.5
+                )
+                fill.setFill()
+                path.fill()
+                path.lineWidth = 1
+                ring.setStroke()
+                path.stroke()
+            }
+        }
+    }
+
+    private func viewportDisplayRange() -> NSRange? {
+        guard let manager = view.textLayoutManager,
+              let content = manager.textContentManager,
+              let viewport = manager.textViewportLayoutController.viewportRange
+        else { return nil }
+        let start = content.offset(from: content.documentRange.location, to: viewport.location)
+        let end = content.offset(from: content.documentRange.location, to: viewport.endLocation)
+        guard start != NSNotFound, end != NSNotFound, start <= end else { return nil }
+        return NSRange(location: start, length: end - start)
+    }
+
+    // MARK: Bracket matching
+
+    private func refreshBracketMatch() {
+        var match: (bracket: UInt32, partner: UInt32?)?
+        if let caret = caretByteOffset, let brackets = preparedIdentifierIndex?.brackets {
+            let found = brackets.bracket(at: caret) ?? (caret > 0 ? brackets.bracket(at: caret - 1) : nil)
+            match = found.map { ($0.offset, $0.partner) }
+        }
+        guard match?.bracket != bracketMatch?.bracket || match?.partner != bracketMatch?.partner else { return }
+        bracketMatch = match
+        view.needsDisplay = true
+    }
+
+    /// Moves the caret to the partner of the bracket beside it.
+    @discardableResult
+    public func jumpToMatchingBracket() -> Bool {
+        if let live = byteOffset(forCharacterIndex: view.selectedRange().location), live != caretByteOffset {
+            caretByteOffset = live
+            refreshBracketMatch()
+        }
+        guard let partner = bracketMatch?.partner else { return false }
+        reveal(byteOffset: partner)
+        if let location = visibleDisplayOffset(forByte: partner) {
+            view.setSelectedRange(NSRange(location: location, length: 0))
+        }
+        updateCurrentLine(byteOffset: partner)
+        return true
+    }
+
+    /// Selects the text inside the innermost bracket pair around the caret;
+    /// repeating widens to the next enclosing pair.
+    @discardableResult
+    public func selectInsideBrackets() -> Bool {
+        guard let brackets = preparedIdentifierIndex?.brackets else { return false }
+        let selection = view.selectedRange()
+        guard let lower = byteOffset(forCharacterIndex: selection.location) else { return false }
+        let upper = selection.length > 0
+            ? byteOffset(forCharacterIndex: NSMaxRange(selection)) ?? lower
+            : lower
+        guard let pair = brackets.enclosingPair(lower: lower, upper: upper) else { return false }
+        _ = unfoldAncestors(containing: pair.open)
+        guard let visible = displayMap?.project(
+            byteRange: ByteRange(lowerBound: pair.open + 1, upperBound: pair.close)
+        )?.visible, let first = visible.first, let last = visible.last else { return false }
+        clearOccurrences()
+        let range = NSRange(location: first.location, length: NSMaxRange(last) - first.location)
+        view.setSelectedRange(range)
+        view.scrollRangeToVisible(range)
+        return true
+    }
+
+    private func drawBracketMatch(in textView: NSTextView, dirtyRect: NSRect) {
+        guard let match = bracketMatch else { return }
+        for offset in [match.bracket] + (match.partner.map { [$0] } ?? []) {
+            guard let location = visibleDisplayOffset(forByte: offset) else { continue }
+            for segment in ReaderViewportGeometry.visibleRects(
+                forDisplayRange: NSRange(location: location, length: 1),
+                in: textView, clipTo: textView.visibleRect
+            ) where segment.intersects(dirtyRect) {
+                if match.partner == nil {
+                    let path = NSBezierPath()
+                    path.move(to: NSPoint(x: segment.minX, y: segment.maxY - 1))
+                    path.line(to: NSPoint(x: segment.maxX, y: segment.maxY - 1))
+                    path.lineWidth = 1.2
+                    path.setLineDash([2, 2], count: 2, phase: 0)
+                    theme.unresolvedColor.setStroke()
+                    path.stroke()
+                } else {
+                    let path = NSBezierPath(
+                        roundedRect: segment.insetBy(dx: -0.5, dy: 0.5), xRadius: 2, yRadius: 2
+                    )
+                    path.lineWidth = 1
+                    theme.accentColor.setStroke()
+                    path.stroke()
+                }
+            }
+        }
+    }
+
+    // MARK: Block-end annotations
+
+    private var blockEndAnnotationFont: NSFont {
+        let size = CGFloat(max(9, theme.fontSize - 1.5))
+        return NSFontManager.shared.convert(.systemFont(ofSize: size), toHaveTrait: .italicFontMask)
+    }
+
+    private func drawBlockEndAnnotations(in textView: NSTextView, dirtyRect: NSRect) {
+        drawnBlockEndAnnotations = []
+        guard theme.blockEndAnnotations, !blockEndAnnotations.isEmpty,
+              let document = displayedDocument, let viewport = viewportDisplayRange(),
+              let visibleBytes = displayMap?.visibleSourceRanges(forDisplay: viewport),
+              let lowerByte = visibleBytes.first?.lowerBound,
+              let upperByte = visibleBytes.last?.upperBound
+        else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: blockEndAnnotationFont,
+            .foregroundColor: theme.chromeTertiaryColor,
+        ]
+        var low = 0
+        var high = blockEndAnnotations.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if blockEndAnnotations[middle].closingBrace < lowerByte { low = middle + 1 } else { high = middle }
+        }
+        for annotation in blockEndAnnotations[low...] {
+            guard annotation.closingBrace < upperByte else { break }
+            guard let braceLocation = visibleDisplayOffset(forByte: annotation.closingBrace),
+                  let line = document.lineTable.lineColumn(at: annotation.closingBrace)?.line
+            else { continue }
+            // Text after the brace (`});`) stays left of the label.
+            let starts = document.lineTable.lineStarts
+            let lineEndByte = starts.indices.contains(Int(line)) ? starts[Int(line)] - 1 : UInt32(document.bytes.count)
+            let lineEnd = visibleDisplayOffset(forByte: lineEndByte) ?? braceLocation + 1
+            guard let last = ReaderViewportGeometry.visibleRects(
+                forDisplayRange: NSRange(location: braceLocation, length: max(1, lineEnd - braceLocation)),
+                in: textView, clipTo: textView.bounds
+            ).last else { continue }
+            let text = "‹ " + annotation.label as NSString
+            let size = text.size(withAttributes: attributes)
+            let rect = NSRect(
+                x: last.maxX + 16, y: last.midY - size.height / 2,
+                width: ceil(size.width), height: ceil(size.height)
+            )
+            // A label never wraps or widens the line; it is dropped instead.
+            if wrapLines, rect.maxX > textView.bounds.maxX - textView.textContainerInset.width { continue }
+            drawnBlockEndAnnotations.append((rect, annotation))
+            guard rect.intersects(dirtyRect) else { continue }
+            text.draw(at: rect.origin, withAttributes: attributes)
+        }
+    }
+
+    private func blockEndAnnotation(at point: NSPoint) -> BlockEndAnnotation? {
+        drawnBlockEndAnnotations.first { $0.rect.insetBy(dx: -2, dy: -2).contains(point) }?.annotation
     }
 
     package static func projectorSelfTestChecks() -> [String: Bool] {
@@ -1051,6 +1386,10 @@ public final class ReaderTextView {
         prepareIdentifiers(for: document)
         diffMarkers = [:]
         bookmarkMarkers = [:]
+        bracketMatch = nil
+        caretByteOffset = nil
+        blockEndAnnotations = BlockEndAnnotations.compute(for: document)
+        drawnBlockEndAnnotations = []
         refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
@@ -3421,7 +3760,8 @@ public final class ReaderTextView {
     ) {
         occurrenceCount = logicalCount ?? ranges.count
         renderingCoordinator.setOccurrences(
-            ranges.filter { $0 != primarySelectionRange }
+            ranges.filter { $0 != primarySelectionRange },
+            primary: primarySelectionRange
         )
         guard let layoutManager = view.textLayoutManager else { return }
         installRenderingValidator(in: layoutManager)
@@ -3628,6 +3968,8 @@ public final class ReaderTextView {
     }
 
     private func updateCurrentLine(byteOffset: UInt32) {
+        caretByteOffset = byteOffset
+        refreshBracketMatch()
         onCaretChange?(byteOffset)
         guard let line = displayedDocument?.lineTable.lineColumn(at: byteOffset)?.line
         else {
@@ -4962,6 +5304,8 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
     }
 
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+    /// Consumes a click on drawn chrome (block-end labels) before selection.
+    var annotationClickHandler: ((NSPoint) -> Bool)?
     var sourceCopyHandler: (() -> String?)?
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
@@ -5050,6 +5394,10 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1,
+           annotationClickHandler?(convert(event.locationInWindow, from: nil)) == true {
+            return
+        }
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)

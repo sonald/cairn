@@ -126,6 +126,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         certainty: .possible, theme: ReaderTheme(settings: ReaderSettings()), size: 13
     )
     private let truncatedLabel = NSTextField(labelWithString: localized("main.results.truncated"))
+    private let highlightChips = HighlightChipsView()
     private var focusNotice: String?
     // A unique identifier per controller keeps AppKit's toolbar-family
     // synchronization from mutating sibling toolbars (closed windows from
@@ -395,7 +396,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextButton.setAccessibilityLabel(localized("main.show.definition.context"))
 
         let statusStack = NSStackView()
-        statusStack.setViews([contextButton, indexLabel, identifierStatusLabel, refreshIndexButton], in: .leading)
+        statusStack.setViews(
+            [contextButton, highlightChips, indexLabel, identifierStatusLabel, refreshIndexButton],
+            in: .leading
+        )
         statusStack.setViews([truncatedLabel], in: .center)
         statusStack.setViews([exactStones, exactLabel, exactInfoButton], in: .trailing)
         statusStack.translatesAutoresizingMaskIntoConstraints = false
@@ -585,10 +589,28 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onIdentifierPreparationChanged = { [weak self] in
             self?.renderIdentifierStatus()
+            self?.renderHighlightChips()
         }
         secondaryReaderController.onIdentifierPreparationChanged = { [weak self] in
             self?.renderIdentifierStatus()
+            self?.renderHighlightChips()
         }
+        for reader in [readerController, secondaryReaderController] {
+            reader.onToggleHighlightName = { [weak self] name in self?.toggleHighlight(name: name) }
+            reader.onAssignHighlightColor = { [weak self] name, slot in
+                self?.model.highlightedNames.assign(name, slot: slot)
+                self?.highlightsDidChange()
+            }
+        }
+        highlightChips.onReveal = { [weak self] name, backwards in
+            guard let self, !focusedReader.revealOccurrence(ofName: name, backwards: backwards) else { return }
+            showTransientStatus(localizedFormat("main.highlight.notInFile", name))
+        }
+        highlightChips.onRemove = { [weak self] name in
+            self?.model.highlightedNames.remove(name)
+            self?.highlightsDidChange()
+        }
+        highlightChips.onClearAll = { [weak self] in self?.clearHighlights() }
         readerController.onFocusNotice = { [weak self] message in
             self?.focusNotice = message
             self?.renderStatusBar()
@@ -895,6 +917,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if let tracking = ContextWindowModel.Tracking(rawValue: snapshot.contextTracking ?? "") {
             model.contextWindow.setTracking(tracking)
         }
+        model.highlightedNames = HighlightedNames(restoring: snapshot.highlights)
+        renderHighlights()
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let restored = await model.restoreSession(
@@ -1009,6 +1033,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // session save notice; the cleared in-memory state stands.
         try? model.clearSessionForCurrentProject(panelPreset: panelPreset)
         pendingTabRestore = nil
+        renderHighlights()
         render()
     }
 
@@ -2480,6 +2505,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         statusBar.wantsLayer = true
         statusBar.layer?.backgroundColor = theme.chromeColor.cgColor
         applyStatusTheme(theme)
+        renderHighlightChips(theme: theme)
         renderCommitButton()
         renderTrustSeal()
         readerController.apply(settings: settings)
@@ -4028,6 +4054,66 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
+    // MARK: Highlighted names and brackets
+
+    func toggleHighlightAtCaret() {
+        guard let name = focusedReader.identifierAtCaret else {
+            showTransientStatus(localized("main.highlight.noIdentifier"))
+            return
+        }
+        toggleHighlight(name: name)
+    }
+
+    private func toggleHighlight(name: String) {
+        if model.highlightedNames.toggle(name) == .full {
+            showTransientStatus(localizedFormat("main.highlight.full", Int64(ReaderTheme.highlightSlotCount)))
+            return
+        }
+        highlightsDidChange()
+    }
+
+    func clearHighlights() {
+        guard !model.highlightedNames.isEmpty else { return }
+        model.highlightedNames.removeAll()
+        highlightsDidChange()
+    }
+
+    var hasHighlights: Bool { !model.highlightedNames.isEmpty }
+
+    func jumpToMatchingBracket() {
+        guard !focusedReader.jumpToMatchingBracket() else { return }
+        showTransientStatus(localized("main.bracket.none"))
+    }
+
+    func selectInsideBrackets() {
+        guard !focusedReader.selectInsideBrackets() else { return }
+        showTransientStatus(localized("main.bracket.notInside"))
+    }
+
+    private func highlightsDidChange() {
+        renderHighlights()
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+    }
+
+    /// Every reader of the window paints the same names in the same colors.
+    private func renderHighlights() {
+        let names = model.highlightedNames.slotsByName
+        readerController.setHighlightedNames(names)
+        secondaryReaderController.setHighlightedNames(names)
+        contextController.setHighlightedNames(names)
+        renderHighlightChips()
+    }
+
+    private func renderHighlightChips(theme: ReaderTheme? = nil) {
+        let reader = focusedReader
+        highlightChips.display(
+            model.highlightedNames.entries.map {
+                .init(name: $0.name, slot: $0.slot, count: reader.occurrenceCount(ofName: $0.name))
+            },
+            theme: theme ?? ReaderTheme(settings: currentReaderSettings)
+        )
+    }
+
     func jumpToTypeDefinitionAtCaret() {
         guard let offset = model.tabStrip.activeTab?.selectionByteOffset else {
             showTransientStatus(modelText("model.typehop.noType"))
@@ -4838,6 +4924,42 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readerIdentifierPreparationNotice(textView.identifierPreparationState)
     }
 
+    /// Context menu: toggle a name's highlight, or give it a chosen color slot.
+    var onToggleHighlightName: ((String) -> Void)?
+    var onAssignHighlightColor: ((String, UInt8) -> Void)?
+
+    func setHighlightedNames(_ names: [String: UInt8]) {
+        textView.setHighlightedNames(names)
+    }
+
+    var identifierAtCaret: String? { textView.identifierAtCaret }
+
+    func occurrenceCount(ofName name: String) -> Int? {
+        textView.occurrenceCount(ofName: name)
+    }
+
+    @discardableResult
+    func revealOccurrence(ofName name: String, backwards: Bool) -> Bool {
+        textView.revealOccurrence(ofName: name, backwards: backwards)
+    }
+
+    @discardableResult
+    func jumpToMatchingBracket() -> Bool { textView.jumpToMatchingBracket() }
+
+    @discardableResult
+    func selectInsideBrackets() -> Bool { textView.selectInsideBrackets() }
+
+    @objc private func toggleHighlightFromMenu(_ sender: Any?) {
+        guard let offset = contextMenuOffset, let name = textView.identifier(atByteOffset: offset) else { return }
+        onToggleHighlightName?(name)
+    }
+
+    @objc private func assignHighlightColorFromMenu(_ sender: NSMenuItem) {
+        guard let offset = contextMenuOffset, let name = textView.identifier(atByteOffset: offset),
+              let slot = UInt8(exactly: sender.tag) else { return }
+        onAssignHighlightColor?(name, slot)
+    }
+
     private func cancelSyntaxLoad() {
         syntaxLoadPending = false
         syntaxTask?.cancel()
@@ -5004,6 +5126,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.onUserCaretChange = { [weak self] byteOffset in
             self?.onCaretFollow?(byteOffset)
         }
+        textView.onBlockEndAnnotationActivate = { [weak self] byteOffset in
+            guard let self else { return }
+            if let onOpenScope { onOpenScope(byteOffset) } else { textView.reveal(byteOffset: byteOffset) }
+        }
 
         let relationMenu = NSMenu(title: localized("main.relations"))
         relationMenu.autoenablesItems = false
@@ -5035,6 +5161,27 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         ))
         relationMenu.addItem(.separator())
         relationMenu.addItem(NSMenuItem(
+            title: localized("main.highlight.toggle"),
+            action: #selector(toggleHighlightFromMenu(_:)),
+            keyEquivalent: ""
+        ))
+        let colorItem = NSMenuItem(title: localized("main.highlight.color"), action: nil, keyEquivalent: "")
+        let colorMenu = NSMenu(title: localized("main.highlight.color"))
+        colorMenu.autoenablesItems = false
+        for slot in 1...Int(ReaderTheme.highlightSlotCount) {
+            let item = NSMenuItem(
+                title: localizedFormat("main.highlight.color.slot", Int64(slot)),
+                action: #selector(assignHighlightColorFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            item.tag = slot
+            item.target = self
+            colorMenu.addItem(item)
+        }
+        colorItem.submenu = colorMenu
+        relationMenu.addItem(colorItem)
+        relationMenu.addItem(.separator())
+        relationMenu.addItem(NSMenuItem(
             title: localized("main.copy.path.line"),
             action: #selector(copyPathLine(_:)),
             keyEquivalent: ""
@@ -5052,8 +5199,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 ? nil
                 : textView.byteOffset(forCharacterIndex: characterIndex)
             let location = contextMenuLocation()
+            let highlightName = contextMenuOffset.flatMap { textView.identifier(atByteOffset: $0) }
+            for item in textView.view.menu?.items ?? [] where item.submenu != nil {
+                for colorItem in item.submenu?.items ?? [] {
+                    colorItem.image = highlightSwatch(slot: UInt8(colorItem.tag))
+                }
+            }
             for item in textView.view.menu?.items ?? [] where !item.isSeparatorItem {
-                item.isEnabled = if item.action == #selector(revealInFinder(_:)) {
+                item.isEnabled = if item.action == #selector(toggleHighlightFromMenu(_:)) || item.submenu != nil {
+                    highlightName != nil
+                } else if item.action == #selector(revealInFinder(_:)) {
                     location.map {
                         FileManager.default.fileExists(atPath: $0.file.path)
                     } ?? false
@@ -7388,6 +7543,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         onRevealInFinder?(location.file)
     }
 
+    private func highlightSwatch(slot: UInt8) -> NSImage {
+        let fill = readerTheme.highlightColor(slot: slot)
+        let stroke = readerTheme.chromeDividerColor
+        return NSImage(size: NSSize(width: 14, height: 12), flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+            fill.setFill()
+            path.fill()
+            stroke.setStroke()
+            path.stroke()
+            return true
+        }
+    }
+
     private func contextMenuLocation() -> (file: URL, line: UInt32)? {
         guard let contextMenuOffset,
               let file = displayedFile,
@@ -7469,6 +7637,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     private var excerptFullWidth: NSLayoutConstraint?
     private var isSyncingListSelection = false
     private static let candidateListWidth: CGFloat = 240
+
+    func setHighlightedNames(_ names: [String: UInt8]) {
+        miniReader.setHighlightedNames(names)
+    }
 
     init(model: ContextWindowModel, derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore()) {
         miniReader = ReaderTextView(derivedDataStore: derivedDataStore)

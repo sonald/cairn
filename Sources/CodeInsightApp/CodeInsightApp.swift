@@ -11387,6 +11387,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.jumpToTypeDefinitionAtCaret()
     }
 
+    @objc private func toggleHighlight(_ sender: Any?) {
+        projectCommandTarget()?.toggleHighlightAtCaret()
+    }
+
+    @objc private func clearHighlights(_ sender: Any?) {
+        projectCommandTarget()?.clearHighlights()
+    }
+
+    @objc private func jumpToMatchingBracket(_ sender: Any?) {
+        projectCommandTarget()?.jumpToMatchingBracket()
+    }
+
+    @objc private func selectInsideBrackets(_ sender: Any?) {
+        projectCommandTarget()?.selectInsideBrackets()
+    }
+
     @objc private func goToLine(_ sender: Any?) {
         projectCommandTarget()?.showPalette(prefill: ":")
     }
@@ -11599,6 +11615,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         case #selector(findInFile(_:)), #selector(findNext(_:)),
             #selector(findPrevious(_:)):
             return target?.canFindInFile == true
+        case #selector(toggleHighlight(_:)), #selector(jumpToMatchingBracket(_:)),
+            #selector(selectInsideBrackets(_:)):
+            return target?.canFindInFile == true
+        case #selector(clearHighlights(_:)):
+            return target?.hasHighlights == true
         case #selector(goBack(_:)):
             return model?.navigationHistory.canGoBack == true
         case #selector(goForward(_:)):
@@ -11781,6 +11802,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .goPreviousDiffHunk: CommandAction(#selector(AppDelegate.previousDiffHunk(_:))),
         .goNextDiffHunk: CommandAction(#selector(AppDelegate.nextDiffHunk(_:))),
         .navigateTypeDefinition: CommandAction(#selector(AppDelegate.jumpToTypeDefinition(_:))),
+        .findToggleHighlight: CommandAction(#selector(AppDelegate.toggleHighlight(_:))),
+        .findClearHighlights: CommandAction(#selector(AppDelegate.clearHighlights(_:))),
+        .goMatchingBracket: CommandAction(#selector(AppDelegate.jumpToMatchingBracket(_:))),
+        .goSelectInsideBrackets: CommandAction(#selector(AppDelegate.selectInsideBrackets(_:))),
         .viewPresetReading: CommandAction(
             #selector(AppDelegate.applyPanelPreset(_:)),
             representedObject: PanelPresetModel.reading.rawValue
@@ -12003,6 +12028,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .findPrevious, to: findMenu)
         findMenu.addItem(.separator())
         appendMenuItem(for: .findInProject, to: findMenu)
+        findMenu.addItem(.separator())
+        appendMenuItem(for: .findToggleHighlight, to: findMenu)
+        appendMenuItem(for: .findClearHighlights, to: findMenu)
         findItem.submenu = findMenu
         mainMenu.addItem(findItem)
 
@@ -12012,6 +12040,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .goOpenSymbol, to: goMenu)
         appendMenuItem(for: .goToLine, to: goMenu)
         appendMenuItem(for: .navigateTypeDefinition, to: goMenu)
+        appendMenuItem(for: .goMatchingBracket, to: goMenu)
+        appendMenuItem(for: .goSelectInsideBrackets, to: goMenu)
         goMenu.addItem(.separator())
         // Back/Forward keep the migrated menu order: both visible items
         // first, then both hidden alternate items (⌘[ / ⌘]).
