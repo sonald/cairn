@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightAppModel
 import CodeInsightCore
 
 /// Sheet for the open project's exclusion rules: built-in skips shown
@@ -56,9 +57,9 @@ final class ExclusionRulesSheet: NSWindowController {
         scroll.translatesAutoresizingMaskIntoConstraints = false
 
         let cancel = NSButton(title: localized("rules.cancel"), target: self, action: #selector(cancel(_:)))
-        cancel.keyEquivalent = "\u{1b}"
+        cancel.applyKeyChord(KeyChord(modifiers: [], key: .special(.escape)))
         let save = NSButton(title: localized("rules.save"), target: self, action: #selector(save(_:)))
-        save.keyEquivalent = "\r"
+        save.applyKeyChord(KeyChord(modifiers: [], key: .special(.return)))
         let buttons = NSStackView(views: [NSView(), cancel, save])
         buttons.orientation = .horizontal
         buttons.spacing = 8

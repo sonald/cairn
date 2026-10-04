@@ -67,8 +67,12 @@ func readerContextMenuCopiesClickedLineAndRevealsTheDisplayedFile() throws {
         $0.title == "Show References"
     }))
 
-    #expect(referencesIndex + 2 == copyIndex)
+    // Relations, then the highlight group, then the location actions.
     #expect(menu.items[referencesIndex + 1].isSeparatorItem)
+    #expect(menu.items[referencesIndex + 2].title == "Highlight This Name")
+    #expect(menu.items[referencesIndex + 3].submenu?.items.count == 6)
+    #expect(menu.items[referencesIndex + 4].isSeparatorItem)
+    #expect(referencesIndex + 5 == copyIndex)
     #expect(revealIndex == copyIndex + 1)
     #expect(copy.isEnabled)
     #expect(reveal.isEnabled)
