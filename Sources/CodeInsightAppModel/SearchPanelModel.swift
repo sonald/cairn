@@ -54,6 +54,13 @@ public final class SearchPanelModel {
     public private(set) var requestID: UInt64 = 0
     public private(set) var isCaseSensitive = false
     public private(set) var isRegex = false
+    public private(set) var isWholeWord = false
+    /// Comma-separated path globs as the user typed them.
+    public private(set) var includePaths = ""
+    public private(set) var excludePaths = ""
+    /// Files searched and files the path filters removed, summed over sessions.
+    public private(set) var searchedFileCount = 0
+    public private(set) var excludedFileCount = 0
 
     public var displayedMatchCount: Int {
         min(totalMatches, Self.displayLimit)
@@ -65,6 +72,7 @@ public final class SearchPanelModel {
     @ObservationIgnored private var projectState = ProjectState.empty
     @ObservationIgnored private var groupsByPath: [PathID: Group] = [:]
     @ObservationIgnored private var matchedPathIDs: Set<PathID> = []
+    @ObservationIgnored private var scopeBySession: [ObjectIdentifier: (searched: Int, excluded: Int)] = [:]
 
     public init() {
         searcher = { session, query, context in
@@ -106,6 +114,19 @@ public final class SearchPanelModel {
     public func setRegex(_ enabled: Bool) {
         guard isRegex != enabled else { return }
         isRegex = enabled
+        restart()
+    }
+
+    public func setWholeWord(_ enabled: Bool) {
+        guard isWholeWord != enabled else { return }
+        isWholeWord = enabled
+        restart()
+    }
+
+    public func setPathFilters(include: String, exclude: String) {
+        guard include != includePaths || exclude != excludePaths else { return }
+        includePaths = include
+        excludePaths = exclude
         restart()
     }
 
@@ -180,7 +201,10 @@ public final class SearchPanelModel {
         let query = ContentSearchQuery(
             pattern: query,
             isRegex: isRegex,
-            caseSensitive: isCaseSensitive
+            caseSensitive: isCaseSensitive,
+            wholeWord: isWholeWord,
+            includeGlobs: PathGlob.list(includePaths).map(\.pattern),
+            excludeGlobs: PathGlob.list(excludePaths).map(\.pattern)
         )
         let searcher = searcher
         searchTask = Task { [weak self] in
@@ -229,9 +253,15 @@ public final class SearchPanelModel {
         displayTruncationMessage = nil
         selectedIndex = nil
         matchedPathIDs = []
+        scopeBySession = [:]
+        searchedFileCount = 0
+        excludedFileCount = 0
     }
 
     private func apply(_ batch: SearchBatch, session: EngineSession) {
+        scopeBySession[ObjectIdentifier(session)] = (batch.searchedPathCount, batch.excludedPathCount)
+        searchedFileCount = scopeBySession.values.reduce(0) { $0 + $1.searched }
+        excludedFileCount = scopeBySession.values.reduce(0) { $0 + $1.excluded }
         let previousSelectedIndex = selectedIndex
         let selectedMatch = previousSelectedIndex.flatMap {
             selection(at: $0)?.match

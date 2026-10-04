@@ -619,6 +619,56 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
     }
 }
 
+@Test
+func snapshotSearchAppliesPathFiltersAndWholeWordAndReportsScope() async throws {
+    let source = FakeSnapshotSource([
+        ("src/lib.rs", Array("let permits = permits_budget + permits;\n".utf8)),
+        ("src/tests/sem.rs", Array("assert!(permits > 0);\n".utf8)),
+        ("vendor/dep/lib.rs", Array("permits\n".utf8)),
+        ("README.md", Array("permits\n".utf8)),
+    ])
+    let everything = try await search(ContentSearchQuery(pattern: "permits"), source: source)
+    #expect(everything.matches.count == 5)
+    #expect(everything.final.searchedPathCount == 3, "only Rust files belong to the session")
+    #expect(everything.final.excludedPathCount == 0)
+
+    let filtered = try await search(
+        ContentSearchQuery(
+            pattern: "permits",
+            wholeWord: true,
+            includeGlobs: ["src/**"],
+            excludeGlobs: ["tests/"]
+        ),
+        source: source
+    )
+    #expect(filtered.matches.map(\.column) == [5, 32], "permits_budget is not a whole word")
+    #expect(filtered.final.searchedPathCount == 1)
+    #expect(filtered.final.excludedPathCount == 2)
+
+    let regex = try await search(
+        ContentSearchQuery(pattern: #"perm\w+"#, isRegex: true, wholeWord: true),
+        source: source
+    )
+    #expect(regex.matches.filter { $0.pathID == source.manifest.files[0].pathID }.count == 3,
+            "a regex hit is checked at its own boundaries")
+}
+
+@Test
+func typescriptWholeWordTreatsDollarAsAnIdentifierCharacter() async throws {
+    let source = FakeSnapshotSource([
+        ("a.ts", Array("const $permits = 8; clamp(permits, $permits);\n".utf8)),
+    ], language: .typescript)
+    let result = try await collect(try SnapshotSearchService(
+        source: source,
+        language: .typescript,
+        extractor: TypeScriptExtractor()
+    ).search(
+        ContentSearchQuery(pattern: "permits", wholeWord: true),
+        context: context(for: source)
+    ))
+    #expect(result.matches.map(\.column) == [27])
+}
+
 private func search(
     _ query: ContentSearchQuery,
     source: FakeSnapshotSource

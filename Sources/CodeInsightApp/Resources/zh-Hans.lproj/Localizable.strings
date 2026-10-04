@@ -652,3 +652,10 @@
 "main.bracket.notInside" = "光标不在括号内";
 "settings.blockEndAnnotations" = "标注长代码块的结尾";
 "settings.blockEndAnnotations.help" = "Rust 和 TypeScript：块长 12 行以上时，在闭合的 } 后显示它属于哪个块。点击标注跳到块开头。";
+"panel.search.word" = "全词匹配";
+"panel.search.paths" = "包含 / 排除路径";
+"panel.search.include.placeholder" = "包含，例如 src/**、*.{rs,ts}";
+"panel.search.exclude.placeholder" = "排除，例如 **/tests/**";
+"panel.search.scope" = "在 %lld 个文件中搜索";
+"panel.search.scope.excluded" = "在 %1$lld 个文件中搜索 · 按路径排除 %2$lld 个";
+"main.match.word" = "全词匹配";

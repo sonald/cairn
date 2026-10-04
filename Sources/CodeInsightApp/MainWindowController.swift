@@ -4828,6 +4828,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let findBarDivider = NSView()
     private let findField = NSSearchField()
     private let findCaseButton = NSButton()
+    private let findWordButton = NSButton()
     private let findPreviousButton = NSButton()
     private let findNextButton = NSButton()
     private let findStatusLabel = NSTextField(labelWithString: "")
@@ -5467,6 +5468,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         findCaseButton.toolTip = localized("main.match.case")
         findCaseButton.setAccessibilityLabel(localized("main.match.case"))
 
+        findWordButton.setButtonType(.toggle)
+        findWordButton.bezelStyle = .texturedRounded
+        findWordButton.attributedTitle = NSAttributedString(string: "ab", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .regular)),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ])
+        findWordButton.target = self
+        findWordButton.action = #selector(toggleFindCase(_:))
+        findWordButton.toolTip = localized("main.match.word")
+        findWordButton.setAccessibilityLabel(localized("main.match.word"))
+
         findPreviousButton.title = "↑"
         findPreviousButton.bezelStyle = .inline
         findPreviousButton.target = self
@@ -5498,6 +5510,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let row = NSStackView(views: [
             findField,
             findCaseButton,
+            findWordButton,
             findPreviousButton,
             findNextButton,
             findStatusLabel,
@@ -5518,6 +5531,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             findField.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
             findField.heightAnchor.constraint(equalToConstant: 22),
             findCaseButton.widthAnchor.constraint(equalToConstant: 34),
+            findWordButton.widthAnchor.constraint(equalToConstant: 34),
             findPreviousButton.widthAnchor.constraint(equalToConstant: 24),
             findNextButton.widthAnchor.constraint(equalToConstant: 24),
             findCloseButton.widthAnchor.constraint(equalToConstant: 24),
@@ -6249,6 +6263,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let bytes = document.bytes
         let pattern = Array(query.utf8)
         let caseSensitive = findCaseButton.state == .on
+        let wholeWord = findWordButton.state == .on
+        let wordBoundary = wholeWord
+            ? WordBoundary(allowsDollar: document.languageMode.language == .typescript) : nil
         let selectedRange = textView.selectedFindMatchRange
         let scanDelay = findScanDelayForTesting
         findStatusLabel.stringValue = localized("main.searching")
@@ -6270,7 +6287,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 return try literalRanges(
                     pattern,
                     in: bytes,
-                    caseSensitive: caseSensitive
+                    caseSensitive: caseSensitive,
+                    wordBoundary: wordBoundary
                 )
             }
             self.findWorker = worker
@@ -6281,7 +6299,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                       self.displayedFile?.standardizedFileURL == file,
                       self.displayedDocument?.contentID == contentID,
                       self.findField.stringValue == query,
-                      (self.findCaseButton.state == .on) == caseSensitive
+                      (self.findCaseButton.state == .on) == caseSensitive,
+                      (self.findWordButton.state == .on) == wholeWord
                 else { return }
                 self.findWorker = nil
                 let selectedIndex = selectedRange.flatMap { ranges.firstIndex(of: $0) }

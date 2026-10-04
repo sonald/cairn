@@ -652,3 +652,10 @@
 "main.bracket.notInside" = "The caret is not inside brackets";
 "settings.blockEndAnnotations" = "Label the end of long blocks";
 "settings.blockEndAnnotations.help" = "Rust and TypeScript: after the closing brace of a block of 12 lines or more, show which block it ends. Click the label to go to the block's start.";
+"panel.search.word" = "Whole word";
+"panel.search.paths" = "Include / exclude paths";
+"panel.search.include.placeholder" = "Include, e.g. src/**, *.{rs,ts}";
+"panel.search.exclude.placeholder" = "Exclude, e.g. **/tests/**";
+"panel.search.scope" = "Searched %lld files";
+"panel.search.scope.excluded" = "Searched %1$lld files · %2$lld excluded by path";
+"main.match.word" = "Whole word";

@@ -17,6 +17,11 @@ final class SearchPanel: NSWindowController,
     private let input = NSTextField()
     private let caseButton = NSButton()
     private let regexButton = NSButton()
+    private let wordButton = NSButton()
+    private let pathsButton = NSButton()
+    private let includeField = NSTextField()
+    private let excludeField = NSTextField()
+    private let pathsRow = NSStackView()
     private let outlineView = NSOutlineView()
     private let scrollView = NSScrollView()
     private let placeholderLabel = NSTextField(labelWithString: "")
@@ -318,6 +323,10 @@ final class SearchPanel: NSWindowController,
     }
 
     func controlTextDidChange(_ notification: Notification) {
+        if let field = notification.object as? NSTextField, field === includeField || field === excludeField {
+            panelModel.setPathFilters(include: includeField.stringValue, exclude: excludeField.stringValue)
+            return
+        }
         panelModel.setQuery(input.stringValue)
     }
 
@@ -351,6 +360,24 @@ final class SearchPanel: NSWindowController,
         window?.makeFirstResponder(input)
     }
 
+    @objc private func wholeWordChanged(_ sender: NSButton) {
+        panelModel.setWholeWord(sender.state == .on)
+        window?.makeFirstResponder(input)
+    }
+
+    @objc private func togglePathsRow(_ sender: Any?) {
+        pathsRow.isHidden.toggle()
+        renderPathsButton()
+        window?.makeFirstResponder(pathsRow.isHidden ? input : includeField)
+    }
+
+    private func renderPathsButton() {
+        let active = !panelModel.includePaths.trimmingCharacters(in: .whitespaces).isEmpty
+            || !panelModel.excludePaths.trimmingCharacters(in: .whitespaces).isEmpty
+        pathsButton.title = (pathsRow.isHidden ? "▸ " : "▾ ") + localized("panel.search.paths")
+            + (active && pathsRow.isHidden ? " ●" : "")
+    }
+
     @objc private func openClickedRow(_ sender: Any?) {
         guard outlineView.clickedRow >= 0,
               let match = outlineView.item(atRow: outlineView.clickedRow)
@@ -380,10 +407,46 @@ final class SearchPanel: NSWindowController,
             accessibilityLabel: localized("panel.search.regex"),
             action: #selector(regexChanged(_:))
         )
-        let header = NSStackView(views: [input, caseButton, regexButton])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
+        configureToggle(
+            wordButton,
+            title: "ab",
+            accessibilityLabel: localized("panel.search.word"),
+            action: #selector(wholeWordChanged(_:))
+        )
+        wordButton.attributedTitle = NSAttributedString(string: "ab", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ])
+        let searchRow = NSStackView(views: [input, caseButton, wordButton, regexButton])
+        searchRow.orientation = .horizontal
+        searchRow.alignment = .centerY
+        searchRow.spacing = 8
+
+        pathsButton.isBordered = false
+        pathsButton.font = .systemFont(ofSize: 11)
+        pathsButton.target = self
+        pathsButton.action = #selector(togglePathsRow(_:))
+        pathsButton.setAccessibilityLabel(localized("panel.search.paths"))
+        for (field, placeholder) in [
+            (includeField, localized("panel.search.include.placeholder")),
+            (excludeField, localized("panel.search.exclude.placeholder")),
+        ] {
+            field.placeholderString = placeholder
+            field.setAccessibilityLabel(placeholder)
+            field.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            field.delegate = self
+        }
+        pathsRow.setViews([includeField, excludeField], in: .leading)
+        pathsRow.orientation = .horizontal
+        pathsRow.distribution = .fillEqually
+        pathsRow.spacing = 8
+        pathsRow.isHidden = true
+        renderPathsButton()
+
+        let header = NSStackView(views: [searchRow, pathsButton, pathsRow])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 4
         header.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: .init("SearchResult"))
@@ -448,7 +511,10 @@ final class SearchPanel: NSWindowController,
             header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             input.heightAnchor.constraint(equalToConstant: 32),
             caseButton.widthAnchor.constraint(equalToConstant: 42),
+            wordButton.widthAnchor.constraint(equalToConstant: 42),
             regexButton.widthAnchor.constraint(equalToConstant: 42),
+            searchRow.widthAnchor.constraint(equalTo: header.widthAnchor),
+            pathsRow.widthAnchor.constraint(equalTo: header.widthAnchor),
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
@@ -527,6 +593,9 @@ final class SearchPanel: NSWindowController,
             _ = panelModel.selectedIndex
             _ = panelModel.isCaseSensitive
             _ = panelModel.isRegex
+            _ = panelModel.isWholeWord
+            _ = panelModel.searchedFileCount
+            _ = panelModel.excludedFileCount
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -549,7 +618,18 @@ final class SearchPanel: NSWindowController,
     private func render() {
         caseButton.state = panelModel.isCaseSensitive ? .on : .off
         regexButton.state = panelModel.isRegex ? .on : .off
-        statusLabel.stringValue = localizedFormat("panel.search.summary", localizedFormat("panel.search.matches", Int64(panelModel.totalMatches)), localizedFormat("panel.search.files", Int64(panelModel.fileCount)))
+        wordButton.state = panelModel.isWholeWord ? .on : .off
+        renderPathsButton()
+        let summary = localizedFormat("panel.search.summary", localizedFormat("panel.search.matches", Int64(panelModel.totalMatches)), localizedFormat("panel.search.files", Int64(panelModel.fileCount)))
+        // Q6.4: say what was searched, and what the path filters left out.
+        let scope: String? = if panelModel.excludedFileCount > 0 {
+            localizedFormat("panel.search.scope.excluded", Int64(panelModel.searchedFileCount), Int64(panelModel.excludedFileCount))
+        } else if panelModel.searchedFileCount > 0 {
+            localizedFormat("panel.search.scope", Int64(panelModel.searchedFileCount))
+        } else {
+            nil
+        }
+        statusLabel.stringValue = [scope, summary].compactMap { $0 }.joined(separator: " · ")
         truncatedLabel.isHidden = !panelModel.isTruncated
         placeholderLabel.stringValue = panelModel.placeholder
         placeholderLabel.isHidden = panelModel.placeholder.isEmpty

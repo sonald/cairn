@@ -12,15 +12,26 @@ public struct ContentSearchQuery: Sendable {
     public let pattern: String
     public let isRegex: Bool
     public let caseSensitive: Bool
+    /// Hits may not touch an identifier character on either side.
+    public let wholeWord: Bool
+    /// Project-relative path globs; empty means every path.
+    public let includeGlobs: [String]
+    public let excludeGlobs: [String]
 
     public init(
         pattern: String,
         isRegex: Bool = false,
-        caseSensitive: Bool = false
+        caseSensitive: Bool = false,
+        wholeWord: Bool = false,
+        includeGlobs: [String] = [],
+        excludeGlobs: [String] = []
     ) {
         self.pattern = pattern
         self.isRegex = isRegex
         self.caseSensitive = caseSensitive
+        self.wholeWord = wholeWord
+        self.includeGlobs = includeGlobs
+        self.excludeGlobs = excludeGlobs
     }
 }
 
@@ -54,17 +65,25 @@ public struct SearchBatch: Sendable {
     public let isFinal: Bool
     public let completeness: Completeness
     public let truncatedPathIDs: Set<PathID>
+    /// Files of the session's language that the query's path filters kept,
+    /// and those they removed; the same on every batch of one search.
+    public let searchedPathCount: Int
+    public let excludedPathCount: Int
 
     public init(
         matchesByPath: [PathID: [SearchMatch]],
         isFinal: Bool,
         completeness: Completeness,
-        truncatedPathIDs: Set<PathID> = []
+        truncatedPathIDs: Set<PathID> = [],
+        searchedPathCount: Int = 0,
+        excludedPathCount: Int = 0
     ) {
         self.matchesByPath = matchesByPath
         self.isFinal = isFinal
         self.completeness = completeness
         self.truncatedPathIDs = truncatedPathIDs
+        self.searchedPathCount = searchedPathCount
+        self.excludedPathCount = excludedPathCount
     }
 }
 
@@ -130,6 +149,8 @@ public struct SnapshotSearchService: Sendable {
                 actual: context.snapshotID
             )
         }
+        let wordBoundary = query.wholeWord
+            ? WordBoundary(allowsDollar: language == .typescript) : nil
         let regularExpression: NSRegularExpression?
         if query.isRegex {
             regularExpression = try NSRegularExpression(
@@ -142,7 +163,16 @@ public struct SnapshotSearchService: Sendable {
         let literalPattern = Array(query.pattern.utf8)
 
         let source = source
-        let files = activeFiles().map(\.file)
+        let candidates = activeFiles().map(\.file)
+        let includes = query.includeGlobs.compactMap(PathGlob.init)
+        let excludes = query.excludeGlobs.compactMap(PathGlob.init)
+        let files = candidates.filter { file in
+            guard let path = source.path(for: file.pathID) else { return false }
+            return (includes.isEmpty || includes.contains { $0.matches(path) })
+                && !excludes.contains { $0.matches(path) }
+        }
+        let searchedPathCount = files.count
+        let excludedPathCount = candidates.count - files.count
         let wallClockLimit = wallClockLimit
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
@@ -166,7 +196,9 @@ public struct SnapshotSearchService: Sendable {
                         matchesByPath: batchMatches,
                         isFinal: isFinal,
                         completeness: completeness,
-                        truncatedPathIDs: truncatedPathIDs
+                        truncatedPathIDs: truncatedPathIDs,
+                        searchedPathCount: searchedPathCount,
+                        excludedPathCount: excludedPathCount
                     ))
                     batchMatches.removeAll(keepingCapacity: true)
                     batchMatchCount = 0
@@ -213,6 +245,9 @@ public struct SnapshotSearchService: Sendable {
                         ranges = Self.regexRanges(
                             regularExpression,
                             string: string,
+                            accepting: { range in
+                                wordBoundary?.isWholeWord(range, in: bytes) ?? true
+                            },
                             startedAt: startedAt,
                             wallClockLimit: wallClockLimit
                         )
@@ -221,6 +256,7 @@ public struct SnapshotSearchService: Sendable {
                             literalPattern,
                             in: bytes,
                             caseSensitive: query.caseSensitive,
+                            wordBoundary: wordBoundary,
                             maximumMatches: Self.matchesPerFile,
                             wallClockExpired: {
                                 Self.expired(startedAt, limit: wallClockLimit)
@@ -529,6 +565,7 @@ public struct SnapshotSearchService: Sendable {
     private static func regexRanges(
         _ regex: NSRegularExpression,
         string: String,
+        accepting accepts: (ByteRange) -> Bool,
         startedAt: ContinuousClock.Instant,
         wallClockLimit: Duration
     ) -> [ByteRange] {
@@ -555,10 +592,9 @@ public struct SnapshotSearchService: Sendable {
                 stop.pointee = true
                 return
             }
-            ranges.append(ByteRange(
-                lowerBound: lowerBound,
-                upperBound: upperBound
-            ))
+            let hit = ByteRange(lowerBound: lowerBound, upperBound: upperBound)
+            guard accepts(hit) else { return }
+            ranges.append(hit)
             if ranges.count > matchesPerFile { stop.pointee = true }
         }
         return ranges
