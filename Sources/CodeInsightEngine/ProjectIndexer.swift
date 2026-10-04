@@ -35,11 +35,6 @@ public struct ProjectIndexer: Sendable {
         fileprivate let startedAt: Date
     }
 
-    public static let skippedDirectories: Set<String> = [
-        ".git", "target", "node_modules", ".build", "venv", ".venv",
-        "__pycache__", "dist", "build",
-    ]
-
     private let parallelism: Int
     private let cache: IndexCache?
     private let extractorOverride: (any LanguageExtractor)?
@@ -74,11 +69,15 @@ public struct ProjectIndexer: Sendable {
         try index(root: root, language: .rust)
     }
 
-    public func index(root: URL, language: LanguageID) throws -> EngineSession {
+    public func index(
+        root: URL,
+        language: LanguageID,
+        pathRules: ProjectPathRules = ProjectPathRules()
+    ) throws -> EngineSession {
         let extractor = try languageExtractor(for: language)
         let startedAt = Date()
         let root = root.standardizedFileURL
-        let files = try sourceFiles(in: root, language: language).sorted {
+        let files = try sourceFiles(in: root, language: language, rules: pathRules).sorted {
             relativePath(of: $0, under: root) < relativePath(of: $1, under: root)
         }
         let store = ProjectIndexStore()
@@ -485,29 +484,12 @@ public struct ProjectIndexer: Sendable {
 
     private func sourceFiles(
         in root: URL,
-        language: LanguageID
+        language: LanguageID,
+        rules: ProjectPathRules
     ) throws -> [URL] {
-        var result: [URL] = []
-        for url in try FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
-        ) {
-            if url.lastPathComponent == ".DS_Store" { continue }
-            let values = try url.resourceValues(forKeys: [
-                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ])
-            if values.isDirectory == true {
-                guard values.isSymbolicLink != true,
-                      !Self.skippedDirectories.contains(url.lastPathComponent)
-                else { continue }
-                result += try sourceFiles(in: url, language: language)
-            } else if values.isRegularFile == true,
-                      LanguageMode.classify(path: url.path, language: language) != nil
-            {
-                result.append(url)
-            }
+        try ProjectTreeWalk.regularFiles(under: root, rules: rules).files.filter {
+            LanguageMode.classify(path: $0.path, language: language) != nil
         }
-        return result
     }
 
     private func languageExtractor(

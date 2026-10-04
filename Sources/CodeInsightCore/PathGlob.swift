@@ -60,6 +60,12 @@ package struct PathGlob: Sendable {
         return expression.firstMatch(in: path, range: range) != nil
     }
 
+    /// Whether the pattern covers the contents of directory `path`, the test
+    /// a tree walk uses to decide whether to descend.
+    package func matchesDirectory(_ path: String) -> Bool {
+        matches(path + "/")
+    }
+
     private static func translate(_ glob: Substring) -> String {
         var result = ""
         var index = glob.startIndex

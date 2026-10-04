@@ -726,6 +726,79 @@ func typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
         == Array(files["nested/tsconfig.json"]!.utf8))
 }
 
+@Test
+func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirectories() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files = [
+        "src/lib.rs": "fn lib() {}\n",
+        "src/api.pb.rs": "fn generated() {}\n",
+        "vendor/dep/lib.rs": "fn dep() {}\n",
+        "build/gen/schema.rs": "fn schema() {}\n",
+        "target/debug/out.rs": "fn out() {}\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contents.utf8).write(to: url)
+    }
+    try fixture.git("add", "-A", "-f")
+    try fixture.commit("fixture")
+    let rules = ProjectPathRules(lines: ["vendor/", "*.pb.rs", "!build/"])
+
+    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, languages: [.rust], pathRules: rules)
+    #expect(Set(worktree.listFiles().map(\.path)) == ["src/lib.rs", "build/gen/schema.rs"])
+    #expect(worktree.ruleExcludedPaths == ["src/api.pb.rs", "vendor"],
+            "a pruned directory is reported once; built-in skips are not listed")
+
+    let commit = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD", pathRules: rules)
+    #expect(Set(commit.listFiles().map(\.path))
+        == ["src/lib.rs", "build/gen/schema.rs", "target/debug/out.rs"],
+        "tracked files under built-in skipped directories stay visible in commits")
+    #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "vendor/dep/lib.rs"])
+
+    let unruled = try WorktreeSnapshot(repositoryURL: fixture.root, languages: [.rust])
+    #expect(Set(unruled.listFiles().map(\.path))
+        == ["src/lib.rs", "src/api.pb.rs", "vendor/dep/lib.rs"], "no rules keeps the built-in behavior")
+}
+
+@Test
+func treeWalkKeepsExactlyFilesWhoseAncestorsAndSelfAreIncluded() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightTreeWalk-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let paths = [
+        "a.rs", "b.pb.rs", "src/a.rs", "src/b.pb.rs", "src/tests/t.rs", "build/x.rs",
+        "build/target/y.rs", "vendor/v.rs", "vendor/keep/k.rs", "dist/d.rs", "node_modules/n.rs",
+    ]
+    for path in paths {
+        let url = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x\n".utf8).write(to: url)
+    }
+    let pool = ["vendor/", "!vendor/keep/", "*.pb.rs", "!build/", "tests/", "!src/b.pb.rs", "src/", "!dist/", "**"]
+    var state: UInt64 = 0x5EED
+    func next(_ bound: Int) -> Int {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return Int((state >> 33) % UInt64(bound))
+    }
+    for trial in 0..<120 {
+        let lines = (0..<next(5)).map { _ in pool[next(pool.count)] }
+        let rules = ProjectPathRules(lines: lines)
+        let walked = try ProjectTreeWalk.regularFiles(under: root, rules: rules)
+        let kept = Set(walked.files.map { ProjectTreeWalk.relativePath(of: $0, under: root) })
+        // Reference: a file survives when every ancestor directory and the
+        // file itself are included, judged one path at a time.
+        let expected = Set(paths.filter { path in
+            let components = path.split(separator: "/").map(String.init)
+            let ancestors = (1..<components.count).map { components.prefix($0).joined(separator: "/") }
+            return ancestors.allSatisfy { !rules.verdict(for: $0, isDirectory: true).isExcluded }
+                && !rules.verdict(for: path, isDirectory: false).isExcluded
+        })
+        #expect(kept == expected, "trial \(trial): \(lines)")
+    }
+}
+
 private final class GitFixture {
     let root: URL
 

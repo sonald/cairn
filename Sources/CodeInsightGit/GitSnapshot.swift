@@ -80,11 +80,16 @@ public protocol Snapshot: Sendable {
     func readBytes(path: String) throws -> [UInt8]
 
     var configurationPaths: [String] { get }
+    /// Paths the project's own exclusion rules removed: the topmost excluded
+    /// directory or file of each pruned branch, sorted. Built-in skips are
+    /// not listed.
+    var ruleExcludedPaths: [String] { get }
 }
 
 public extension Snapshot {
     var projectRootName: String { "." }
     var configurationPaths: [String] { [] }
+    var ruleExcludedPaths: [String] { [] }
 }
 
 public final class GitRepository {
@@ -149,6 +154,7 @@ public final class GitRepository {
 
 public final class CommitSnapshot: Snapshot, Sendable {
     private let files: [String: CapturedFile]
+    public let ruleExcludedPaths: [String]
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
@@ -158,8 +164,14 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let projectRootName: String
     public let configurationPaths: [String]
 
-    public init(repositoryURL: URL, revision: String = "HEAD") throws {
-        let loaded: ([String: CapturedFile], GitObjectFormat, GitOID) =
+    /// Built-in skipped directories never hide tracked files here; only the
+    /// user's rules do, and excluded blobs are never read.
+    public init(
+        repositoryURL: URL,
+        revision: String = "HEAD",
+        pathRules: ProjectPathRules = ProjectPathRules()
+    ) throws {
+        let loaded: ([String: CapturedFile], GitObjectFormat, GitOID, [String]) =
             try LibGit2Executor.sync {
                 let repository = try GitRepository(url: repositoryURL)
 
@@ -212,7 +224,12 @@ public final class CommitSnapshot: Snapshot, Sendable {
                 )
 
                 var captured: [String: CapturedFile] = [:]
+                var excluded: [String] = []
                 for entry in collector.entries {
+                    if pathRules.verdict(for: entry.path, isDirectory: false, appliesDefaults: false).isExcluded {
+                        excluded.append(entry.path)
+                        continue
+                    }
                     let bytes = if entry.fileMode == .gitlink {
                         Array(entry.oid.hex.utf8)
                     } else {
@@ -224,13 +241,14 @@ public final class CommitSnapshot: Snapshot, Sendable {
                         fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
                     )
                 }
-                return (captured, repository.objectFormat, oidString(commitID))
+                return (captured, repository.objectFormat, oidString(commitID), excluded.sorted())
             }
 
         snapshotID = SnapshotID(rawValue: UUID())
         objectFormat = loaded.1
         self.revision = revision
         commitOID = loaded.2
+        ruleExcludedPaths = loaded.3
         projectRootName = repositoryURL.standardizedFileURL.lastPathComponent
         let capturedFiles = loaded.0
         files = capturedFiles
@@ -267,13 +285,8 @@ public final class CommitSnapshot: Snapshot, Sendable {
 }
 
 public final class WorktreeSnapshot: Snapshot, Sendable {
-    // Keep synchronized with CodeInsightEngine.ProjectIndexer.skippedDirectories.
-    private static let skippedDirectories: Set<String> = [
-        ".git", "target", "node_modules", ".build", "venv", ".venv",
-        "__pycache__", "dist", "build",
-    ]
-
     private let files: [String: CapturedFile]
+    public let ruleExcludedPaths: [String]
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
@@ -291,7 +304,11 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         try self.init(repositoryURL: repositoryURL, languages: [language])
     }
 
-    public init(repositoryURL: URL, languages: [LanguageID]) throws {
+    public init(
+        repositoryURL: URL,
+        languages: [LanguageID],
+        pathRules: ProjectPathRules = ProjectPathRules()
+    ) throws {
         let selectedLanguages = try LanguageMode.normalize(languages: languages)
         let repositoryInfo: (URL, GitObjectFormat) = try LibGit2Executor.sync {
             let repository = try GitRepository(url: repositoryURL)
@@ -309,9 +326,12 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         let root = repositoryInfo.0
 
         var captured: [String: CapturedFile] = [:]
-        for file in try Self.regularFiles(under: root) {
+        var excluded: [String] = []
+        let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
+        excluded = walked.ruleExcluded
+        for file in walked.files {
             let bytes = [UInt8](try Data(contentsOf: file, options: .mappedIfSafe))
-            let relative = Self.relativePath(of: file, under: root)
+            let relative = ProjectTreeWalk.relativePath(of: file, under: root)
             captured[relative] = CapturedFile(
                 bytes: bytes,
                 contentID: ContentID.sha256(of: bytes),
@@ -323,6 +343,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         objectFormat = repositoryInfo.1
         projectRootName = root.lastPathComponent
         files = captured
+        ruleExcludedPaths = excluded
         configurationPaths = captured.keys.filter { entry in
             configurationLanguage(
                 for: URL(fileURLWithPath: entry).lastPathComponent
@@ -351,37 +372,55 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         return file.bytes
     }
 
-    private static func regularFiles(under root: URL) throws -> [URL] {
-        var result: [URL] = []
-        for url in try FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [
-                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ]
-        ) {
-            if url.lastPathComponent == ".DS_Store" { continue }
-            let values = try url.resourceValues(forKeys: [
-                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ])
-            if values.isDirectory == true {
-                guard values.isSymbolicLink != true,
-                      !skippedDirectories.contains(url.lastPathComponent)
-                else { continue }
-                result += try regularFiles(under: url)
-            } else if values.isSymbolicLink != true,
-                      values.isRegularFile == true,
-                      url.lastPathComponent != ".DS_Store"
-            {
-                result.append(url)
-            }
-        }
-        return result.sorted { $0.path < $1.path }
+}
+
+/// The one worktree walk shared by snapshot capture, directory indexing and
+/// the file tree: regular non-symlink files, pruned by `ProjectPathRules`.
+public enum ProjectTreeWalk {
+    public static func regularFiles(
+        under root: URL,
+        rules: ProjectPathRules
+    ) throws -> (files: [URL], ruleExcluded: [String]) {
+        var files: [URL] = []
+        var excluded: [String] = []
+        try walk(root, root: root, rules: rules, files: &files, excluded: &excluded)
+        return (files.sorted { $0.path < $1.path }, excluded.sorted())
     }
 
-    private static func relativePath(of file: URL, under root: URL) -> String {
+    public static func relativePath(of file: URL, under root: URL) -> String {
         file.standardizedFileURL.pathComponents
-            .dropFirst(root.pathComponents.count)
+            .dropFirst(root.standardizedFileURL.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private static func walk(
+        _ directory: URL,
+        root: URL,
+        rules: ProjectPathRules,
+        files: inout [URL],
+        excluded: inout [String]
+    ) throws {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
+        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys) {
+            if url.lastPathComponent == ".DS_Store" { continue }
+            let values = try url.resourceValues(forKeys: Set(keys))
+            guard values.isSymbolicLink != true else { continue }
+            let isDirectory = values.isDirectory == true
+            guard isDirectory || values.isRegularFile == true else { continue }
+            let relative = relativePath(of: url, under: root)
+            switch rules.verdict(for: relative, isDirectory: isDirectory) {
+            case .included:
+                if isDirectory {
+                    try walk(url, root: root, rules: rules, files: &files, excluded: &excluded)
+                } else {
+                    files.append(url)
+                }
+            case .excludedByRule:
+                excluded.append(relative)
+            case .skippedByDefault, .alwaysSkipped:
+                continue
+            }
+        }
     }
 }
 

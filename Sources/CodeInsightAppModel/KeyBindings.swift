@@ -140,6 +140,7 @@ extension CommandID {
     public static let fileCloseWindow = CommandID(rawValue: "file.closeWindow")
     public static let fileClearReadingSession = CommandID(rawValue: "file.clearReadingSession")
     public static let fileRefreshIndex = CommandID(rawValue: "file.refreshIndex")
+    public static let fileExclusionRules = CommandID(rawValue: "file.exclusionRules")
     public static let fileTrustRepository = CommandID(rawValue: "file.trustRepository")
 
     public static let editCut = CommandID(rawValue: "edit.cut")
@@ -296,6 +297,7 @@ public extension KeyBindingScheme {
             def(.fileClearReadingSession, .file, "app.menu.clear.reading.session", []),
             def(.fileRefreshIndex, .file, "app.menu.refresh.index",
                 [keyboard([.command], .character("r"))]),
+            def(.fileExclusionRules, .file, "app.menu.exclusion.rules", []),
             def(.fileTrustRepository, .file, "app.menu.trust.this.repository", []),
 
             def(.editCut, .edit, "app.menu.cut", [keyboard([.command], .character("x"))]),

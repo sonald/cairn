@@ -945,7 +945,7 @@ func fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() throws {
         atPath: root.appendingPathComponent("linked.md").path,
         withDestinationPath: "README.md"
     )
-    for skipped in ProjectIndexer.skippedDirectories {
+    for skipped in ProjectPathRules.alwaysSkippedDirectories + ProjectPathRules.defaultSkippedDirectories {
         try write("", to: root.appendingPathComponent(skipped).appendingPathComponent("skip.rs"))
     }
 

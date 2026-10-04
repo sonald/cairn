@@ -2348,3 +2348,49 @@ func historyReadFailureKeepsCursorVersionAndViewport(crossVersion: Bool) async t
     #expect(model.selectedByteOffset == 3)
     #expect(model.readingTrail.activeNodeID == active)
 }
+
+// MARK: - P5 project exclusion rules
+
+@MainActor
+@Test
+func exclusionRulesRefreshIndexKeepTabsAndPersistOutsideTheRepository() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let state = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightRules-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: state) }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    try snapshotWrite("pub fn kept() -> i32 { 1 }\n", to: main)
+    try snapshotWrite("pub fn vendored() -> i32 { 2 }\n", to: fixture.root.appendingPathComponent("vendor/dep.rs"))
+    try snapshotWrite("pub fn built() -> i32 { 3 }\n", to: fixture.root.appendingPathComponent("build/gen.rs"))
+    try fixture.git("add", "-A")
+    try fixture.commit("initial")
+    let sessionURL = state.appendingPathComponent("session.json")
+
+    let model = AppModel(sessionURL: sessionURL, indexService: ProjectIndexService())
+    model.openProject(root: fixture.root)
+    #expect(await testWaitUntil("ready") { model.snapshotPhase == .fullReady })
+    model.navigate(to: main)
+    let tabs = model.tabStrip.tabs.count
+    #expect(model.fileTree?.ruleExcludedPaths == [])
+
+    try model.updatePathRules(lines: ["vendor/", "!build/"], leaving: nil)
+    #expect(await testWaitUntil("refreshed") { model.snapshotPhase == .fullReady && !model.isRefreshingIndex })
+    #expect(model.fileTree?.ruleExcludedPaths == ["vendor"])
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected a ready session")
+        return
+    }
+    let indexed = Set(session.manifest.files.compactMap { session.paths.resolve($0.pathID) })
+    #expect(indexed.contains("main.rs") && indexed.contains("build/gen.rs"))
+    #expect(!indexed.contains("vendor/dep.rs"))
+    #expect(model.tabStrip.tabs.count == tabs, "a rules refresh keeps the reading session")
+
+    // The rules live in application data, keyed by project, never in the repository.
+    #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent(".cairnignore").path))
+    let reopened = AppModel(sessionURL: sessionURL, indexService: ProjectIndexService())
+    reopened.openProject(root: fixture.root)
+    #expect(reopened.pathRules.lines == ["vendor/", "!build/"])
+    #expect(await testWaitUntil("reopened ready") { reopened.snapshotPhase == .fullReady })
+    #expect(reopened.fileTree?.ruleExcludedPaths == ["vendor"])
+}

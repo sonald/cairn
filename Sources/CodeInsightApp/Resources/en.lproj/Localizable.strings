@@ -659,3 +659,15 @@
 "panel.search.scope" = "Searched %lld files";
 "panel.search.scope.excluded" = "Searched %1$lld files · %2$lld excluded by path";
 "main.match.word" = "Whole word";
+"app.menu.exclusion.rules" = "Project Exclusion Rules…";
+"main.rules.excluded" = "%lld paths excluded by project rules";
+"main.rules.more" = "…and %lld more";
+"main.rules.edit" = "Edit Exclusion Rules…";
+"rules.title" = "Project Exclusion Rules";
+"rules.explain" = "One path glob per line (*, **, ?, {a,b}; a trailing / means a directory). A line starting with ! includes what it matches; later lines win. A file inside an excluded directory cannot be included on its own. Excluded paths leave the file tree, the index and search. Rules are kept only in this Mac's application data, never in the repository. Saving refreshes the index; tabs, bookmarks and the reading trail stay.";
+"rules.defaults" = "Skipped by default (restore with ! rules, except .git): %@";
+"rules.save" = "Save and Refresh Index";
+"rules.cancel" = "Cancel";
+"rules.saveFailed" = "The rules could not be saved: %@";
+"main.rules.fileExcluded" = "Excluded · not indexed";
+"main.rules.fileExcluded.help" = "A project exclusion rule removes this file from the index and search; it stays readable here.";

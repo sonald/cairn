@@ -526,6 +526,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             navigate(to: file, byteOffset: offset, cause: .outline)
         }
         readerController.onOpenScope = sidebarController.onOpenOutline
+        sidebarController.onEditExclusionRules = { [weak self] in self?.showExclusionRules() }
         readerController.onRevealPath = { [weak self] url in
             guard let self else { return }
             sidebarItem.isCollapsed = false
@@ -3508,6 +3509,30 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         render()
     }
 
+    private var exclusionRulesSheet: ExclusionRulesSheet?
+
+    func showExclusionRules() {
+        guard canRefreshIndex, let window, exclusionRulesSheet == nil else { return }
+        let sheet = ExclusionRulesSheet(rules: model.pathRules) { [weak self] lines in
+            self?.applyExclusionRules(lines)
+        }
+        exclusionRulesSheet = sheet
+        guard let sheetWindow = sheet.window else { return }
+        window.beginSheet(sheetWindow) { [weak self] _ in
+            self?.exclusionRulesSheet = nil
+        }
+    }
+
+    private func applyExclusionRules(_ lines: [String]) {
+        captureActiveTabState()
+        do {
+            try model.updatePathRules(lines: lines, leaving: currentJumpRecord())
+        } catch {
+            showTransientStatus(localizedFormat("rules.saveFailed", error.localizedDescription))
+        }
+        render()
+    }
+
     private func renderTrail() {
         trailView.display(
             trail: model.readingTrail,
@@ -3575,6 +3600,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func renderCommitButton() {
         let theme = ReaderTheme(settings: currentReaderSettings)
         readerController.setHistoricalSnapshot(model.currentRevision != nil)
+        let excludedByRules = model.selectedFile.flatMap { projectPath(for: $0) }.map { path in
+            if case .excludedByRule = model.pathRules.verdict(
+                for: path, isDirectory: false, appliesDefaults: model.currentRevision == nil
+            ) { true } else { false }
+        } ?? false
+        readerController.setExcludedByRules(excludedByRules)
         guard let revision = model.currentRevision else {
             commitButton.title = switch model.commitPicker.currentBranchName {
             case "detached": localized("main.detached")
@@ -4802,8 +4833,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         text: localized("main.snapshot.readonly"),
         theme: readerTheme
     )
+    /// The open file is outside the index because of the project's own rules.
+    private lazy var exclusionBadge = CairnBadgeView(
+        style: .limited,
+        text: localized("main.rules.fileExcluded"),
+        theme: readerTheme
+    )
     private lazy var pathRow: NSStackView = {
-        let row = NSStackView(views: [pathControl, snapshotBadge])
+        let row = NSStackView(views: [pathControl, snapshotBadge, exclusionBadge])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
@@ -4814,6 +4851,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         snapshotBadge.isHidden = true
         snapshotBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
         snapshotBadge.setContentHuggingPriority(.required, for: .horizontal)
+        exclusionBadge.isHidden = true
+        exclusionBadge.toolTip = localized("main.rules.fileExcluded.help")
+        exclusionBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        exclusionBadge.setContentHuggingPriority(.required, for: .horizontal)
         return row
     }()
     private let scopeHeader = NSView()
@@ -5899,6 +5940,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         snapshotBadge.isHidden = !historical
     }
 
+    func setExcludedByRules(_ excluded: Bool) {
+        exclusionBadge.isHidden = !excluded
+    }
+
     var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {
         view.layoutSubtreeIfNeeded()
         return (
@@ -5920,6 +5965,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let previousTheme = readerTheme
         readerTheme = ReaderTheme(settings: settings)
         snapshotBadge.update(style: .commit, text: localized("main.snapshot.readonly"), theme: readerTheme)
+        exclusionBadge.update(style: .limited, text: localized("main.rules.fileExcluded"), theme: readerTheme)
         if showsCompareControls { renderFunctionSummary() }
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)

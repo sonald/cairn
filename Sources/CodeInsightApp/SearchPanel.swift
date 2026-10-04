@@ -629,7 +629,10 @@ final class SearchPanel: NSWindowController,
         } else {
             nil
         }
-        statusLabel.stringValue = [scope, summary].compactMap { $0 }.joined(separator: " · ")
+        let ruleExcluded = appModel.fileTree?.ruleExcludedPaths.count ?? 0
+        let rules: String? = ruleExcluded > 0
+            ? localizedFormat("main.rules.excluded", Int64(ruleExcluded)) : nil
+        statusLabel.stringValue = [scope, rules, summary].compactMap { $0 }.joined(separator: " · ")
         truncatedLabel.isHidden = !panelModel.isTruncated
         placeholderLabel.stringValue = panelModel.placeholder
         placeholderLabel.isHidden = panelModel.placeholder.isEmpty

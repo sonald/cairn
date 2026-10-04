@@ -66,9 +66,13 @@ public protocol IndexService: Sendable {
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession
     func flushPersistentIndexCache()
+    /// The project's exclusion rules for every later capture and index.
+    func setPathRules(_ rules: ProjectPathRules)
 }
 
 public extension IndexService {
+    func setPathRules(_ rules: ProjectPathRules) {}
+
     func index(root: URL) async throws -> EngineSession {
         try await index(root: root, language: .rust)
     }
@@ -145,6 +149,11 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     private var store = ProjectIndexStore()
     private let lock = NSLock()
     private var indexer = ProjectIndexer()
+    private var pathRules = ProjectPathRules()
+
+    public func setPathRules(_ rules: ProjectPathRules) {
+        lock.withLock { pathRules = rules }
+    }
 
     public init() {}
 
@@ -178,15 +187,17 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         let store = lock.withLock { self.store }
         let indexer = ProjectIndexer(persistingProjectAt: root)
         lock.withLock { self.indexer = indexer }
+        let rules = lock.withLock { pathRules }
         return try await detachedValue {
             let snapshot: WorktreeSnapshot
             do {
                 snapshot = try WorktreeSnapshot(
                     repositoryURL: root,
-                    language: language
+                    languages: [language],
+                    pathRules: rules
                 )
             } catch {
-                return try indexer.index(root: root, language: language)
+                return try indexer.index(root: root, language: language, pathRules: rules)
             }
             return try indexer.indexSnapshot(
                 snapshot,
@@ -203,12 +214,13 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     ) async throws -> any Snapshot {
         try validateProductSupport(language)
         beginSnapshotScope()
+        let rules = lock.withLock { pathRules }
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
-                try CommitSnapshot(repositoryURL: root, revision: revision)
+                try CommitSnapshot(repositoryURL: root, revision: revision, pathRules: rules)
             } else {
-                try WorktreeSnapshot(repositoryURL: root, language: language)
+                try WorktreeSnapshot(repositoryURL: root, languages: [language], pathRules: rules)
             }
             try Task.checkCancellation()
             return snapshot
@@ -237,12 +249,13 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     ) async throws -> any Snapshot {
         let normalized = try LanguageMode.normalize(languages: languages)
         beginSnapshotScope()
+        let rules = lock.withLock { pathRules }
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
-                try CommitSnapshot(repositoryURL: root, revision: revision)
+                try CommitSnapshot(repositoryURL: root, revision: revision, pathRules: rules)
             } else {
-                try WorktreeSnapshot(repositoryURL: root, languages: normalized)
+                try WorktreeSnapshot(repositoryURL: root, languages: normalized, pathRules: rules)
             }
             try Task.checkCancellation()
             return snapshot
@@ -361,19 +374,28 @@ public struct FileTreeModel: Sendable {
     public let root: URL
     public let children: [FileTreeNode]
     public let fileCount: Int
+    /// What the project's exclusion rules removed (topmost path of each branch).
+    public let ruleExcludedPaths: [String]
 
     /// The tree lists every file; languages only decide which files are indexed.
-    public init(root: URL) throws {
-        self.root = root.standardizedFileURL
-        children = try Self.children(in: self.root)
+    public init(root: URL, pathRules: ProjectPathRules = ProjectPathRules()) throws {
+        let root = root.standardizedFileURL
+        self.root = root
+        let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
+        let paths = walked.files.map {
+            ProjectTreeWalk.relativePath(of: $0, under: root).split(separator: "/").map(String.init)
+        }
+        children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
+        ruleExcludedPaths = walked.ruleExcluded
     }
 
-    public init(root: URL, snapshotPaths: [String]) {
+    public init(root: URL, snapshotPaths: [String], ruleExcludedPaths: [String] = []) {
         self.root = root.standardizedFileURL
         let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
+        self.ruleExcludedPaths = ruleExcludedPaths
     }
 
     public func selectionPath(for selectedFile: URL?) -> [FileTreeNode]? {
@@ -382,40 +404,6 @@ public struct FileTreeModel: Sendable {
             for: selectedFile.standardizedFileURL,
             in: children
         )
-    }
-
-    private static func children(in directory: URL) throws -> [FileTreeNode] {
-        let keys: Set<URLResourceKey> = [
-            .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-        ]
-        var nodes: [FileTreeNode] = []
-        for url in try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: Array(keys)
-        ) {
-            let values = try url.resourceValues(forKeys: keys)
-            if values.isDirectory == true {
-                guard values.isSymbolicLink != true,
-                      !ProjectIndexer.skippedDirectories.contains(url.lastPathComponent)
-                else { continue }
-                let children = try children(in: url)
-                if !children.isEmpty {
-                    nodes.append(FileTreeNode(
-                        url: url,
-                        isDirectory: true,
-                        children: children
-                    ))
-                }
-            } else if values.isRegularFile == true,
-                      url.lastPathComponent != ".DS_Store"
-            {
-                nodes.append(FileTreeNode(url: url, isDirectory: false))
-            }
-        }
-        return nodes.sorted {
-            if $0.isDirectory != $1.isDirectory { return $0.isDirectory }
-            return $0.name < $1.name
-        }
     }
 
     private static func children(
@@ -531,6 +519,9 @@ public final class AppModel {
     public let symbolHover = SymbolHoverModel()
     /// Names painted in fixed colors in every reader of this window.
     public var highlightedNames = HighlightedNames()
+    /// The open project's exclusion rules, from application data.
+    public private(set) var pathRules = ProjectPathRules()
+    @ObservationIgnored private var pathRulesStore: ProjectPathRulesStore?
     package var bookmarkModel = BookmarkModel()
 
     public var canTrustCurrentRepository: Bool {
@@ -712,6 +703,10 @@ public final class AppModel {
         self.sessionStore = SessionCheckpointStore(
             legacyURL: sessionURL.standardizedFileURL,
             maximumTabCount: tabStrip.maximumCount
+        )
+        self.pathRulesStore = ProjectPathRulesStore(
+            directory: sessionURL.standardizedFileURL.deletingLastPathComponent()
+                .appendingPathComponent("rules", isDirectory: true)
         )
         // One shared records authority per process when the application
         // provides it; otherwise this model owns a private one (tests,
@@ -1113,6 +1108,8 @@ public final class AppModel {
         exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
         projectLanguages = languages
+        pathRules = pathRulesStore?.load(forProject: root) ?? ProjectPathRules()
+        indexService.setPathRules(pathRules)
         workspaceSessions.removeAll(keepingCapacity: true)
         commitPicker.setCurrentRevision(nil)
         commitPicker.load(repositoryURL: root)
@@ -1561,11 +1558,12 @@ public final class AppModel {
         // propagate into .failed unchanged (never reclassified as "not a
         // Git repository").
         let openGeneration = beginWorkspaceOpen(root: root, languages: [language])
+        let rules = pathRules
 
         snapshotTask = Task { [weak self, indexService] in
             do {
                 let fileTree = try await detachedValue {
-                    try FileTreeModel(root: root)
+                    try FileTreeModel(root: root, pathRules: rules)
                 }
                 try Task.checkCancellation()
                 guard let self,
@@ -1734,6 +1732,17 @@ public final class AppModel {
     /// index instead of failing the workspace. Repeated triggers cancel the
     /// in-flight capture; this never routes through openProject, which would
     /// reset tabs and trail.
+    /// Saves the open project's rules and refreshes the index under them;
+    /// tabs, reading sets, bookmarks, the trail and layout stay.
+    public func updatePathRules(lines: [String], leaving current: JumpRecord?) throws {
+        guard let root = projectRoot else { return }
+        let rules = ProjectPathRules(lines: ProjectPathRulesStore.sanitized(lines))
+        try pathRulesStore?.save(rules, forProject: root)
+        pathRules = rules
+        indexService.setPathRules(rules)
+        refreshIndex(leaving: current)
+    }
+
     public func refreshIndex(leaving current: JumpRecord?) {
         guard let root = projectRoot,
               !projectLanguages.isEmpty,
@@ -1788,6 +1797,7 @@ public final class AppModel {
         let languages = projectLanguages
         if languages.count == 1 {
             let language = languages[0]
+            let rules = pathRules
             snapshotTask = Task { [weak self, indexService] in
                 do {
                     let session = try await indexService.index(
@@ -1796,7 +1806,7 @@ public final class AppModel {
                     )
                     try Task.checkCancellation()
                     let tree = try await detachedValue {
-                        try FileTreeModel(root: root)
+                        try FileTreeModel(root: root, pathRules: rules)
                     }
                     try Task.checkCancellation()
                     guard let self,
@@ -2568,7 +2578,8 @@ public final class AppModel {
             self.commitPicker.setCurrentRevision(revision)
             self.fileTree = FileTreeModel(
                 root: root,
-                snapshotPaths: files.map(\.path)
+                snapshotPaths: files.map(\.path),
+                ruleExcludedPaths: snapshot.ruleExcludedPaths
             )
             self.currentSnapshotID = snapshot.snapshotID
             self.snapshotDestinations[snapshot.snapshotID] = switch record.snapshot {
@@ -3310,7 +3321,8 @@ public final class AppModel {
         }
         fileTree = FileTreeModel(
             root: root,
-            snapshotPaths: paths
+            snapshotPaths: paths,
+            ruleExcludedPaths: snapshot.ruleExcludedPaths
         )
         if let selectedPath, paths.contains(selectedPath) {
             selectedFile = root.appendingPathComponent(selectedPath)

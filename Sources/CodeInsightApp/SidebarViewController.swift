@@ -12,6 +12,10 @@ final class SidebarViewController: NSViewController,
     var onOpenFileInSecondary: ((URL) -> Void)?
     var onOpenFileInNewTab: ((URL) -> Void)?
     var onOpenOutline: ((UInt32) -> Void)?
+    /// Opens the project's exclusion rules editor.
+    var onEditExclusionRules: (() -> Void)?
+    /// Files header: how many paths the project's rules removed.
+    private let exclusionButton = NSButton()
     var onChooseProject: (() -> Void)?
     private let fileOutlineView = NSOutlineView()
     private let symbolOutlineView = NSOutlineView()
@@ -379,6 +383,12 @@ final class SidebarViewController: NSViewController,
         isSynchronizingFileSelection = true
         defer { isSynchronizingFileSelection = false }
         self.tree = tree
+        let excluded = tree?.ruleExcludedPaths.count ?? 0
+        exclusionButton.isHidden = excluded == 0
+        exclusionButton.title = String(excluded)
+        let help = localizedFormat("main.rules.excluded", Int64(excluded))
+        exclusionButton.toolTip = help
+        exclusionButton.setAccessibilityLabel(help)
         fileOutlineView.reloadData()
         func restore(_ nodes: [FileTreeNode]) {
             for node in nodes where node.isDirectory {
@@ -391,6 +401,40 @@ final class SidebarViewController: NSViewController,
             let row = fileOutlineView.row(forItem: node)
             if row >= 0 { fileOutlineView.selectRowIndexes([row], byExtendingSelection: false) }
         }
+    }
+
+    /// Lists what the rules removed; editing happens in the rules sheet.
+    @objc private func showExcludedPaths(_ sender: NSButton) {
+        let paths = tree?.ruleExcludedPaths ?? []
+        let title = NSTextField(labelWithString: localizedFormat("main.rules.excluded", Int64(paths.count)))
+        title.font = .systemFont(ofSize: 12, weight: .semibold)
+        let list = NSTextField(wrappingLabelWithString: paths.prefix(50).joined(separator: "\n")
+            + (paths.count > 50 ? "\n" + localizedFormat("main.rules.more", Int64(paths.count - 50)) : ""))
+        list.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        list.textColor = theme.chromeSecondaryColor
+        list.isSelectable = true
+        let edit = NSButton(title: localized("main.rules.edit"), target: self, action: #selector(editRulesFromPopover(_:)))
+        edit.bezelStyle = .rounded
+        let stack = NSStackView(views: [title, list, edit])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        let controller = NSViewController()
+        controller.view = stack
+        stack.widthAnchor.constraint(lessThanOrEqualToConstant: 420).isActive = true
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = controller
+        exclusionPopover = popover
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    private var exclusionPopover: NSPopover?
+
+    @objc private func editRulesFromPopover(_ sender: Any?) {
+        exclusionPopover?.close()
+        onEditExclusionRules?()
     }
 
     func setProjectState(_ state: ProjectState) {
@@ -785,6 +829,24 @@ final class SidebarViewController: NSViewController,
         collapse.setAccessibilityLabel(localizedFormat("main.collapse.all", title.lowercased()))
         collapse.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(collapse)
+        if outlineView === fileOutlineView {
+            exclusionButton.isBordered = false
+            exclusionButton.controlSize = .small
+            exclusionButton.font = .systemFont(ofSize: 10.5)
+            exclusionButton.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
+            exclusionButton.imagePosition = .imageLeading
+            exclusionButton.contentTintColor = theme.chromeSecondaryColor
+            exclusionButton.target = self
+            exclusionButton.action = #selector(showExcludedPaths(_:))
+            exclusionButton.isHidden = true
+            exclusionButton.translatesAutoresizingMaskIntoConstraints = false
+            header.addSubview(exclusionButton)
+            NSLayoutConstraint.activate([
+                exclusionButton.trailingAnchor.constraint(equalTo: collapse.leadingAnchor, constant: -4),
+                exclusionButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                exclusionButton.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 6),
+            ])
+        }
         pane.addSubview(divider)
         let body = NSView()
         body.translatesAutoresizingMaskIntoConstraints = false

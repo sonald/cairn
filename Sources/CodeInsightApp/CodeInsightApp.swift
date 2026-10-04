@@ -11387,6 +11387,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.jumpToTypeDefinitionAtCaret()
     }
 
+    @objc private func showExclusionRules(_ sender: Any?) {
+        projectCommandTarget()?.showExclusionRules()
+    }
+
     @objc private func toggleHighlight(_ sender: Any?) {
         projectCommandTarget()?.toggleHighlightAtCaret()
     }
@@ -11610,7 +11614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let target = projectCommandTarget()
         let model = target?.model
         switch menuItem.action {
-        case #selector(refreshProjectIndex(_:)):
+        case #selector(refreshProjectIndex(_:)), #selector(showExclusionRules(_:)):
             return target?.canRefreshIndex == true
         case #selector(findInFile(_:)), #selector(findNext(_:)),
             #selector(findPrevious(_:)):
@@ -11802,6 +11806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .goPreviousDiffHunk: CommandAction(#selector(AppDelegate.previousDiffHunk(_:))),
         .goNextDiffHunk: CommandAction(#selector(AppDelegate.nextDiffHunk(_:))),
         .navigateTypeDefinition: CommandAction(#selector(AppDelegate.jumpToTypeDefinition(_:))),
+        .fileExclusionRules: CommandAction(#selector(AppDelegate.showExclusionRules(_:))),
         .findToggleHighlight: CommandAction(#selector(AppDelegate.toggleHighlight(_:))),
         .findClearHighlights: CommandAction(#selector(AppDelegate.clearHighlights(_:))),
         .goMatchingBracket: CommandAction(#selector(AppDelegate.jumpToMatchingBracket(_:))),
@@ -12002,6 +12007,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .fileClearReadingSession, to: fileMenu)
         fileMenu.addItem(.separator())
         appendMenuItem(for: .fileRefreshIndex, to: fileMenu)
+        appendMenuItem(for: .fileExclusionRules, to: fileMenu)
         fileMenu.addItem(.separator())
         appendMenuItem(for: .fileTrustRepository, to: fileMenu)
         fileItem.submenu = fileMenu
