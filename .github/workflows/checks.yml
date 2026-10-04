@@ -22,6 +22,7 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+      RUSTUP_TOOLCHAIN: 1.97.1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,7 +73,11 @@ jobs:
           print('Selected:', selected)
           PY
       - name: Install build tools
-        run: brew install libgit2 ripgrep
+        run: |
+          brew install libgit2 ripgrep
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" \
+            --profile minimal --component rust-analyzer
+          rust-analyzer --version
       - name: Run selected checks
         run: |
           set -o pipefail

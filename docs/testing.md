@@ -54,6 +54,8 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 
 日常 GitHub CI 根据改动路径选择域；文档不会触发 Swift 全套。产品语料质量和性能工作流改为手动触发，避免每个 PR 下载完整语料、安装全部语言工具链并重复运行性能测试。手动门禁用于明确的跨域验收或发布决策。
 
+日常 CI 与产品门禁均安装 Rust 1.97.1 的 `rust-analyzer` 组件并选择该工具链。镜像中存在 `rust-analyzer` 的 rustup 代理不代表组件可运行；日常 CI 安装后先执行 `rust-analyzer --version`，避免等到 LSP 集成测试才发现环境缺失。
+
 ## 本次清理的取舍
 
 删除以断言实现细节为主的用例：
