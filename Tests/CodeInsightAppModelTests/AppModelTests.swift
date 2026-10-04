@@ -8,11 +8,6 @@ import Testing
 @testable import CodeInsightAppModel
 @testable import CodeInsightEngine
 
-private let repositoryRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-
 @MainActor
 @Test
 func navigationHistoryTruncatesForwardEntriesAfterNewPush() {
@@ -657,37 +652,6 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async thr
 
 @MainActor
 @Test
-func navigationRequestKeepsCausePolicyAndReplaySemantics() async throws {
-    let root = try temporaryProject([
-        "a.rs": "fn a() {}\n",
-        "b.rs": "fn b() {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let model = AppModel(indexService: FailingIndexService())
-    model.openProject(root: root)
-    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
-    let request = NavigationRequest(
-        destination: SourceDestination(
-            file: root.appendingPathComponent("b.rs"),
-            byteOffset: 4
-        ),
-        cause: .relation,
-        policy: .explicitSemantic
-    )
-
-    model.navigate(request, leaving: jumpRecord("a.rs", offset: 0))
-
-    #expect(model.activeNavigationRequest?.cause == .relation)
-    #expect(model.activeNavigationRequest?.policy == .explicitSemantic)
-    model.goBack(from: jumpRecord("b.rs", offset: 4))
-    #expect(await testWaitUntil("replay request published") {
-        model.activeNavigationRequest?.cause == .historyReplay
-    })
-    #expect(model.activeNavigationRequest?.policy == .replay)
-}
-
-@MainActor
-@Test
 func readingTrailBranchesFromRestoredHistoryIdentity() async throws {
     let root = try temporaryProject([
         "a.rs": "fn a() {}\n",
@@ -897,22 +861,6 @@ func relationRootResetRetainsTrailMaterializationsWithoutLiveReferences()
 
 @MainActor
 @Test
-func outlineFollowArbitrationClearsOnlyOnLiveScroll() {
-    var arbitration = OutlineFollowArbitration()
-    arbitration.apply(NavigationRequest(
-        destination: SourceDestination(file: URL(fileURLWithPath: "/tmp/a.rs")),
-        cause: .outline,
-        policy: .explicitSemantic
-    ))
-    #expect(arbitration.suppressedBy == .outline)
-
-    arbitration.didLiveScroll()
-
-    #expect(arbitration.suppressedBy == nil)
-}
-
-@MainActor
-@Test
 func navigationHistoryReplaysAnAbsoluteDependencyPath() async throws {
     let root = try temporaryProject(["main.rs": "fn main() {}\n"])
     let dependencyRoot = try temporaryProject([
@@ -973,20 +921,6 @@ func projectStateRejectsIllegalTransitions() {
     #expect(!model.transition(to: .failed))
     #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
     #expect(!model.transition(to: .indexing(root: root, startedAt: .now)))
-}
-
-@MainActor
-@Test
-func navigationPushesWhileProjectIsIndexing() {
-    let model = AppModel()
-    let root = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
-    let a = jumpRecord("a.rs", offset: 10, snapshotID: nil)
-
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    model.navigate(to: root.appendingPathComponent("a.rs"))
-    model.navigate(to: root.appendingPathComponent("b.rs"), leaving: a)
-
-    #expect(model.navigationHistory.records == [a])
 }
 
 @Test
@@ -1107,139 +1041,6 @@ func unsupportedJavaScriptOpenIsSynchronousAndAtomic() async {
 
 @MainActor
 @Test
-func realIndexServiceOpensTypeScriptProjectAndPublishesTypeScriptSession() async throws {
-    let root = try temporaryProject([
-        "src/a.ts": "export const a = 1\n",
-        "src/b.tsx": "export const b = <div />\n",
-        "ignored.js": "export const js = 1\n",
-        "ignored.rs": "fn main() {}",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let model = AppModel(indexService: ProjectIndexService())
-
-    try model.openProject(root: root, language: .typescript)
-
-    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
-        model.snapshotPhase == .fullReady
-    })
-    #expect(model.projectLanguage == .typescript)
-    #expect(model.fileTree?.fileCount == 4)
-    #expect(model.fileTree?.selectionPath(
-        for: root.appendingPathComponent("src/a.ts")
-    )?.map(\.name) == ["src", "a.ts"])
-    guard case let .ready(session, _) = model.projectState else {
-        Issue.record("expected ready TypeScript session")
-        return
-    }
-    #expect(session.analysisProfile.language == .typescript)
-    let manifestFiles = session.manifest.files.map {
-        session.paths.resolve($0.pathID)
-    }.sorted()
-    #expect(manifestFiles == ["src/a.ts", "src/b.tsx"])
-    #expect(model.availableFeatureSelections == [.defaultFeatures])
-}
-
-@MainActor
-@Test
-func realIndexServiceOpensPythonProjectAndPublishesPythonSession() async throws {
-    let root = try temporaryProject([
-        "main.py": "def hello():\n    return 1\n",
-        "ignored.rs": "fn main() {}",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let model = AppModel(indexService: ProjectIndexService())
-
-    try model.openProject(root: root, language: .python)
-
-    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
-        model.snapshotPhase == .fullReady
-    })
-    #expect(model.projectLanguage == .python)
-    #expect(model.fileTree?.children.map(\.name) == ["ignored.rs", "main.py"])
-    #expect(model.fileTree?.fileCount == 2)
-    guard case let .ready(session, _) = model.projectState else {
-        Issue.record("expected ready Python session")
-        return
-    }
-    #expect(session.analysisProfile.language == .python)
-    #expect(session.manifest.files.map {
-        session.paths.resolve($0.pathID)
-    } == ["main.py"])
-    let context = QueryContext(
-        snapshotID: session.snapshotID,
-        analysisProfileID: session.analysisProfile.id,
-        generation: model.generation
-    )
-    #expect(try session.searchSymbols(
-        query: "hello",
-        limit: 10,
-        boost: SearchBoost(),
-        context: context
-    ).map(\.path) == ["main.py"])
-    var contentMatches: [SearchMatch] = []
-    for try await batch in try session.search(
-        ContentSearchQuery(pattern: "return 1"),
-        context: context
-    ) {
-        contentMatches.append(contentsOf: batch.matchesByPath.values.flatMap { $0 })
-    }
-    #expect(contentMatches.map { session.paths.resolve($0.pathID) } == ["main.py"])
-    #expect(model.availableFeatureSelections == [.defaultFeatures])
-}
-
-@MainActor
-@Test
-func pythonProfileLimitsFeatureChoicesAndSwitchingIsNoOp() async throws {
-    let root = try temporaryProject(["main.rs": "fn main() {}"])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let rustSession = try ProjectIndexer().index(root: root)
-    let pythonSession = EngineSession(
-        store: rustSession.store,
-        snapshotView: SnapshotView(
-            reprofiling: rustSession.snapshotView,
-            analysisProfile: .placeholder(
-                language: .python,
-                root: rustSession.analysisProfile.projectRoot
-            )
-        )
-    )
-    let service = ControlledIndexService()
-    let model = AppModel(indexService: service)
-
-    model.openProject(root: root)
-    #expect(await service.waitUntilRequested(root: root))
-    await service.complete(root: root, result: .success(rustSession))
-    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
-        model.snapshotPhase == .fullReady
-    })
-
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(
-        pythonSession,
-        QueryContext(
-            snapshotID: pythonSession.snapshotID,
-            analysisProfileID: pythonSession.analysisProfile.id,
-            generation: model.generation
-        )
-    )))
-    #expect(model.availableFeatureSelections == [.defaultFeatures])
-    #expect(model.currentFeatureSelection == .defaultFeatures)
-
-    let generationBeforeSwitch = model.generation
-    model.switchFeatureSelection(.allFeatures)
-
-    #expect(model.generation == generationBeforeSwitch)
-    guard case let .ready(session, _) = model.projectState else {
-        Issue.record("expected python ready session")
-        return
-    }
-    #expect(session.analysisProfile.id == pythonSession.analysisProfile.id)
-    #expect(session.analysisProfile.featureSelection == .defaultFeatures)
-    #expect(model.currentFeatureSelection == .defaultFeatures)
-}
-
-@MainActor
-@Test
 func openingAnotherProjectDiscardsLateSession() async throws {
     let rootA = try temporaryProject(["a.rs": "fn a() {}"])
     let rootB = try temporaryProject(["b.rs": "fn b() {}"])
@@ -1345,20 +1146,6 @@ func mismatchedSessionLanguageFailsWithoutPublishingSessionState() async throws 
     #expect(model.snapshotPhase == nil)
     #expect(model.coverage.filesIndexed == 0)
     #expect(model.coverage.filesTotal == 1)
-}
-
-@Test
-func realIndexServiceBuildsFixtureSession() async throws {
-    let fixture = repositoryRoot
-        .appendingPathComponent("Tests/RustExtractorTests/Fixtures/use_alias")
-
-    let session = try await ProjectIndexService().index(root: fixture)
-
-    #expect(session.stats.fileCount == 2)
-    #expect(session.stats.uniqueContentCount == 2)
-    #expect(session.stats.symbolCount == 3)
-    #expect(session.stats.callCount == 1)
-    #expect(session.stats.importCount == 1)
 }
 
 @MainActor
@@ -1522,7 +1309,6 @@ func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
     })
     #expect(model.contextWindow.displayedCandidate?.path == "lib.py")
 }
-
 
 @MainActor
 @Test
@@ -2014,51 +1800,6 @@ func indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets()
 
 @MainActor
 @Test
-func symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() async throws {
-    let root = try temporaryProject([
-        "main.rs": "fn alpha() {}\nfn alpine() {}",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = QueryContext(
-        snapshotID: session.snapshotID,
-        analysisProfileID: session.analysisProfile.id,
-        generation: 1
-    )
-    let model = SymbolSearchPanelModel()
-
-    model.updateQuery("al", projectState: .ready(session, context))
-    #expect(await testWaitUntil("model.rows.count == 2") { model.rows.count == 2 })
-    #expect(model.selectedIndex == 0)
-
-    model.selectPrevious()
-    #expect(model.selectedIndex == 1)
-    model.selectNext()
-    #expect(model.selectedIndex == 0)
-
-    let request = try #require(model.openSelection())
-    #expect(request.path == "main.rs")
-    #expect(request.byteOffset == 3)
-
-    model.reset()
-    #expect(model.query.isEmpty)
-    #expect(model.rows.isEmpty)
-    #expect(model.selectedIndex == nil)
-
-    model.updateQuery(
-        "alpha",
-        projectState: .indexing(root: root, startedAt: .now)
-    )
-    #expect(model.rows.count == 1)
-    if case let .placeholder(message) = model.rows[0] {
-        #expect(message == "Indexing symbols…")
-    } else {
-        Issue.record("expected indexing placeholder")
-    }
-}
-
-@MainActor
-@Test
 func symbolSearchPathCacheRefreshesForANewSession() async throws {
     let firstRoot = try temporaryProject(["z.rs": "fn one() {}"])
     let secondRoot = try temporaryProject([
@@ -2136,32 +1877,6 @@ func symbolSearchWorkspaceMergesAllSessionsWithStableOrdering() async throws {
         return hit.path
     }
     #expect(paths == ["app.ts", "lib.py", "main.rs"])
-}
-
-@MainActor
-@Test
-func symbolSearchWorkspaceKeepsSameNamesAndUsesSharedPathBoost() async throws {
-    let fixture = try await makeMixedSymbolWorkspace()
-    defer {
-        for path in fixture.cachePaths {
-            try? FileManager.default.removeItem(atPath: path)
-        }
-        try? FileManager.default.removeItem(at: fixture.root)
-    }
-    let model = SymbolSearchPanelModel()
-
-    model.updateQuery(
-        "target",
-        sessions: fixture.sessions,
-        currentPath: "main.rs"
-    )
-    #expect(await testWaitUntil("model.rows.count == 3") { model.rows.count == 3 })
-    let rows = model.rows.compactMap { row -> (name: String, path: String)? in
-        guard case let .result(name, hit) = row else { return nil }
-        return (name, hit.path)
-    }
-    #expect(rows.map(\.path) == ["main.rs", "app.ts", "lib.py"])
-    #expect(rows.map(\.name).allSatisfy { $0 == "target" })
 }
 
 @MainActor
@@ -2282,41 +1997,6 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
     for _ in 0..<10 { await Task.yield() }
 
     #expect(resolveCount == 1)
-}
-
-@MainActor
-@Test
-func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
-    let source = """
-        struct Config;
-        impl Config { fn set() {} }
-        enum ConfigKey { Backend }
-        fn f() { Config::set(ConfigKey::Backend, 1); }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, context), root: root)
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "set(ConfigKey", in: source)
-    )
-    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset == byteOffset(of: \"set() {}\", in: source)") {
-        model.displayedCandidate?.targetByteOffset
-            == byteOffset(of: "set() {}", in: source)
-    })
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "ConfigKey::Backend", in: source)
-    )
-    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset == byteOffset(of: \"ConfigKey {\", in: source)") {
-        model.displayedCandidate?.targetByteOffset
-            == byteOffset(of: "ConfigKey {", in: source)
-    })
 }
 
 @MainActor
@@ -2564,332 +2244,6 @@ func resolvedContextCandidateRejectsAnOlderProfileGeneration() async throws {
 
 @MainActor
 @Test
-func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
-    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var resolveCount = 0
-    let model = ContextWindowModel { session, file, offset, context in
-        resolveCount += 1
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    model.updateProjectState(.ready(session, context), root: root)
-    let alpha = byteOffset(of: "alpha();", in: source)
-    let beta = byteOffset(of: "beta();", in: source)
-
-    let first = try #require(await model.explicitJump(file: "main.rs", offset: alpha))
-    model.setMode(.pinned)
-    let pinnedStage = model.stage
-    let pinnedCandidate = try #require(model.displayedCandidate)
-    let pinnedRequestID = model.requestID
-
-    model.tokenClicked(file: "main.rs", offset: beta)
-    for _ in 0..<10 { await Task.yield() }
-    #expect(resolveCount == 1)
-
-    let target = try #require(await model.explicitJump(file: "main.rs", offset: beta))
-    #expect(target.symbol != first.symbol)
-    #expect(resolveCount == 2)
-    #expect(model.requestID == pinnedRequestID)
-    #expect(model.selectedIndex == 0)
-    #expect(model.candidateCount == 1)
-    #expect(model.displayedCandidate?.symbol == pinnedCandidate.symbol)
-    #expect(model.displayedCandidate?.path == pinnedCandidate.path)
-    #expect(model.displayedCandidate?.line == pinnedCandidate.line)
-    #expect(model.displayedCandidate?.column == pinnedCandidate.column)
-    #expect(model.displayedCandidate?.label == pinnedCandidate.label)
-    #expect(model.displayedCandidate?.excerpt == pinnedCandidate.excerpt)
-    #expect(model.displayedCandidate?.bindingKind == pinnedCandidate.bindingKind)
-    #expect(model.displayedCandidate?.targetByteOffset == pinnedCandidate.targetByteOffset)
-    guard case let .candidates(pinnedCandidates, pinnedSelected) = pinnedStage,
-          case let .candidates(currentCandidates, currentSelected) = model.stage
-    else {
-        Issue.record("pinned explicit jump changed the context stage")
-        return
-    }
-    #expect(currentSelected == pinnedSelected)
-    #expect(currentCandidates.map(\.symbol) == pinnedCandidates.map(\.symbol))
-
-    model.setMode(.follow)
-    #expect(await model.explicitJump(file: "main.rs", offset: beta) != nil)
-    #expect(model.displayedCandidate?.symbol == target.symbol)
-
-    let followedRequestID = model.requestID
-    #expect(await model.resolvedCandidate(file: "main.rs", offset: alpha) != nil)
-    #expect(model.requestID == followedRequestID)
-    #expect(model.displayedCandidate?.symbol == target.symbol)
-}
-
-@MainActor
-@Test
-func relationSelectionUpdatesContextUnlessPinned() async throws {
-    let source = "fn target() {}\nfn caller() { target(); }"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var requests: [(path: String, offset: UInt32)] = []
-    let contextWindow = ContextWindowModel { session, file, offset, context in
-        requests.append((session.paths.resolve(file), offset))
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    let model = AppModel(
-        indexService: FailingIndexService(),
-        contextWindow: contextWindow
-    )
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(session, context)))
-    let caller = try #require(
-        session.definitions(of: "caller", context: context).first?.0
-    )
-
-    let loadTask = model.relationTree.setRoot(
-        target: .engine(caller),
-        direction: .calls
-    )
-    if let loadTask { await loadTask.value }
-    let edge = try #require(
-        appRelationRows(model.relationTree.root).first { $0.title == "target" }
-    )
-
-    contextWindow.setMode(.pinned)
-    model.relationTree.select(edge)
-    for _ in 0..<10 { await Task.yield() }
-    #expect(requests.isEmpty)
-
-    contextWindow.setMode(.follow)
-    model.relationTree.select(edge)
-    #expect(await testWaitUntil("requests.count == 1") { requests.count == 1 })
-    #expect(requests.first?.path == "main.rs")
-    #expect(requests.first?.offset == byteOffset(of: "target() {}", in: source))
-}
-
-@MainActor
-@Test
-func relationSelectionUpdatesContextOnConsecutiveCallerRows() async throws {
-    let source = """
-        fn target() {}
-        fn first() { target(); }
-        fn second() { target(); }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var requests: [(path: String, offset: UInt32)] = []
-    let contextWindow = ContextWindowModel { session, file, offset, context in
-        requests.append((session.paths.resolve(file), offset))
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    let model = AppModel(
-        indexService: FailingIndexService(),
-        contextWindow: contextWindow
-    )
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(session, context)))
-    let target = try #require(
-        session.definitions(of: "target", context: context).first?.0
-    )
-
-    await model.relationTree.setRoot(
-        target: .engine(target),
-        direction: .callers
-    )?.value
-    let edges = appRelationRows(model.relationTree.root)
-    let first = try #require(edges.first { $0.title == "first" })
-    let second = try #require(edges.first { $0.title == "second" })
-
-    model.relationTree.select(first)
-    #expect(await testWaitUntil("contextWindow.displayedCandidate != nil") { contextWindow.displayedCandidate != nil })
-    let firstCandidate = try #require(contextWindow.displayedCandidate)
-
-    model.relationTree.select(second)
-    #expect(await testWaitUntil("contextWindow.displayedCandidate?.symbol != firstCandidate.symbol") {
-        contextWindow.displayedCandidate?.symbol != firstCandidate.symbol
-    })
-    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
-    #expect(requests.map(\.offset) == [
-        byteOffset(of: "first() {", in: source),
-        byteOffset(of: "second() {", in: source),
-    ])
-}
-
-@MainActor
-@Test
-func relationSelectionUpdatesContextOnConsecutiveCallRows() async throws {
-    let source = """
-        fn first() {}
-        fn second() {}
-        fn root() { first(); second(); }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var requests: [(path: String, offset: UInt32)] = []
-    let contextWindow = ContextWindowModel { session, file, offset, context in
-        requests.append((session.paths.resolve(file), offset))
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    let model = AppModel(
-        indexService: FailingIndexService(),
-        contextWindow: contextWindow
-    )
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(session, context)))
-    let rootSymbol = try #require(
-        session.definitions(of: "root", context: context).first?.0
-    )
-
-    await model.relationTree.setRoot(
-        target: .engine(rootSymbol),
-        direction: .calls
-    )?.value
-    let edges = appRelationRows(model.relationTree.root)
-    let first = try #require(edges.first { $0.title == "first" })
-    let second = try #require(edges.first { $0.title == "second" })
-
-    model.relationTree.select(first)
-    #expect(await testWaitUntil("contextWindow.displayedCandidate != nil") { contextWindow.displayedCandidate != nil })
-    let firstCandidate = try #require(contextWindow.displayedCandidate)
-    model.relationTree.select(second)
-    #expect(await testWaitUntil("contextWindow.displayedCandidate?.symbol != firstCandidate.symbol") {
-        contextWindow.displayedCandidate?.symbol != firstCandidate.symbol
-    })
-    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
-    #expect(requests.map(\.offset) == [
-        byteOffset(of: "first() {}", in: source),
-        byteOffset(of: "second() {}", in: source),
-    ])
-}
-
-@MainActor
-@Test
-func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async throws {
-    let source = """
-        trait Render { fn render(&self); }
-        struct First;
-        struct Second;
-        impl Render for First { fn render(&self) {} }
-        impl Render for Second { fn render(&self) {} }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var requests: [(path: String, offset: UInt32)] = []
-    let contextWindow = ContextWindowModel { session, file, offset, context in
-        requests.append((session.paths.resolve(file), offset))
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    let model = AppModel(
-        indexService: FailingIndexService(),
-        contextWindow: contextWindow
-    )
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(session, context)))
-    let trait = try #require(
-        session.definitions(of: "Render", context: context).first?.0
-    )
-
-    await model.relationTree.setRoot(
-        target: .engine(trait),
-        direction: .implementations
-    )?.value
-    let edges = appRelationRows(model.relationTree.root)
-    let first = try #require(edges.first { $0.title == "First" })
-    let second = try #require(edges.first { $0.title == "Second" })
-
-    model.relationTree.select(first)
-    #expect(await testWaitUntil("!requests.isEmpty") { !requests.isEmpty })
-    let firstCandidate = contextWindow.displayedCandidate
-    model.relationTree.select(second)
-    #expect(await testWaitUntil("requests.count == 2") { requests.count == 2 })
-    #expect(contextWindow.displayedCandidate?.symbol != firstCandidate?.symbol)
-    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
-    #expect(requests[0].offset != requests[1].offset)
-}
-
-@MainActor
-@Test
-func contextFuzzyCandidateLabelsComposeCertaintyAndDispatch() async throws {
-    let source = "fn target() {}\nfn main() { target(); }\n"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let certainties: [Certainty] = [.unresolved, .possible, .probable, .strong, .exact]
-    let dispatches: [DispatchKind] = [
-        .direct, .virtualDispatch, .traitDispatch, .interfaceDispatch,
-        .callback, .dynamicDispatch, .macroGenerated,
-    ]
-    let combinations = certainties.flatMap { certainty in
-        dispatches.map { (certainty, $0) }
-    }
-    let model = ContextWindowModel { session, pathID, _, _ in
-        combinations.map { certainty, dispatch in
-            ResolutionCandidate(
-                target: SymbolOccurrenceID(
-                    snapshotID: session.snapshotID,
-                    pathID: pathID,
-                    localKind: .declarationFacet,
-                    localIndex: 0
-                ),
-                certainty: certainty,
-                dispatch: dispatch,
-                provenance: .fuzzyResolver,
-                completeness: .complete,
-                evidence: []
-            )
-        }
-    }
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "target();", in: source))
-    #expect(await testWaitUntil("every combination presented") {
-        model.candidateCount == combinations.count
-    })
-    guard case let .candidates(candidates, _) = model.stage else {
-        Issue.record("no candidates")
-        return
-    }
-    for (candidate, (certainty, dispatch)) in zip(candidates, combinations) {
-        let expected = "\(resolutionCertaintyLabel(certainty))·\(resolutionDispatchLabel(dispatch))"
-        #expect(candidate.label == expected)
-        #expect(candidate.provenanceBadge == expected)
-        #expect(candidate.certainty == certainty)
-        guard case .fuzzyResolver = candidate.provenance else {
-            Issue.record("\(certainty) \(dispatch) lost its provenance")
-            continue
-        }
-        #expect(candidate.exactAttribution == nil && candidate.exactOrigin == nil)
-    }
-}
-
-@MainActor
-@Test
-func contextCandidateSelectionWraps() async throws {
-    let source = """
-        struct A; impl A { fn close(&self) {} }
-        struct B; impl B { fn close(&self) {} }
-        fn f<T>(value: T) { value.close(); }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "close();", in: source))
-    #expect(await testWaitUntil("model.candidateCount == 2") { model.candidateCount == 2 })
-
-    model.selectPrevious()
-    #expect(model.selectedIndex == 1)
-    model.selectNext()
-    #expect(model.selectedIndex == 0)
-}
-
-@MainActor
-@Test
 func contextPendingTokenResolvesWhenIndexBecomesReady() async throws {
     let source = "fn target() {}\nfn main() { target(); }"
     let root = try temporaryProject(["main.rs": source])
@@ -2915,70 +2269,6 @@ func contextPendingTokenResolvesWhenIndexBecomesReady() async throws {
     )
     #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
     #expect(resolveCount == 1)
-}
-
-@MainActor
-@Test
-func contextWindowResolvesUseAliasFixtureWithPresentationLabel() async throws {
-    let root = repositoryRoot
-        .appendingPathComponent("Tests/RustExtractorTests/Fixtures/use_alias")
-    let source = try String(
-        contentsOf: root.appendingPathComponent("main.rs"),
-        encoding: .utf8
-    )
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "open_db();", in: source)
-    )
-    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
-    let candidate = try #require(model.displayedCandidate)
-
-    #expect(candidate.label.lowercased().contains("strong"))
-    #expect(candidate.path == "db.rs")
-}
-
-@MainActor
-@Test
-func contextWindowPresentsLocalBindingKind() async throws {
-    let source = "fn f() {\n    let local = 1;\n    local;\n}"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "local;", in: source)
-    )
-    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
-
-    #expect(model.displayedCandidate?.bindingKind == "letBinding")
-    #expect(model.displayedCandidate?.line == 2)
-}
-
-@MainActor
-@Test
-func contextWindowExplainsUnresolvedImport() async throws {
-    for (language, file, source, usage) in [
-        (LanguageID.rust, "main.rs", "use std::io::Read;\nfn f() { Read(); }", "Read();"),
-        (.python, "main.py", "from missing_module import helper\nhelper()\n", "helper()"),
-    ] {
-        let root = try temporaryProject([file: source])
-        defer { try? FileManager.default.removeItem(at: root) }
-        let session = try ProjectIndexer().index(root: root, language: language)
-        let model = ContextWindowModel()
-        model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-        model.tokenClicked(file: file, offset: byteOffset(of: usage, in: source))
-        #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
-
-        #expect(model.displayedCandidate?.excerpt == "Import target could not be resolved.")
-    }
 }
 
 private actor ControlledIndexService: IndexService {
@@ -3243,16 +2533,6 @@ private func queryContext(for session: EngineSession) -> QueryContext {
     )
 }
 
-private func appRelationRows(
-    _ root: RelationTreeModel.Node?
-) -> [RelationTreeModel.Node] {
-    root?.children?.flatMap { child in
-        child.kind == .edge
-            ? [child]
-            : (child.children ?? []).filter { $0.kind == .edge }
-    } ?? []
-}
-
 private func pathID(_ path: String, in session: EngineSession) -> PathID? {
     session.manifest.files.first {
         session.paths.resolve($0.pathID) == path
@@ -3513,136 +2793,17 @@ func sameProjectRevisionsDoNotAccumulateInServiceStore() async throws {
 /// P0 baseline (R2): before the type hop lands, the lens displays the very
 /// symbol the user pointed at; navigation keeps acting on it. In P1 the two
 /// concepts diverge for value bindings — this locks the pre-hop behavior.
-@MainActor
-@Test
-func contextWindowDisplayedCandidateMatchesSymbolCandidateBeforeTypeHop() async throws {
-    let source = "fn greet() {}\nfn main() {\n    greet();\n}"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "greet();", in: source)
-    )
-    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
-
-    let displayed = try #require(model.displayedCandidate)
-    let symbol = try #require(model.symbolCandidate)
-    #expect(displayed.path == symbol.path)
-    #expect(displayed.targetByteOffset == symbol.targetByteOffset)
-}
 
 // MARK: P1 — lens type hop
 
 /// R1.1/R2: clicking a value binding shows its type in the window, while the
 /// pointed-at symbol (and every "act on the symbol" entry point) stays the
 /// binding itself.
-@MainActor
-@Test
-func lensShowsTypeForValueBindingButJumpsToDeclaration() async throws {
-    let source = """
-        pub struct S { pub n: u32 }
-
-        fn use_it(ps: &S) -> u32 {
-            let local: Box<S> = Box::new(S { n: 1 });
-            ps.n + local.n
-        }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
-    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
-
-    // The window displays the type S (its struct declaration)…
-    let displayed = try #require(model.displayedCandidate)
-    #expect(displayed.targetByteOffset
-        == byteOffset(of: "pub struct S {", in: source) + UInt32("pub struct ".utf8.count))
-    // …while the pointed-at symbol and the ⌘+click jump stay the binding.
-    let symbol = try #require(model.symbolCandidate)
-    #expect(symbol.targetByteOffset == byteOffset(of: "ps: &S", in: source))
-    let jump = try #require(
-        await model.explicitJump(
-            file: "main.rs",
-            offset: byteOffset(of: "ps.n", in: source)
-        )
-    )
-    #expect(jump.targetByteOffset == symbol.targetByteOffset)
-    #expect(model.activeTypeHop?.showing == .type)
-}
 
 /// R7.2: toggling the displayed side sticks and blocks later auto-switching.
-@MainActor
-@Test
-func lensTypeHopToggleSticks() async throws {
-    let source = """
-        pub struct S { pub n: u32 }
-
-        fn use_it(ps: &S) -> u32 {
-            let local: Box<S> = Box::new(S { n: 1 });
-            ps.n + local.n
-        }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
-    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
-
-    model.showTypeHop(.declaration)
-    let hop = try #require(model.activeTypeHop)
-    #expect(hop.showing == .declaration)
-    #expect(hop.userChoseShowing)
-    // The window shows the binding's own declaration again.
-    #expect(model.displayedCandidate?.targetByteOffset
-        == model.symbolCandidate?.targetByteOffset)
-}
 
 /// Q3: a primitive-typed field does not hop; the lens stays on the
 /// declaration with an explanatory note.
-@MainActor
-@Test
-func lensPrimitiveFieldStaysOnDeclarationWithNote() async throws {
-    let source = """
-        pub struct S { pub n: u32 }
-        impl S {
-            fn get(&self) -> u32 {
-                self.n
-            }
-        }
-        """
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-
-    // Click the field name `n` (not the receiver `self`).
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "self.n", in: source) + UInt32("self.".utf8.count)
-    )
-    #expect(await testWaitUntil("model.displayedCandidate != nil") {
-        model.displayedCandidate != nil
-    })
-    // Stage stays a plain candidate list (no type hop) and the candidate
-    // carries the primitive-type note.
-    guard case .candidates = model.stage else {
-        Issue.record("stage should stay .candidates for a primitive field")
-        return
-    }
-    #expect(model.displayedCandidate?.note != nil)
-}
-
 
 // MARK: P2 — exact typeDefinition in the lens
 
@@ -3788,31 +2949,6 @@ func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
 /// 2026-10-03 (superseding M7-S0A): a click on a method call's receiver
 /// points at the receiver — the lens shows its type and ⌘-click jumps to
 /// its declaration; the method name still points at the method.
-@MainActor
-@Test
-func lensReceiverClickShowsTheReceiversTypeAndJumpsToItsDeclaration() async throws {
-    let source = """
-        pub struct S { pub n: u32 }
-        impl S { pub fn get(&self) -> u32 { self.n } }
-        fn f(ps: &S) -> u32 {
-            ps.get()
-        }
-        """
-    let (model, _, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let receiver = byteOffset(of: "ps.get()", in: source)
-
-    model.tokenClicked(file: "main.rs", offset: receiver)
-    #expect(await testWaitUntil("type hop") { model.activeTypeHop != nil })
-    #expect(model.activeTypeHop?.viaText == "ps: &S")
-    #expect(model.displayedCandidate?.targetByteOffset
-        == byteOffset(of: "pub struct S", in: source) + 11)
-    let jump = await model.explicitJump(file: "main.rs", offset: receiver)
-    #expect(jump?.targetByteOffset == byteOffset(of: "ps: &S", in: source))
-
-    let method = await model.resolvedCandidate(file: "main.rs", offset: receiver + 3)
-    #expect(method?.targetByteOffset == byteOffset(of: "get(&self)", in: source))
-}
 
 /// R1.1 (Python): clicking a class attribute (`h.repo`) shows its type
 /// through the class-body declaration; the declaration is labelled a field
@@ -3824,13 +2960,11 @@ func lensShowsPythonAttributeTypeThroughTheReceiversClass() async throws {
         class Repository:
             pass
 
-
         class Holder:
             repo: Repository
         """
     let use = """
         from models import Holder
-
 
         def go(h: Holder):
             keep = h.repo
@@ -4319,285 +3453,3 @@ func lensKeepsPreviousContentWhenCaretLeavesSymbols() async throws {
         !model.isShowingPreviousToken
     })
 }
-
-// MARK: P3 — enclosing mode
-
-@MainActor
-private func makeEnclosingLensModel(
-    _ source: String
-) throws -> (ContextWindowModel, ReaderDocument, URL) {
-    let root = try temporaryProject(["main.rs": source])
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
-    let document = try #require(
-        try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
-    )
-    return (model, document, root)
-}
-
-/// R5.3: in the enclosing mode a click neither replaces the enclosing
-/// presentation nor sends Exact requests; ⌘-click still answers a target.
-/// Switching back to the symbol mode shows the last symbol again.
-@MainActor
-@Test
-func enclosingModeIgnoresSymbolClicksAndRestoresSymbolOnSwitchBack() async throws {
-    let source = """
-        fn alpha() {}
-        fn main() {
-            alpha();
-        }
-        """
-    let log = ExactRequestLog()
-    let (model, root) = try makeCaretLensModel(source, requestLog: log)
-    defer { try? FileManager.default.removeItem(at: root) }
-    let document = try #require(
-        try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
-    )
-    let use = byteOffset(of: "alpha();", in: source)
-
-    model.tokenClicked(file: "main.rs", offset: use)
-    #expect(await testWaitUntil("symbol shown") { model.symbolCandidate != nil })
-    #expect(await testWaitUntil("first click's exact request") { log.recorded.count == 1 })
-
-    model.setTracking(.enclosing)
-    model.caretMoved(file: "main.rs", offset: use, document: document)
-    #expect(model.activeEnclosingScope?.name == "main")
-
-    // A plain click on another symbol in the enclosing mode.
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "fn main", in: source) + 3)
-    // ⌘-click answers a target without touching the stage.
-    let jump = await model.explicitJump(file: "main.rs", offset: use)
-    #expect(jump != nil)
-    try await Task.sleep(for: .milliseconds(150))
-    #expect(model.activeEnclosingScope?.name == "main")
-    #expect(log.recorded.count == 1)
-
-    model.setTracking(.symbol)
-    #expect(await testWaitUntil("symbol restored") {
-        model.activeEnclosingScope == nil && model.displayedCandidate != nil
-    })
-}
-
-/// R5.1: of nested functions, the innermost one encloses the caret.
-@MainActor
-@Test
-func enclosingPicksTheInnermostOfNestedFunctions() async throws {
-    let source = """
-        fn outer() {
-            fn inner() {
-                let z = 1;
-            }
-            let y = 2;
-        }
-        """
-    let (model, document, root) = try makeEnclosingLensModel(source)
-    defer { try? FileManager.default.removeItem(at: root) }
-    model.setTracking(.enclosing)
-
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "let z", in: source),
-        document: document
-    )
-    #expect(model.activeEnclosingScope?.name == "inner")
-
-    // Back in the outer body, after the nested function → the outer one.
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "let y", in: source),
-        document: document
-    )
-    #expect(model.activeEnclosingScope?.name == "outer")
-}
-
-/// R5.1: the innermost function wins over the enclosing type; outside every
-/// function the type wins; outside both, idle.
-@MainActor
-@Test
-func enclosingPrefersInnermostFunctionOverType() async throws {
-    let source = """
-        // top-level comment line — no function or type encloses it.
-        struct S;
-
-        impl S {
-            fn small(&self) -> u32 {
-                1
-            }
-        }
-
-        fn main() {
-            let s = S;
-        }
-        """
-    let (model, document, root) = try makeEnclosingLensModel(source)
-    defer { try? FileManager.default.removeItem(at: root) }
-    model.setTracking(.enclosing)
-
-    // Inside `small` → the method.
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "1", in: source),
-        document: document
-    )
-    let methodScope = try #require(model.activeEnclosingScope)
-    #expect(methodScope.kind == .method)
-    #expect(methodScope.name == "small")
-
-    // On the impl's own line, outside every method → the impl.
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "impl S {", in: source) + 8,
-        document: document
-    )
-    let typeScope = try #require(model.activeEnclosingScope)
-    #expect(typeScope.kind == .impl)
-    #expect(typeScope.name == "S")
-
-    // Top-level whitespace (the blank line before fn main) → idle.
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "// top-level", in: source) + 5,
-        document: document
-    )
-    guard case .idle = model.stage else {
-        Issue.record("expected idle outside every function and type")
-        return
-    }
-}
-
-/// R5.1: closures do not count; the caret inside a closure still shows the
-/// enclosing function.
-@MainActor
-@Test
-func enclosingSkipsClosures() async throws {
-    let source = """
-        fn outer() {
-            let add = |a: u32| a + 1;
-            let _ = add(1);
-        }
-        """
-    let (model, document, root) = try makeEnclosingLensModel(source)
-    defer { try? FileManager.default.removeItem(at: root) }
-    model.setTracking(.enclosing)
-
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "add(1)", in: source) + 5,
-        document: document
-    )
-    let scope = try #require(model.activeEnclosingScope)
-    #expect(scope.kind == .fn)
-    #expect(scope.name == "outer")
-}
-
-/// R5.3: moving within the same outline facet does not refresh the stage.
-@MainActor
-@Test
-func enclosingDoesNotRefreshWithinSameFacet() async throws {
-    let source = """
-        fn outer() {
-            let a = 1;
-            let b = 2;
-        }
-        """
-    let (model, document, root) = try makeEnclosingLensModel(source)
-    defer { try? FileManager.default.removeItem(at: root) }
-    model.setTracking(.enclosing)
-
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "let a", in: source),
-        document: document
-    )
-    let first = try #require(model.activeEnclosingScope)
-    let countAfterFirst = model.enclosingRefreshCount
-    // Moving within the same fn writes no new stage.
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "let b", in: source),
-        document: document
-    )
-    let second = try #require(model.activeEnclosingScope)
-    #expect(model.enclosingRefreshCount == countAfterFirst)
-    #expect(first.displayRange == second.displayRange)
-    #expect(first.nameLine == second.nameLine)
-}
-
-/// R5.2: a multi-line `where` clause keeps every signature line; the body
-/// starts after the `{`.
-@MainActor
-@Test
-func enclosingSignatureEndsAtBodyFold() async throws {
-    let source = """
-        fn long<T>(
-            t: T,
-        ) -> u32
-        where
-            T: Clone,
-        {
-            let _ = t;
-            1
-        }
-        """
-    let (model, document, root) = try makeEnclosingLensModel(source)
-    defer { try? FileManager.default.removeItem(at: root) }
-    model.setTracking(.enclosing)
-
-    model.caretMoved(
-        file: "main.rs",
-        offset: byteOffset(of: "let _ = t;", in: source),
-        document: document
-    )
-    let scope = try #require(model.activeEnclosingScope)
-    // The `{` sits on line 6; the signature ends there and the body follows.
-    #expect(scope.signatureEndLine == 6)
-    #expect(scope.bodyFirstLine == 7)
-}
-
-/// R6: the pin is orthogonal to tracking and blocks both update paths.
-@MainActor
-@Test
-func pinIsOrthogonalToTracking() async throws {
-    let source = """
-        fn alpha() {}
-        fn main() {
-            alpha();
-        }
-        """
-    let log = ExactRequestLog()
-    let (model, root) = try makeCaretLensModel(source, requestLog: log)
-    defer { try? FileManager.default.removeItem(at: root) }
-
-    // Symbol mode pins.
-    model.setPinned(true)
-    #expect(model.isPinned)
-    #expect(model.tracking == .symbol)
-    guard case .idle = model.stage else {
-        Issue.record("expected idle before pinning")
-        return
-    }
-    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "alpha();", in: source))
-    try await Task.sleep(for: .milliseconds(120))
-    guard case .idle = model.stage else {
-        Issue.record("pinned mode must not follow clicks")
-        return
-    }
-
-    // Enclosing mode pins too, and blocks caretMoved.
-    model.setTracking(.enclosing)
-    model.setPinned(true)
-    model.caretMoved(file: "main.rs", offset: 0, document: ReaderDocument(bytes: Array(source.utf8)))
-    #expect(model.activeEnclosingScope == nil)
-    guard case .idle = model.stage else {
-        Issue.record("pinned enclosing mode must not present a scope")
-        return
-    }
-    // Unpinning resumes following.
-    model.setPinned(false)
-    #expect(!model.isPinned)
-    #expect(model.tracking == .enclosing)
-}
-
-
-

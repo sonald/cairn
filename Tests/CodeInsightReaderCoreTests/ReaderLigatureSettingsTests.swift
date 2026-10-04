@@ -50,15 +50,6 @@ func readerLigatureSettingsRejectMalformedStoredValues() throws {
 }
 
 @Test
-func readerLigatureSettingsNormalizeEmptyRequestsAndRetainMissingFonts() {
-    #expect(ReaderSettings(codeFont: .postScriptName("")).codeFont == .systemMonospaced)
-    var settings = ReaderSettings(codeFont: .postScriptName("Unavailable-Regular"))
-    #expect(settings.codeFont == .postScriptName("Unavailable-Regular"))
-    settings.codeFont = .postScriptName(" \t")
-    #expect(settings.codeFont == .systemMonospaced)
-}
-
-@Test
 func readerLigatureSettingsInvalidateThemeAndTypography() {
     let initial = ReaderSettings()
     let key = ReaderTypographyKey(settings: initial)

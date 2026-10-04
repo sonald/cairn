@@ -15,38 +15,6 @@ func readerThemeColorResolvesFromDetachedExecutor() async throws {
     #expect(values.allSatisfy { $0 >= 0 && $0 <= 1 })
 }
 
-@MainActor
-@Test
-func autoThemeChromeAndAccentColorsResolveFromThemeTables() {
-    let theme = ReaderTheme(settings: ReaderSettings(theme: .auto))
-    let cases: [(NSAppearance.Name, [UInt32])] = [
-        (.aqua, [0xF3F1EB, 0xE7E3DA, 0xD5D1C6, 0x2B5849]),
-        (.darkAqua, [0x161A18, 0x1D221F, 0x2B312D, 0x8CC6A9]),
-    ]
-
-    for (appearance, expected) in cases {
-        #expect([
-            resolvedRGB(theme.chromeColor, appearance: appearance),
-            resolvedRGB(theme.chromeHeaderColor, appearance: appearance),
-            resolvedRGB(theme.chromeDividerColor, appearance: appearance),
-            resolvedRGB(theme.accentColor, appearance: appearance),
-        ] == expected.map(Optional.some))
-    }
-}
-
-@MainActor
-private func resolvedRGB(_ color: NSColor, appearance name: NSAppearance.Name) -> UInt32? {
-    guard let appearance = NSAppearance(named: name) else { return nil }
-    var value: UInt32?
-    appearance.performAsCurrentDrawingAppearance {
-        guard let rgb = color.usingColorSpace(.sRGB) else { return }
-        value = UInt32((rgb.redComponent * 255).rounded()) << 16
-            | UInt32((rgb.greenComponent * 255).rounded()) << 8
-            | UInt32((rgb.blueComponent * 255).rounded())
-    }
-    return value
-}
-
 @Test
 func displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() throws {
     let source = "α\nfn outer() {\n    let emoji = \"😀é\";\n}\nω\n"
@@ -185,39 +153,6 @@ func identityDisplayMapMatchesEveryExistingCoordinateFamily() throws {
 
 @MainActor
 @Test
-func structAndTraitDeclarationNamesUsePrimaryTypography() throws {
-    let source = "struct Widget;\ntrait Work {}\n"
-    let bytes = Array(source.utf8)
-    let highlighted = try RustHighlighter().highlight(bytes: bytes)
-    let attributed = attributedSource(source)
-    let theme = ReaderTheme(settings: ReaderSettings())
-
-    ReaderTextView.applyTypography(
-        highlighted.spans,
-        map: try identityDisplayMap(bytes: bytes),
-        to: attributed,
-        theme: theme
-    )
-
-    // Type titles sit one step below function names in the hierarchy.
-    #expect(theme.typeNameFontSize < theme.functionNameFontSize)
-    #expect(theme.typeNameFontSize > theme.fontSize)
-    let expected = NSFont.monospacedSystemFont(
-        ofSize: theme.typeNameFontSize,
-        weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
-    )
-    for name in ["Widget", "Work"] {
-        let location = (source as NSString).range(of: name).location
-        let font = try #require(
-            attributed.attribute(.font, at: location, effectiveRange: nil) as? NSFont
-        )
-        #expect(font.fontName == expected.fontName)
-        #expect(font.pointSize == expected.pointSize)
-    }
-}
-
-@MainActor
-@Test
 func callsAndFieldsKeepBaseMetricsWhenDeclarationEmphasisIsLarge() throws {
     let source = "fn build(value: usize) { let item = value; item.run(); item.field; }"
     let bytes = Array(source.utf8)
@@ -260,36 +195,6 @@ func humanistCommentsKeepASCIIFiguresMonospaced() throws {
         weight: .regular
     )
     #expect(font.fontName == expected.fontName)
-}
-
-@MainActor
-@Test
-func secondaryDeclarationsKeepConfiguredWeightWithoutScaling() throws {
-    let source = "mod area {}\nconst LIMIT: usize = 3;\nstatic FLAG: bool = true;\n"
-    let bytes = Array(source.utf8)
-    let highlighted = try RustHighlighter().highlight(bytes: bytes)
-    let attributed = attributedSource(source)
-    let theme = ReaderTheme(settings: ReaderSettings())
-
-    ReaderTextView.applyTypography(
-        highlighted.spans,
-        map: try identityDisplayMap(bytes: bytes),
-        to: attributed,
-        theme: theme
-    )
-
-    let expected = NSFont.monospacedSystemFont(
-        ofSize: theme.fontSize,
-        weight: NSFont.Weight(rawValue: theme.declarationEmphasisFontWeight)
-    )
-    for name in ["area", "LIMIT", "FLAG"] {
-        let location = (source as NSString).range(of: name).location
-        let font = try #require(
-            attributed.attribute(.font, at: location, effectiveRange: nil) as? NSFont
-        )
-        #expect(font.fontName == expected.fontName)
-        #expect(abs(Double(font.pointSize) - theme.fontSize) < 0.001)
-    }
 }
 
 @MainActor

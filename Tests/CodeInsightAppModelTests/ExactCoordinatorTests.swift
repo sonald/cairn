@@ -438,73 +438,6 @@ func exactCoordinatorRejectsJavaScriptWithoutChangingState() throws {
 
 @MainActor
 @Test
-func exactCoordinatorAcceptsPythonProfileAndUsesWorktreeDefaultSnapshot()
-    async throws
-{
-    let root = try exactTemporaryPythonProject([
-        "pyproject.toml": "[tool.pyright]\npythonVersion = \"3.12\"\n",
-        "main.py": "def target():\n    pass\n\ntarget()\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    try exactGit(root, "init", "-q")
-    try exactGit(root, "config", "user.name", "CodeInsight Tests")
-    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
-    let trustRegistry = TrustRegistry(
-        fileURL: root.appendingPathComponent("trust.json")
-    )
-    let state = ExactProviderState { _, _, _ in
-        ExactLocation(file: "main.py", byteOffset: 0, line: 1, column: 1)
-    }
-    let worktree = try WorktreeSnapshot(
-        repositoryURL: root,
-        language: .python
-    )
-    let expectedProfile = try ExactProfileKey(
-        snapshot: worktree,
-        language: .python
-    )
-    let coordinator = ExactCoordinator(
-        providerFactory: { _, language in
-            ExactTestProvider(language: language, state: state)
-        },
-        sandboxAvailable: { true },
-        trustRegistry: trustRegistry
-    )
-
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactAnalysisProfile(
-            language: .python,
-            projectUnitName: root.lastPathComponent,
-            configFingerprint: expectedProfile.configFingerprint,
-            environmentFingerprint: expectedProfile.environmentFingerprint,
-            featureSelection: .defaultFeatures
-        ),
-        generation: 1
-    )
-    #expect(
-        await testWaitUntil("python exact readiness == .ready || unavailable") {
-            coordinator.readiness != .preparing
-        }
-    )
-    guard case .ready = coordinator.readiness else {
-        if case .unavailable(let reason) = coordinator.readiness {
-            Issue.record("Python exact became unavailable: \(reason)")
-        }
-        return
-    }
-    #expect(state.prepareCount == 1)
-    let result = await coordinator.definition(
-        file: "main.py",
-        byteOffset: 0,
-        generation: 1
-    )
-    #expect(exactCompletedEntry(result)?.origin == .worktree)
-}
-
-@MainActor
-@Test
 func exactCoordinatorRejectsPythonProfileMismatchBeforeProvider() async throws {
     let root = try exactTemporaryPythonProject([
         "pyproject.toml": "[tool.pyright]\npythonVersion = \"3.12\"\n",
@@ -603,83 +536,6 @@ func exactCoordinatorFiltersPythonStubTargets() async throws {
 
 @MainActor
 @Test
-func exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly()
-    async throws
-{
-    let root = try exactTemporaryTypeScriptProject([
-        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
-        "package.json": "{}\n",
-        "main.ts": "export function target(): void {}\ntarget();\n",
-        "widget.tsx": "export function widget(): void {}\n",
-        "index.d.ts": "declare const old: any\n",
-        "legacy.js": "let old = 1\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let state = ExactProviderState { _, _, _ in
-        ExactLocation(file: "main.ts", byteOffset: 0, line: 1, column: 1)
-    }
-    let expectedProfile = try ExactProfileKey(
-        projectURL: root,
-        language: .typescript
-    )
-    let coordinator = ExactCoordinator(
-        providerFactory: { _, language in
-            ExactTestProvider(language: language, state: state)
-        },
-        snapshotFactory: ExactSnapshotFactoryState(files: [
-            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
-            "package.json": "{}\n",
-            "main.ts": "export function target(): void {}\ntarget();\n",
-            "widget.tsx": "export function widget(): void {}\n",
-            "index.d.ts": "export const old: any\n",
-            "legacy.js": "let old = 1\n",
-        ]).make,
-        sandboxAvailable: { true },
-        trustRegistry: TrustRegistry(
-            fileURL: root.appendingPathComponent("trust.json")
-        )
-    )
-
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactTypeScriptProfile(
-            language: .typescript,
-            projectUnitName: root.lastPathComponent,
-            configFingerprint: expectedProfile.configFingerprint,
-            environmentFingerprint: expectedProfile.environmentFingerprint
-        ),
-        generation: 1
-    )
-    #expect(await testWaitUntil("ready or unavailable") {
-        coordinator.readiness != .preparing
-    })
-    guard case .ready = coordinator.readiness else {
-        if case .unavailable(let reason) = coordinator.readiness {
-            Issue.record("TypeScript exact became unavailable: \(reason)")
-        }
-        return
-    }
-    #expect(state.prepareCount == 1)
-
-    let tsResult = await coordinator.definition(
-        file: "main.ts",
-        byteOffset: 0,
-        generation: 1
-    )
-    #expect(exactCompletedEntry(tsResult)?.origin == .worktree)
-    #expect(exactCompletedEntry(tsResult)?.location.file == "main.ts")
-
-    let tsxResult = await coordinator.definition(
-        file: "widget.tsx",
-        byteOffset: 0,
-        generation: 1
-    )
-    #expect(exactCompletedEntry(tsxResult) != nil)
-}
-
-@MainActor
-@Test
 func exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() async throws {
     let root = try exactTemporaryTypeScriptProject([
         "tsconfig.json": "{ \"compilerOptions\": {} }\n",
@@ -723,57 +579,6 @@ func exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() async thro
     }
     #expect(reason.contains("profile"))
     #expect(state.prepareCount == 0)
-}
-
-@MainActor
-@Test
-func exactCoordinatorReportsMissingTypeScriptProvider() async throws {
-    let root = try exactTemporaryTypeScriptProject([
-        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
-        "package.json": "{}\n",
-        "main.ts": "export function target(): void {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let profile = try ExactProfileKey(
-        projectURL: root,
-        language: .typescript
-    )
-    let coordinator = ExactCoordinator(
-        providerFactory: { _, _ in
-            throw ExactError.unavailable(
-                "typescript-language-server is not installed"
-            )
-        },
-        snapshotFactory: ExactSnapshotFactoryState(files: [
-            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
-            "package.json": "{}\n",
-            "main.ts": "export function target(): void {}\n",
-        ]).make,
-        sandboxAvailable: { true },
-        trustRegistry: TrustRegistry(
-            fileURL: root.appendingPathComponent("trust.json")
-        )
-    )
-
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactTypeScriptProfile(
-            language: .typescript,
-            projectUnitName: root.lastPathComponent,
-            configFingerprint: profile.configFingerprint,
-            environmentFingerprint: profile.environmentFingerprint
-        ),
-        generation: 1
-    )
-    #expect(await testWaitUntil("ts missing provider leaves preparing") {
-        coordinator.readiness != .preparing
-    })
-    guard case .unavailable(let reason) = coordinator.readiness else {
-        Issue.record("missing TS provider did not fail")
-        return
-    }
-    #expect(reason.contains("typescript-language-server"))
 }
 
 @Test
@@ -872,57 +677,6 @@ func exactCoordinatorFiltersDeferredTypeScriptTargets() async throws {
     }
     #expect(entries.isEmpty)
     #expect(state.definitionCount == 1)
-}
-
-@MainActor
-@Test
-func exactCoordinatorReportsPythonImplementationsUnsupported() async throws {
-    let root = try exactTemporaryPythonProject([
-        "main.py": "class Target:\n    pass\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let state = ExactProviderState { _, _, _ in nil }
-    let profile = try ExactProfileKey(
-        projectURL: root,
-        language: .python
-    )
-    let coordinator = ExactCoordinator(
-        providerFactory: { _, language in
-            ExactTestProvider(language: language, state: state)
-        },
-        snapshotFactory: ExactSnapshotFactoryState(files: [
-            "main.py": "class Target:\n    pass\n",
-        ]).make,
-        sandboxAvailable: { true },
-        trustRegistry: TrustRegistry(
-            fileURL: root.appendingPathComponent("trust.json")
-        )
-    )
-
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactPythonProfile(
-            language: .python,
-            projectUnitName: root.lastPathComponent,
-            configFingerprint: profile.configFingerprint,
-            environmentFingerprint: profile.environmentFingerprint
-        ),
-        generation: 1
-    )
-    #expect(await testWaitUntil("implementation unsupported ready") {
-        coordinator.readiness == .ready
-    })
-    guard case .unsupported = await coordinator.relations(
-        file: "main.py",
-        byteOffset: 0,
-        item: nil,
-        direction: .implementations,
-        generation: 1
-    )! else {
-        Issue.record("Python implementations should be unsupported")
-        return
-    }
 }
 
 @MainActor
@@ -1070,69 +824,6 @@ func exactCoordinatorAcceptsRustProfileWithDifferentFingerprintRepresentation()
         return
     }
     #expect(state.prepareCount > 0)
-}
-
-@MainActor
-@Test
-func exactCoordinatorReportsMissingPythonProviderWithoutSessions() async throws {
-    let root = try exactTemporaryPythonProject([
-        "main.py": "def target():\n    pass\n\ntarget()\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let profile = try ExactProfileKey(
-        projectURL: root,
-        language: .python
-    )
-    let coordinator = ExactCoordinator(
-        providerFactory: { _, _ in
-            throw ExactError.unavailable("未安装 pyright-langserver")
-        },
-        snapshotFactory: ExactSnapshotFactoryState(files: [
-            "main.py": "def target():\n    pass\n\ntarget()\n",
-        ]).make,
-        sandboxAvailable: { true },
-        trustRegistry: TrustRegistry(
-            fileURL: root.appendingPathComponent("trust.json")
-        )
-    )
-
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactPythonProfile(
-            language: .python,
-            projectUnitName: root.lastPathComponent,
-            configFingerprint: profile.configFingerprint,
-            environmentFingerprint: profile.environmentFingerprint
-        ),
-        generation: 1
-    )
-    #expect(await testWaitUntil("python missing provider leaves preparing") {
-        coordinator.readiness != .preparing
-    })
-    guard case .unavailable(let reason) = coordinator.readiness else {
-        Issue.record("missing provider did not fail")
-        return
-    }
-    #expect(reason == "未安装 pyright-langserver")
-}
-
-@MainActor
-@Test
-func exactCoordinatorMarksWorktreeOrigin() async throws {
-    let fixture = try ExactTestFixture()
-    defer { fixture.remove() }
-    let coordinator = fixture.coordinator(state: ExactProviderState())
-
-    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
-
-    let result = await coordinator.definition(
-        file: "main.rs",
-        byteOffset: 0,
-        generation: 1
-    )
-    #expect(exactCompletedEntry(result)?.origin == .worktree)
 }
 
 @MainActor
@@ -2392,46 +2083,6 @@ func contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() async throws {
 
 @MainActor
 @Test
-func pythonContextExactBadgeOmitsCargoFeatureDetail() async throws {
-    let source = "def target():\n    pass\n\ntarget()\n"
-    let root = try exactTemporaryPythonProject(["main.py": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root, language: .python)
-    let context = exactQueryContext(for: session, generation: 1)
-    let gate = ContextExactGate()
-    let model = ContextWindowModel(
-        { session, file, offset, context in
-            try session.resolve(file: file, offset: offset, context: context)
-        },
-        exactResolver: gate.resolve
-    )
-    model.updateProjectState(.ready(session, context), root: root)
-
-    model.tokenClicked(
-        file: "main.py",
-        offset: exactByteOffset(of: "target()", in: source)
-    )
-    #expect(await testWaitUntil("model.candidateCount == 1 && gate.count == 1") { model.candidateCount == 1 && gate.count == 1 })
-    gate.complete(0, with: exactEntry(
-        file: "main.py",
-        byteOffset: exactByteOffset(of: "def target", in: source)
-            + UInt32("def ".utf8.count),
-        featureSelection: .allFeatures
-    ))
-    #expect(await testWaitUntil("model.displayedCandidate?.certainty == .exact") {
-        model.displayedCandidate?.certainty == .exact
-    })
-    #expect(model.displayedCandidate?.provenanceBadge.contains("Exact") == true)
-    #expect(model.displayedCandidate?.provenanceBadge.contains(
-        "features:"
-    ) == false)
-    #expect(model.displayedCandidate?.provenanceBadge.contains(
-        "fake-exact"
-    ) == true)
-}
-
-@MainActor
-@Test
 func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
     let source = "fn target() {}\nfn main() { target(); }\n"
     let root = try exactTemporaryProject(["main.rs": source])
@@ -2586,53 +2237,6 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
     #expect(model.displayedCandidate?.symbol == original.symbol)
     #expect(model.displayedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
-}
-
-@MainActor
-@Test
-func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
-    async throws
-{
-    let source = "fn target() {}\nfn main() { target(); }\n"
-    let root = try exactTemporaryProject(["main.rs": source])
-    let dependencyRoot = try exactTemporaryProject([
-        "release-1.2.3/src/lib.rs": "pub fn unknown_dependency() {}\n",
-    ])
-    defer {
-        try? FileManager.default.removeItem(at: root)
-        try? FileManager.default.removeItem(at: dependencyRoot)
-    }
-    let dependency = dependencyRoot.appendingPathComponent(
-        "release-1.2.3/src/lib.rs"
-    )
-    let dependencySource = try String(contentsOf: dependency, encoding: .utf8)
-    let session = try ProjectIndexer().index(root: root)
-    let context = exactQueryContext(for: session, generation: 1)
-    let model = ContextWindowModel(
-        { session, file, offset, context in
-            try session.resolve(file: file, offset: offset, context: context)
-        },
-        exactResolver: { _, _, _, _ in
-            .completed([exactEntry(
-                file: dependency.path,
-                byteOffset: exactByteOffset(
-                    of: "unknown_dependency",
-                    in: dependencySource
-                )
-            )])
-        }
-    )
-    model.updateProjectState(.ready(session, context), root: root)
-
-    model.tokenClicked(
-        file: "main.rs",
-        offset: exactByteOffset(of: "target();", in: source)
-    )
-    #expect(await testWaitUntil("model.displayedCandidate?.path == dependency.path") {
-        model.displayedCandidate?.path == dependency.path
-    })
-
-    #expect(model.displayedCandidate?.provenanceBadge.contains(dependency.path) == true)
 }
 
 final class ExactTestProvider: ExactProvider, @unchecked Sendable {

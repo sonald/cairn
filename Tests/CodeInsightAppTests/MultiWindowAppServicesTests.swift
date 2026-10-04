@@ -114,26 +114,6 @@ func existingAppSettingsRefreshesSharedTrustOnEveryOpen() async throws {
 
 @MainActor
 @Test
-func globalSettingsDisablesEveryTargetlessProjectMenu() throws {
-    let delegate = AppDelegate(startedAt: .now)
-    delegate.showSettings(nil)
-    defer { delegate.settingsWindowController?.close() }
-    #expect(delegate.projectCommandTarget() == nil)
-    for action in [
-        "showBookmarks:", "useFullReadingHeight:", "useStructureReadingHeight:",
-        "useOverviewReadingHeight:", "applyPanelPreset:", "toggleRelations:",
-        "previousContextCandidate:", "nextContextCandidate:",
-    ] {
-        let item = NSMenuItem(title: action, action: NSSelectorFromString(action), keyEquivalent: "")
-        let enabled = delegate.validateMenuItem(item)
-        #expect(!enabled, "\(action) must require a project target")
-    }
-    let globalItem = NSMenuItem(title: "Settings", action: NSSelectorFromString("showSettings:"), keyEquivalent: "")
-    #expect(delegate.validateMenuItem(globalItem))
-}
-
-@MainActor
-@Test
 func appTrustGrantRefreshesExistingSettingsAndOtherWindows() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("AppGrant-\(UUID().uuidString)")

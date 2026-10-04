@@ -312,7 +312,7 @@ raise SystemExit(f"missing {step}.{key}")
     }
 
     # AppKit channels are each launched once, independently. Repeating them in
-    # a shell loop is a known intermittent hang shape; see m5-backlog.md.
+    # a shell loop is a known intermittent hang shape; keep provider runs in fresh processes.
     exact_json="$("$binary" --self-test-exact "$PWD")"
     context_ready_ms="$(printf '%s\n' "$exact_json" \
         | json_line_field feature-switch contextReadyMS)"
@@ -346,7 +346,7 @@ import math, sys
 values = sorted(float(line) for line in sys.stdin if line.strip())
 print(values[math.ceil(len(values) * 0.5) - 1])
 ')"
-    # Historical M0 parallel-index p50, preserved in docs/benchmarks.md.
+    # Historical parallel-index reference; not a current performance measurement.
     receiver_baseline_ms=704
     receiver_delta_percent="$(python3 -c '
 baseline, current = map(float, __import__("sys").argv[1:3])

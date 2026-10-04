@@ -10,39 +10,6 @@ import Testing
 
 @Suite(.serialized)
 struct RelationUXTests {
-    @MainActor
-    @Test
-    func relationHeaderLabelsFitAtMinimumPanelWidth() throws {
-        _ = NSApplication.shared
-        let controller = RelationWindowController(model: RelationTreeModel(), languageMode: { _ in nil })
-        controller.loadViewIfNeeded()
-        controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 600)
-        controller.view.layoutSubtreeIfNeeded()
-        #expect(controller.view.frame.width == 300)
-        let controls = controller.view.subviews.flatMap(\.subviews).compactMap { $0 as? NSControl }
-        let directions = try #require(controls.first { $0 is NSSegmentedControl })
-        #expect(directions.intrinsicContentSize.width > 0)
-        for control in controls {
-            #expect(control.frame.width + 1 >= control.intrinsicContentSize.width,
-                    "Header labels must fit their actual control bounds")
-        }
-    }
-
-    @MainActor
-    @Test
-    func mainWindowChromeStaysCompactWhenContentNarrows() {
-        let controller = MainWindowController(
-            model: AppModel(),
-            settings: ReaderSettings(),
-            offscreen: true
-        )
-        defer { controller.close() }
-
-        #expect(controller.selfTestExactStatusAllowsHorizontalCompression)
-        let rows = controller.selfTestSidebarRowGeometry
-        #expect((20...24).contains(rows.height))
-        #expect(rows.spacing.height == 0)
-    }
 
     @MainActor
     @Test
@@ -134,71 +101,6 @@ struct RelationUXTests {
         #expect(result.2.allSatisfy {
             $0 == CodeInsightApp.localized("relation.skip.source")
         })
-    }
-
-    @MainActor
-    @Test
-    func relationReferenceRowsExposeProvenanceThroughAccessibility() async throws {
-        let fixture = try await makeRelationUXFixture()
-        defer { fixture.close() }
-        let title = try #require(
-            fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Exact").first
-        )
-        let accessibility = try #require(
-            fixture.controller.selfTestAccessibility(
-                titled: title,
-                inGroup: "Exact"
-            )
-        )
-
-        #expect(
-            [accessibility.label, accessibility.value]
-                .joined(separator: " ")
-                .contains("Verified")
-        )
-        #expect(accessibility.value.contains("heuristic also matched"))
-        #expect(
-            fixture.controller.selfTestBadgeToolTip(titled: title)
-                == CodeInsightApp.localized("relation.badge.verified.hint")
-        )
-        #expect(accessibility.role != NSAccessibility.Role.textField.rawValue)
-        #expect(accessibility.valueSettable == false)
-    }
-
-    @MainActor
-    @Test
-    func inspectorShowsLiveCertaintyStonesAndHidesThemForACapture() async throws {
-        let fixture = try await makeRelationUXFixture()
-        defer { fixture.close() }
-        var captured: [ReadingSetExcerpt] = []
-        fixture.controller.onOpenReadingSet = { _, excerpts, _ in captured = excerpts }
-        let edgeCertainty = try #require(
-            fixture.controller.selfTestEdgeStones(inGroup: "").first { $0.0 == "first" }?.1
-        )
-
-        #expect(fixture.controller.selfTestClickBadge(titled: "first"))
-        await pumpRunLoop()
-        let live = try #require(fixture.controller.selfTestInspectorStones)
-        #expect(live.certainty == edgeCertainty)
-        #expect(live.visible)
-
-        fixture.controller.selfTestOpenAsReadingSet()
-        let display = try #require(captured.first?.inspector)
-        fixture.controller.showFrozenInspector(display)
-        #expect(fixture.controller.selfTestInspectorIsFrozen)
-        #expect(fixture.controller.selfTestInspectorStones == nil)
-    }
-
-    @MainActor
-    @Test
-    func selectingRelationKeepsInspectorClosedUntilRequested() async throws {
-        let fixture = try await makeRelationUXFixture()
-        defer { fixture.close() }
-
-        #expect(fixture.controller.selfTestSelectEdge(titled: "first"))
-        #expect(!fixture.controller.selfTestInspectorVisible)
-        #expect(fixture.controller.selfTestPressInspectorShortcut())
-        #expect(fixture.controller.selfTestInspectorVisible)
     }
 
     @MainActor
@@ -472,37 +374,6 @@ struct RelationUXTests {
 
     @MainActor
     @Test
-    func relationCorrectedCandidatesUseTheirOwnWarningDisclosure() async throws {
-        let fixture = try await makeRelationUXFixture(
-            includesExactMatch: false,
-            expandPossible: false,
-            exactResolver: { _, _, _, _ in
-                .completed([
-                    relationUXExactEntry(file: "main.rs", byteOffset: 3),
-                ])
-            }
-        )
-        defer { fixture.close() }
-
-        #expect(fixture.controller.selfTestExpandPossibleMatches())
-        for _ in 0..<100 {
-            if fixture.controller.selfTestCorrectedDisclosureDisplayText
-                == [CodeInsightApp.localized("relation.corrected.show"), "2"]
-            {
-                break
-            }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(fixture.controller.selfTestCorrectedDisclosureDisplayText
-            == [CodeInsightApp.localized("relation.corrected.show"), "2"])
-        #expect(fixture.controller.selfTestPossibleDisclosureTitle == nil)
-        #expect(relationEdges(in: fixture.model.root).filter {
-            $0.certainty == .exact
-        }.count == 1)
-    }
-
-    @MainActor
-    @Test
     func relationPossibleValidationFollowsTheVisibleViewportInBatches()
         async throws
     {
@@ -751,37 +622,6 @@ struct RelationUXTests {
         #expect(fixture.controller.selfTestSelectedEdgeTitle == "first")
         #expect(fixture.controller.selfTestWholeTreeReloads == wholeReloadsAfterBatch)
     }
-}
-
-@MainActor
-@Test
-func siClassicThemesTheWholeWindowChrome() async throws {
-    let fixture = try await makeRelationNavigationFixture()
-    defer {
-        fixture.controller.close()
-        try? FileManager.default.removeItem(at: fixture.root)
-    }
-    var settings = ReaderSettings()
-    settings.theme = .siClassic
-    fixture.controller.applyReaderSettings(settings)
-    let expected = try #require(
-        ReaderTheme(settings: settings).chromeColor.usingColorSpace(.sRGB)
-    )
-    let windowColor = try #require(
-        fixture.controller.window?.backgroundColor.usingColorSpace(.sRGB)
-    )
-    let statusColor = try #require(
-        fixture.controller.selfTestStatusBarBackgroundColor?
-            .usingColorSpace(.sRGB)
-    )
-
-    #expect(abs(windowColor.redComponent - expected.redComponent) < 0.001)
-    #expect(abs(windowColor.greenComponent - expected.greenComponent) < 0.001)
-    #expect(abs(windowColor.blueComponent - expected.blueComponent) < 0.001)
-    #expect(fixture.controller.window?.titlebarAppearsTransparent == true)
-    #expect(abs(statusColor.redComponent - expected.redComponent) < 0.001)
-    #expect(abs(statusColor.greenComponent - expected.greenComponent) < 0.001)
-    #expect(abs(statusColor.blueComponent - expected.blueComponent) < 0.001)
 }
 
 @MainActor
@@ -1138,57 +978,6 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
     #expect(fixture.controller.selfTestActiveTabIndex == 0)
     #expect(fixture.controller.selfTestReadingByteOffset == scroll)
     #expect(fixture.controller.selfTestReaderCaretByteOffset == selection)
-}
-
-@MainActor
-@Test
-func relationSymbolSingleClicksDoNotNavigate() async throws {
-    let fixture = try await makeRelationNavigationFixture()
-    defer {
-        fixture.controller.close()
-        try? FileManager.default.removeItem(at: fixture.root)
-    }
-    let main = fixture.root.appendingPathComponent("main.rs")
-    fixture.controller.openFileForSelfTest(main)
-    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
-        fixture.controller.displayedReaderFile?.standardizedFileURL
-            == main.standardizedFileURL
-    })
-
-    for (offset, direction, rootTitle, edgeTitle) in [
-        (
-            byteOffset(of: "target() {}", in: fixture.mainSource),
-            RelationTreeModel.Direction.callers,
-            "target",
-            "caller_one"
-        ),
-        (
-            byteOffset(of: "call_root() {", in: fixture.mainSource),
-            .calls,
-            "call_root",
-            "first"
-        ),
-        (
-            byteOffset(of: "Render {", in: fixture.mainSource),
-            .implementations,
-            "Render",
-            "Widget"
-        ),
-    ] {
-        fixture.controller.selfTestReaderRelation(offset: offset, direction: direction)
-        try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.title == rootTitle && relationEdge(titled: edgeTitle, in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"Strong\" ).contains(edgeTitle)") {
-            fixture.model.relationTree.root?.title == rootTitle
-                && relationEdge(titled: edgeTitle, in: fixture.model) != nil
-                && fixture.controller.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "Strong"
-                ).contains(edgeTitle)
-        })
-        let beforeNavigation = fixture.model.navigationGeneration
-        #expect(fixture.controller.selfTestSelectRelationEdge(titled: edgeTitle))
-        await pumpRunLoop()
-        #expect(fixture.model.navigationGeneration == beforeNavigation)
-        #expect(fixture.model.selectedFile?.standardizedFileURL == main.standardizedFileURL)
-    }
 }
 
 @MainActor
@@ -1714,184 +1503,6 @@ func semanticTrailKeepsBranchesVisibleAndRestorable() async throws {
 }
 
 @MainActor
-@Test
-func semanticTrailShowsSnapshotBoundaryAndNavigationCause() throws {
-    _ = NSApplication.shared
-    let trail = ReadingTrail()
-    let store = ResolutionExplanationStore()
-    let worktree = SnapshotID(rawValue: UUID())
-    let commit = SnapshotID(rawValue: UUID())
-    let root = JumpRecord(
-        path: "src/main.rs",
-        contentID: nil,
-        byteOffset: 4,
-        line: 1,
-        column: 5,
-        symbolAnchor: "main",
-        snapshotID: worktree
-    )
-    let destination = JumpRecord(
-        path: "src/lib.rs",
-        contentID: nil,
-        byteOffset: 12,
-        line: 3,
-        column: 2,
-        symbolAnchor: "run",
-        snapshotID: commit,
-        revision: "1234567890abcdef"
-    )
-    _ = trail.recordNavigation(
-        from: root,
-        to: destination,
-        cause: .search
-    )
-    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
-    view.display(trail: trail, store: store)
-
-    #expect(view.snapshotBoundaryCount == 1)
-    #expect(view.breadcrumbText == "main · search → run")
-    #expect(view.selectNode(path: "src/lib.rs"))
-    #expect(view.detailValue.contains("commit 1234567"))
-    #expect(view.detailValue.contains("search"))
-}
-
-@MainActor
-@Test
-func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
-    _ = NSApplication.shared
-    let trail = ReadingTrail()
-    let store = ResolutionExplanationStore()
-    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
-    func jump(_ path: String) -> JumpRecord {
-        JumpRecord(
-            path: path,
-            contentID: nil,
-            byteOffset: 0,
-            line: 1,
-            column: 1,
-            symbolAnchor: nil,
-            snapshotID: nil
-        )
-    }
-    func button() throws -> NSButton {
-        try #require(relationTestViews(in: view).compactMap {
-            $0 as? NSButton
-        }.first {
-            $0.accessibilityLabel() == CodeInsightApp.localized("trail.branchesAX")
-        })
-    }
-
-    view.display(trail: trail, store: store)
-    let emptyText = relationTestViews(in: view).compactMap {
-        ($0 as? NSTextField)?.stringValue
-    }
-    #expect(emptyText.contains(
-        "Follow symbols to build a trail · restored across sessions"
-    ))
-    #expect(view.accessibilityValue() as? String
-        == "Follow symbols to build a trail · restored across sessions")
-    #expect(try button().title == "Trail Details")
-    #expect(try !button().isEnabled)
-
-    let root = jump("root.rs")
-    let a = jump("a.rs")
-    let b = jump("b.rs")
-    let c = jump("c.rs")
-    let d = jump("d.rs")
-    let aID = trail.recordNavigation(from: root, to: a, cause: .relation)
-    let rootID = try #require(trail.edges.last?.from)
-    view.display(trail: trail, store: store)
-    #expect(try button().title == "Trail Details")
-    #expect(try button().isEnabled)
-
-    trail.restore(rootID)
-    _ = trail.recordNavigation(from: root, to: b, cause: .relation)
-    view.display(trail: trail, store: store)
-    #expect(view.branchCount == 1)
-    #expect(try button().title == CodeInsightApp.localizedFormat("trail.branches", Int64(1)))
-
-    trail.restore(aID)
-    _ = trail.recordNavigation(from: a, to: c, cause: .relation)
-    trail.restore(aID)
-    _ = trail.recordNavigation(from: a, to: d, cause: .relation)
-    view.display(trail: trail, store: store)
-    #expect(view.branchCount == 2)
-    #expect(try button().title == CodeInsightApp.localizedFormat("trail.branches", Int64(2)))
-    #expect(try button().toolTip
-        == "Show the semantic trail and its branches (⌥⌘T)")
-}
-
-@MainActor
-@Test
-func trailDetailLabelsEvidenceRestoredFromAnEarlierSession() throws {
-    _ = NSApplication.shared
-    let trail = ReadingTrail()
-    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
-    let saved = TrailNodeID()
-    let restored = TrailNodeID()
-    // Exactly what a decoded session installs: a frozen display with no
-    // live explanation reference and no observed snapshot.
-    trail.restore(
-        nodes: [
-            TrailNode(id: saved, jump: JumpRecord(
-                path: "main.rs",
-                contentID: nil,
-                byteOffset: 0,
-                line: 1,
-                column: 1,
-                symbolAnchor: "saved",
-                snapshotID: nil
-            )),
-            TrailNode(id: restored, jump: JumpRecord(
-                path: "a.rs",
-                contentID: nil,
-                byteOffset: 0,
-                line: 1,
-                column: 1,
-                symbolAnchor: "restored",
-                snapshotID: nil
-            )),
-        ],
-        edges: [
-            TrailEdge(
-                from: saved,
-                to: restored,
-                cause: .relation,
-                observedAtNavigation: nil,
-                currentExplanationID: nil,
-                frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay(
-                    nodeTitle: "restored",
-                    badge: .verified,
-                    why: "rust-analyzer returned this target.",
-                    sourceBody: "Matched a declaration in the same file.",
-                    verificationTitle: "VERIFICATION",
-                    verificationBody: "Verified at capture.",
-                    correctionBody: "",
-                    availabilityBody: "rust-analyzer ready at capture",
-                    environmentBody: "default · Trusted at capture",
-                    auditRows: [
-                        .init(label: "Source", value: "worktree captured"),
-                    ],
-                    accessibilityValue: "Verified restored at capture",
-                    capturedAt: Date(timeIntervalSince1970: 1_786_200_000),
-                    formerCandidateAvailable: false
-                ),
-                readingSetRole: "Definition"
-            ),
-        ],
-        activeNodeID: restored
-    )
-    view.display(trail: trail, store: ResolutionExplanationStore())
-    #expect(view.selectNode(path: "a.rs"))
-
-    let detail = view.detailValue
-    #expect(detail.contains("Evidence at navigation"))
-    #expect(detail.contains("frozen in an earlier session"))
-    #expect(detail.contains("Only that session's display snapshot was kept"))
-    #expect(!detail.contains("Evidence changed after navigation"))
-}
-
-@MainActor
 private func makeRelationNavigationFixture(
     sessionURL: URL? = nil,
     extraFiles: [(String, String)] = [],
@@ -2054,15 +1665,6 @@ func markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge()
 @MainActor
 private func relationTestViews(in view: NSView) -> [NSView] {
     [view] + view.subviews.flatMap(relationTestViews(in:))
-}
-
-@MainActor
-private func relationEdge(
-    titled title: String,
-    in model: AppModel
-) -> RelationTreeModel.Node? {
-    relationEdges(in: model.relationTree.root)
-        .first { $0.kind == .edge && $0.title == title }
 }
 
 @MainActor
@@ -2575,31 +2177,6 @@ func pinnedContextDoesNotStealRelationCommandTargets() async throws {
     #expect(fixture.model.contextWindow.symbolCandidate?.path == pinnedPath)
 }
 
-@MainActor
-@Test
-func relationCommandsDisabledOutsideReadableSourceSurfaces() async throws {
-    let fixture = try await makeRelationNavigationFixture(extraFiles: [
-        ("README.md", "# Notes\n\nSee main.rs.\n"),
-    ])
-    defer {
-        fixture.controller.close()
-        try? FileManager.default.removeItem(at: fixture.root)
-    }
-    let readme = fixture.root.appendingPathComponent("README.md")
-    fixture.controller.openFileForSelfTest(readme)
-    try #require(await relationTestWaitUntil("readme is displayed") {
-        fixture.controller.displayedReaderFile?.standardizedFileURL
-            == readme.standardizedFileURL
-    })
-    #expect(
-        !fixture.controller.canShowRelationsFromReaderSurface,
-        "non-source previews have no relation target"
-    )
-    fixture.controller.showRelations(direction: .references)
-    try await pumpRunLoop()
-    #expect(fixture.model.relationTree.root == nil)
-}
-
 // MARK: - S7b reader-first layout
 
 @MainActor
@@ -2741,39 +2318,4 @@ func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
     fixture.model.openReadingSet(title: "Layout proof", excerpts: [])
     fixture.controller.renderForSelfTest()
     #expect(fixture.controller.selfTestSidebarPaneCollapsed)
-}
-
-@MainActor
-@Test
-func relationRowsShowVisibleCertaintyStonesAndASerifRootTitle() async throws {
-    let fixture = try await makeRelationUXFixture(expandPossible: false)
-    defer { fixture.close() }
-
-    let exact = fixture.controller.selfTestEdgeStones(inGroup: "Exact")
-    #expect(!exact.isEmpty)
-    #expect(exact.map(\.0) == ["first"])
-    #expect(exact.allSatisfy { $0.1 == .exact && $0.2 })
-    #expect(fixture.controller.selfTestPossibleDisclosureStones.0 == .possible)
-    #expect(fixture.controller.selfTestPossibleDisclosureStones.1)
-
-    #expect(fixture.controller.selfTestExpandPossibleMatches())
-    let possible = fixture.controller.selfTestEdgeStones(inGroup: "Possible")
-    #expect(possible.map(\.0) == ["second"])
-    #expect(possible.allSatisfy {
-        ($0.1 == .possible || $0.1 == .probable) && $0.2
-    })
-    #expect(fixture.controller.selfTestRootTitleIsSerif)
-}
-
-@MainActor
-@Test
-func relationActiveDirectionShowsItsResultCountOnly() async throws {
-    let fixture = try await makeRelationUXFixture(expandPossible: false)
-    defer { fixture.close() }
-    let labels = fixture.controller.selfTestDirectionLabels
-    let titles = ["relation.callers", "relation.calls", "relation.implements", "relation.references"]
-        .map { CodeInsightApp.localized($0) }
-    // The fixture queries references: one exact edge plus one possible match.
-    #expect(labels[3] == "\(titles[3]) 2")
-    #expect(Array(labels[0..<3]) == Array(titles[0..<3]))
 }

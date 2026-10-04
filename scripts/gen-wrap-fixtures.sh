@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generate and verify the reader soft-wrap performance fixtures (F1–F5,
-# docs/plans/2026-09-19-reader-wrap-design.md §7.4.3).
+# docs/development.md).
 #
 # Usage:
 #   bash scripts/gen-wrap-fixtures.sh                          # generate into fixtures/wrap/

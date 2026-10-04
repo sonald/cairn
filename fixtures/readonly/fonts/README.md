@@ -22,6 +22,6 @@ CAIRN_READONLY_FONT_EVIDENCE_DIR="$PWD/.build/readonly/font-routing" \
   swift test --no-parallel --filter readonlyFontDistributedNotificationRoutesToAppDelegateWithoutInstallingFonts
 ```
 
-The missing distributed observer predates the readonly implementation (git history identified by the root agent: 3cd489f5, 2026-09-22); this repair is a historical integration gap, not a new S4 regression. Notification readiness pumps actual native run-loop turns as well as yielding the main actor.
+Notification readiness pumps actual native run-loop turns as well as yielding the main actor. CI runs each font check in a fresh process to exclude delayed local notifications from the distributed-routing check.
 
-Status: Swift compilation and both native tests passed after the benchmark was paused at a complete fixture pair. Real Reader font URL and hmtx hashes matched A/B; glyph advance changed 6.5→11.7pt while source/selection/copy remained unchanged. The distributed check also passed in its own fresh process. CI runs each font check separately to exclude delayed local notifications from the routing check. Evidence: [stage-s7-font-registration.json](../../../docs/plans/evidence/readonly/stage-s7-font-registration.json). No system fonts were changed.
+[Historical registration evidence](../../../docs/evidence/font-registration.json) records the tested Reader font URLs, table hashes, glyph widths and preserved source/selection. It is an earlier observation, not current test status; rerun the relevant command when changing this mechanism. These fixtures must remain process-scoped and must not change system fonts.

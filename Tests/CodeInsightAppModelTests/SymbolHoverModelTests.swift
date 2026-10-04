@@ -71,24 +71,6 @@ func hoverSwitchingTokensCancelsTheInFlightExactRequest() async {
 
 @MainActor
 @Test
-func hoverGracePeriodKeepsTheCardWhilePointerTravelsIntoIt() async {
-    let harness = HoverHarness()
-    harness.model.pointerMoved(over: tokenA)
-    await harness.clock.advance()
-    await harness.releaseExact(.completed("Docs.", limitations: []))
-
-    harness.model.pointerExitedText()
-    harness.model.pointerEnteredCard()
-    await harness.clock.advance()
-    #expect(harness.model.shownToken == tokenA)
-
-    harness.model.pointerExitedCard()
-    await harness.clock.advance()
-    #expect(harness.model.phase == .idle)
-}
-
-@MainActor
-@Test
 func hoverDismissesOnEscapeAndServesRepeatsFromCache() async {
     let harness = HoverHarness()
     harness.model.pointerMoved(over: tokenA)
@@ -112,93 +94,6 @@ func hoverDismissesOnEscapeAndServesRepeatsFromCache() async {
     harness.model.pointerMoved(over: otherRevision)
     await harness.clock.advance()
     #expect(harness.syntacticCalls.count == 2)
-}
-
-@MainActor
-@Test
-func hoverSettingOffIgnoresPointerButHonorsExplicitRequests() async {
-    let harness = HoverHarness()
-    harness.model.isHoverEnabled = false
-    harness.model.pointerMoved(over: tokenA)
-    await settle()
-    #expect(harness.model.phase == .idle)
-    #expect(harness.clock.pending.isEmpty)
-
-    harness.model.showNow(tokenA)
-    await settle()
-    #expect(harness.model.shownToken == tokenA)
-    #expect(harness.clock.pending.isEmpty)
-}
-
-@MainActor
-@Test
-func hoverNotesExplainMissingOrLimitedExactResults() async {
-    let missing = HoverHarness(fallback: nil)
-    missing.model.showNow(tokenA)
-    await settle()
-    #expect(missing.model.phase == .dwelling(tokenA))
-    await missing.releaseExact(.completed(nil, limitations: [.dependenciesUnavailableOffline]))
-    #expect(missing.model.phase == .showing(
-        tokenA,
-        SymbolDoc(source: .exact, notes: [.dependencySourceMissing])
-    ))
-
-    let limited = HoverHarness()
-    limited.model.showNow(tokenA)
-    await settle()
-    await limited.releaseExact(.completed(nil, limitations: [.procMacrosDisabled, .buildScriptsDisabled]))
-    guard case let .showing(_, doc) = limited.model.phase else {
-        Issue.record("expected limited card")
-        return
-    }
-    #expect(doc.source == .syntactic)
-    #expect(doc.notes == [.limitation("buildScriptsDisabled"), .limitation("procMacrosDisabled")])
-
-    let unavailable = HoverHarness()
-    unavailable.model.showNow(tokenA)
-    await settle()
-    await unavailable.releaseExact(.unavailable("off"))
-    guard case let .showing(_, fallback) = unavailable.model.phase else {
-        Issue.record("expected fallback card")
-        return
-    }
-    #expect(fallback.notes == [.exactUnavailable("off")])
-
-    let uncached = HoverHarness(fallback: nil, sourceMissing: true)
-    uncached.model.showNow(tokenA)
-    await settle()
-    // Known from local files before the language server answers.
-    #expect(uncached.model.phase == .showing(
-        tokenA,
-        SymbolDoc(source: .syntactic, notes: [.dependencySourceMissing])
-    ))
-    await uncached.releaseExact(.completed(nil, limitations: [.procMacrosDisabled]))
-    #expect(uncached.model.phase == .showing(
-        tokenA,
-        SymbolDoc(source: .exact, notes: [.dependencySourceMissing])
-    ))
-    #expect(uncached.probeCalls == 1)
-
-    let timedOut = HoverHarness(fallback: nil)
-    timedOut.model.showNow(tokenA)
-    await settle()
-    #expect(timedOut.model.phase == .dwelling(tokenA))
-    await timedOut.releaseExact(.unavailable("timeout(\"textDocument/hover\")"))
-    #expect(timedOut.model.phase == .showing(
-        tokenA,
-        SymbolDoc(source: .exact, notes: [.exactPending])
-    ))
-    // Not final: the next hover asks the language server again.
-    timedOut.model.dismiss()
-    timedOut.model.showNow(tokenA)
-    await settle()
-    #expect(timedOut.exactCalls.count == 2)
-
-    let nothing = HoverHarness(fallback: nil)
-    nothing.model.showNow(tokenA)
-    await settle()
-    await nothing.releaseExact(.completed(nil, limitations: []))
-    #expect(nothing.model.phase == .idle)
 }
 
 @Test

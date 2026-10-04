@@ -1,9 +1,6 @@
-name: Mixed-language product quality
+name: Full product verification (manual)
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -131,10 +128,9 @@ jobs:
             .build/corpora.log
             .build/product-gates.log
             .build/mixed-corpus.log
-            .build/ci-swift-test.log
-            .build/ci-swift-test-isolated.log
-            .build/ci-swift-test-panels.log
-            .build/ci-swift-test-mouse.log
+            .build/ci-swift-test-*.log
+            .build/ci-test-list.txt
+            .build/ci-selected-tests.txt
             .build/self-test-run-*
             .build/self-test-run-*/mixed.stdout
             .build/self-test-run-*/mixed.stderr

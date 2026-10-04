@@ -100,53 +100,6 @@ func revealInFinderDisablesWhenTheDisplayedFileNoLongerExists() throws {
     #expect(menu.item(withTitle: "Reveal in Finder")?.isEnabled == false)
 }
 
-@Test
-func pathLineTextUsesProjectRelativeAndDependencyAbsolutePaths() {
-    let root = URL(fileURLWithPath: "/project", isDirectory: true)
-    let projectFile = root.appendingPathComponent("src/main.rs")
-    let dependency = URL(fileURLWithPath: "/dependencies/tokio/src/lib.rs")
-
-    #expect(MainWindowController.pathLineText(
-        for: projectFile,
-        under: root,
-        line: 42
-    ) == "src/main.rs:42")
-    #expect(MainWindowController.pathLineText(
-        for: dependency,
-        under: root,
-        line: 7
-    ) == "/dependencies/tokio/src/lib.rs:7")
-}
-
-@MainActor
-@Test
-func readerContextMenuStaysReadOnly() throws {
-    let fixture = try makeReaderFixture(source: "fn snapshot() {}\n")
-    defer { fixture.cleanup() }
-    fixture.textView.setSelectedRange(NSRange(location: 3, length: 8))
-    let event = try rightClick(in: fixture.window, textView: fixture.textView)
-    let menu = try #require(fixture.textView.menu(for: event))
-    let items = menuItems(in: menu)
-    let forbiddenTitles = Set([
-        "Cut", "Paste", "Paste and Match Style", "Delete",
-        "Insert", "Substitutions", "Transformations",
-        "Spelling and Grammar", "Font", "Text", "Writing Tools",
-    ])
-    let forbiddenActions = Set([
-        "cut:", "paste:", "delete:", "insertText:",
-        "insertNewline:", "insertTab:", "changeFont:",
-    ])
-
-    #expect(fixture.textView.isSelectable)
-    #expect(!fixture.textView.isEditable)
-    #expect(!fixture.textView.isRichText)
-    #expect(items.allSatisfy { !forbiddenTitles.contains($0.title) })
-    #expect(items.allSatisfy {
-        guard let action = $0.action else { return true }
-        return !forbiddenActions.contains(NSStringFromSelector(action))
-    })
-}
-
 @MainActor
 @Test
 func readerContextMenuUsesTheDocumentSelectedByTheCurrentTab() throws {

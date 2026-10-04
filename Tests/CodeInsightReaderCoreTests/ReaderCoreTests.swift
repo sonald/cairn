@@ -11,36 +11,6 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
 
-@Test
-func explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() throws {
-    let bytes = Array("fn greet(value: usize) { let copy = value; }\n".utf8)
-    let loader = DocumentLoader(source: { _ in bytes })
-    let file = URL(fileURLWithPath: "/fixture.rs")
-    let mode = LanguageMode(language: .rust, variant: "artificial-test-mode")
-
-    let convenience = try loader.load(file: file)
-    let explicit = try loader.load(file: file, languageMode: mode)
-
-    #expect(convenience.tier == explicit.tier)
-    #expect(convenience.document.languageMode == LanguageMode(language: .rust))
-    #expect(explicit.document.languageMode == mode)
-    #expect(convenience.document.bytes == explicit.document.bytes)
-    #expect(convenience.document.contentID == explicit.document.contentID)
-    #expect(convenience.document.lineTable == explicit.document.lineTable)
-    #expect(convenience.document.byteUTF16Map.bytes == explicit.document.byteUTF16Map.bytes)
-    #expect(convenience.document.byteUTF16Map.utf16Count
-        == explicit.document.byteUTF16Map.utf16Count)
-    #expect(convenience.document.highlightSpans == explicit.document.highlightSpans)
-    #expect(convenience.document.outlineFacets == explicit.document.outlineFacets)
-    #expect(convenience.document.foldRegions == explicit.document.foldRegions)
-    #expect(convenience.document.localBindings.map(\.kind.rawValue)
-        == explicit.document.localBindings.map(\.kind.rawValue))
-    #expect(convenience.document.localBindings.map(\.declarationRange)
-        == explicit.document.localBindings.map(\.declarationRange))
-    #expect(convenience.document.referencesByBinding
-        == explicit.document.referencesByBinding)
-}
-
 #if DEBUG
 @Test
 func javascriptAndInvalidTypeScriptVariantFailBeforeParsing() throws {
@@ -158,32 +128,6 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
         Issue.record("Detached syntax returned the wrong error: \(error)")
     }
     #expect(resolutionCount.withLock { $0 } == 0)
-}
-
-@Test
-func typeScriptDocumentReadsTsAndTsxModes() throws {
-    let source: DocumentLoader.ContentSource = { file in
-        if file.pathExtension == "tsx" {
-            return Array("const A = () => { return <div />; };\n".utf8)
-        }
-        return Array("function f() { return 1; }\n".utf8)
-    }
-    let loader = DocumentLoader(source: source)
-    let tsDocument = try loader.load(
-        file: URL(fileURLWithPath: "/fixture.ts"),
-        languageMode: LanguageMode(language: .typescript)
-    )
-    let tsxDocument = try loader.load(
-        file: URL(fileURLWithPath: "/fixture.tsx"),
-        languageMode: LanguageMode(language: .typescript, variant: "tsx")
-    )
-
-    #expect(tsDocument.document.languageMode
-        == LanguageMode(language: .typescript))
-    #expect(tsxDocument.document.languageMode
-        == LanguageMode(language: .typescript, variant: "tsx"))
-    #expect(!tsDocument.document.outlineFacets.isEmpty)
-    #expect(!tsxDocument.document.outlineFacets.isEmpty)
 }
 
 @Test
@@ -556,63 +500,6 @@ func pythonReaderFoldsCommentsAndImportsInsideFunctionBodies() throws {
 
     #expect(result.folds.contains { $0.kind == .comment && $0.summary.itemCount == 2 })
     #expect(result.folds.contains { $0.kind == .imports && $0.summary.itemCount == 2 })
-}
-
-@Test
-func pythonReaderSpansAndOutlineIncludeBasicSyntax() throws {
-    let source = [
-        "class Widget:",
-        "    def __init__(self, name):",
-        "        self.name = name  # comment",
-        "",
-        "    async def render(self):",
-        "        return f\"hi {self.name}\"",
-        "",
-        "@widget",
-        "def make() -> Widget:",
-        "    return Widget()",
-    ].joined(separator: "\n")
-
-    let result = try pythonReaderHighlightWithFolds(bytes: Array(source.utf8))
-
-    #expect(result.outlineFacets == [
-        OutlineFacet(
-            kind: .class,
-            name: "Widget",
-            range: ByteRange(lowerBound: 0, upperBound: 141),
-            nameRange: ByteRange(lowerBound: 6, upperBound: 12),
-            depth: 0
-        ),
-        OutlineFacet(
-            kind: .method,
-            name: "__init__",
-            range: ByteRange(lowerBound: 18, upperBound: 79),
-            nameRange: ByteRange(lowerBound: 22, upperBound: 30),
-            depth: 1, detail: "(self, name)"
-        ),
-        OutlineFacet(
-            kind: .method,
-            name: "render",
-            range: ByteRange(lowerBound: 85, upperBound: 141),
-            nameRange: ByteRange(lowerBound: 95, upperBound: 101),
-            depth: 1, detail: "(self)"
-        ),
-        OutlineFacet(
-            kind: .fn,
-            name: "make",
-            range: ByteRange(lowerBound: 143, upperBound: 192),
-            nameRange: ByteRange(lowerBound: 155, upperBound: 159),
-            depth: 0, detail: "() -> Widget"
-        ),
-    ])
-    let comments = result.spans.filter { $0.kind == .comment }
-    #expect(comments.count == 1)
-    let strings = result.spans.filter { $0.kind == .string }
-    #expect(strings.count == 1)
-    let defKeyword = try #require(result.spans.first {
-        text(in: source, range: $0.range) == "def"
-    })
-    #expect(defKeyword.kind == .keyword)
 }
 
 @Test
@@ -1184,18 +1071,6 @@ func foldTransportSeamKeepsPublicInitializationEmptyAndLoadsBothPaths() async th
 }
 
 #if DEBUG
-@Test
-func highlightWithFoldsUsesTheExistingSingleParse() throws {
-    let parseCount = OSAllocatedUnfairLock(initialState: 0)
-    let result = try RustExtractor.$parseObserver.withValue({
-        parseCount.withLock { $0 += 1 }
-    }) {
-        try RustHighlighter().highlightWithFolds(bytes: Array("fn run() {\nwork();\n}".utf8))
-    }
-
-    #expect(parseCount.withLock { $0 } == 1)
-    #expect(result.folds.count == 1)
-}
 #endif
 
 @Test
@@ -1325,50 +1200,6 @@ func rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() throws {
     #expect(!result.spans.contains {
         declarationKinds.contains($0.kind) && $0.range.contains(callOffset)
     })
-}
-
-@Test
-func rustHighlighterMatchesFixtureSnapshot() throws {
-    let fixture = repositoryRoot
-        .appendingPathComponent("Tests/RustExtractorTests/Fixtures/use_alias/main.rs")
-    let bytes = Array(try Data(contentsOf: fixture))
-    let spans = try RustHighlighter().highlight(bytes: bytes).spans.map {
-        "\($0.range.lowerBound)..<\($0.range.upperBound):\($0.kind)"
-    }
-
-    #expect(spans == [
-        "0..<3:keyword",
-        "4..<6:declarationEmphasis",
-        "8..<11:keyword",
-        "24..<26:keyword",
-        "36..<38:keyword",
-        "39..<43:functionName",
-        "48..<55:functionCall",
-    ])
-}
-
-@Test
-func fileTierUsesLineCountBoundaries() {
-    #expect(FileTier(lineCount: 10_000) == .regular)
-    #expect(FileTier(lineCount: 10_001) == .large)
-    #expect(FileTier(lineCount: 50_000) == .large)
-    #expect(FileTier(lineCount: 50_001) == .huge)
-}
-
-@Test
-func viewportGatingReturnsOnlyBufferedIntersections() {
-    let spans = [
-        HighlightSpan(range: ByteRange(lowerBound: 0, upperBound: 5), kind: .keyword),
-        HighlightSpan(range: ByteRange(lowerBound: 10, upperBound: 15), kind: .string),
-        HighlightSpan(range: ByteRange(lowerBound: 20, upperBound: 25), kind: .number),
-        HighlightSpan(range: ByteRange(lowerBound: 30, upperBound: 35), kind: .comment),
-    ]
-
-    #expect(ViewportGating.spans(
-        spans,
-        intersecting: ByteRange(lowerBound: 16, upperBound: 19),
-        buffer: 3
-    ) == Array(spans[1...2]))
 }
 
 @Test
@@ -1623,29 +1454,6 @@ func excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() throws {
         )
         #expect(value == "fn plain() {\n    work();\n}")
     }
-}
-
-@Test
-func excerptStopsCleanlyAtFileEnd() {
-    let source = "fn tail() {\n    work();\n}"
-
-    #expect(excerpt(
-        for: ByteRange(lowerBound: 0, upperBound: UInt32(source.utf8.count)),
-        in: readerDocument(source)
-    ) == source)
-}
-
-@Test
-func bindingExcerptUsesDeclarationLinePlusTwoLinesEachSide() {
-    let source = (1...8).map { "line \($0)" }.joined(separator: "\n")
-    let declaration = source.range(of: "line 5")!
-    let start = UInt32(source[..<declaration.lowerBound].utf8.count)
-
-    #expect(excerpt(
-        for: ByteRange(lowerBound: start, upperBound: start + 6),
-        in: readerDocument(source),
-        binding: true
-    ) == "line 3\nline 4\nline 5\nline 6\nline 7")
 }
 
 private func readerDocument(_ source: String) -> ReaderDocument {

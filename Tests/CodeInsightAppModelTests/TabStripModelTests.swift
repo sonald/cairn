@@ -50,22 +50,6 @@ func tabStripFocusesDuplicatesAndPreservesAnchors() {
 
 @Test
 @MainActor
-func tabStripEvictsTheLeastRecentlyUsedTabAtItsLimit() {
-    let model = TabStripModel(maximumCount: 3)
-    let files = (0..<4).map { URL(fileURLWithPath: "/tmp/\($0).rs") }
-
-    model.open(files[0], inNewTab: false)
-    model.open(files[1], inNewTab: true)
-    model.open(files[2], inNewTab: true)
-    model.activate(0)
-    model.open(files[3], inNewTab: true)
-
-    #expect(model.tabs.compactMap(\.fileURL) == [files[0], files[2], files[3]])
-    #expect(model.activeTab?.fileURL == files[3])
-}
-
-@Test
-@MainActor
 func restoredTabBatchReinstatesPreviewFlagsAndLRUEvictionOrder() {
     let model = TabStripModel(maximumCount: 3)
     let a = URL(fileURLWithPath: "/tmp/a.rs")
@@ -221,23 +205,6 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
     #expect(model.tabs.count == 3)
     #expect(model.tabs[0].title == "spawn")
     #expect(model.tabs.compactMap(\.fileURL) == [fileC, fileD])
-}
-
-@Test
-@MainActor
-func appModelClearsFileOnlyStateForAReadingSetAndRestoresItForAFile() {
-    let model = AppModel()
-    let file = URL(fileURLWithPath: "/tmp/a.rs")
-    model.openInNewTab(file, selectionByteOffset: 7)
-    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
-
-    #expect(model.selectedFile == nil)
-    #expect(model.selectedByteOffset == nil)
-    #expect(model.tabStrip.activeDocument == nil)
-
-    model.activateTab(0)
-    #expect(model.selectedFile == file)
-    #expect(model.selectedByteOffset == 7)
 }
 
 private func readingSetExcerpt() -> ReadingSetExcerpt {

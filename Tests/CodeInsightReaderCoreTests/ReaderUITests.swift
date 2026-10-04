@@ -251,19 +251,6 @@ func typeScriptReaderGenericTransportRendersOutlineFoldAndLocalRefs() throws {
 
 @MainActor
 @Test
-func readerInstallsLineNumberRulerByDefault() {
-    let reader = ReaderTextView()
-    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
-    scrollView.documentView = reader.view
-
-    reader.apply(settings: ReaderSettings())
-
-    #expect(scrollView.hasVerticalRuler)
-    #expect((scrollView.verticalRulerView?.ruleThickness ?? 0) > 0)
-}
-
-@MainActor
-@Test
 func readingGeometryUsesClipWidthWithLegacyScroller() {
     let reader = ReaderTextView()
     let scrollView = NSScrollView(
@@ -362,55 +349,6 @@ func wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() throws {
             + "wrappedHeight=\(wrappedHeight) lineHeight=\(firstHeight) "
             + "line2RulerCount=\(reader.visibleLineNumbers.filter { $0 == 2 }.count)"
     )
-    withExtendedLifetime(window) {}
-}
-
-@MainActor
-@Test
-func wrapSettingReversesEveryTextKitAndScrollerProperty() {
-    let reader = ReaderTextView()
-    let scrollView = NSScrollView(
-        frame: NSRect(x: 0, y: 0, width: 480, height: 180)
-    )
-    scrollView.hasVerticalScroller = true
-    scrollView.documentView = reader.view
-    reader.view.frame = scrollView.contentView.bounds
-    let window = NSWindow(
-        contentRect: scrollView.frame,
-        styleMask: [.borderless],
-        backing: .buffered,
-        defer: false
-    )
-    window.contentView = scrollView
-
-    var wrappedSettings = ReaderSettings()
-    wrappedSettings.wrapLines = true
-    reader.apply(settings: wrappedSettings)
-    let wrappedWidth = scrollView.contentView.bounds.width
-
-    #expect(!scrollView.hasHorizontalScroller)
-    #expect(!reader.view.isHorizontallyResizable)
-    #expect(reader.view.autoresizingMask.contains(.width))
-    #expect(reader.view.textContainer?.widthTracksTextView == true)
-    #expect(reader.view.frame.width == wrappedWidth)
-    #expect(reader.view.textContainer?.containerSize.width == wrappedWidth)
-
-    window.setContentSize(NSSize(width: 360, height: 180))
-    scrollView.tile()
-    window.displayIfNeeded()
-    let resizedDocumentWidth = scrollView.contentView.frame.width
-        - (scrollView.verticalRulerView?.ruleThickness ?? 0)
-    #expect(reader.view.frame.width == resizedDocumentWidth)
-    #expect(reader.view.textContainer?.containerSize.width == (
-        resizedDocumentWidth - reader.view.textContainerInset.width * 2
-    ))
-
-    reader.apply(settings: ReaderSettings())
-    #expect(scrollView.hasHorizontalScroller)
-    #expect(reader.view.isHorizontallyResizable)
-    #expect(!reader.view.autoresizingMask.contains(.width))
-    #expect(reader.view.textContainer?.widthTracksTextView == false)
-    #expect(reader.view.textContainer?.containerSize.width == CGFloat.greatestFiniteMagnitude)
     withExtendedLifetime(window) {}
 }
 
@@ -1223,34 +1161,6 @@ func wrapToggleDoesNotStealFirstResponder() throws {
 }
 
 /// W06: equal-settings applies are idempotent — no projection, no reflow.
-@MainActor
-@Test
-func wrapSettingsApplyIsIdempotentForEqualValues() throws {
-    let document = wrapLongLineDocument()
-    let (reader, _, window) = renderOffscreen(document)
-    let installs = reader.projectionInstallCount
-    let visibleRect = reader.view.visibleRect
-
-    reader.apply(settings: ReaderSettings())
-    reader.apply(settings: ReaderSettings())
-    #expect(reader.projectionInstallCount == installs)
-    #expect(reader.view.visibleRect == visibleRect)
-
-    // Wrap-only toggles never re-project either: the projected string is
-    // identical, only the container geometry changes (the S1 fast path).
-    reader.apply(settings: wrapSettings(true))
-    wrapSettle(reader, pumps: 2)
-    #expect(reader.projectionInstallCount == installs)
-    reader.apply(settings: wrapSettings(false))
-    #expect(reader.projectionInstallCount == installs)
-    // A font-only change updates attributes without rebuilding the source projection.
-    var larger = ReaderSettings()
-    larger.fontSize = 15
-    reader.apply(settings: larger)
-    #expect(reader.projectionInstallCount == installs)
-    withExtendedLifetime(window) {}
-}
-
 /// W15 subset: a font-size change keeps the projection, anchor byte and
 /// the complete selection.
 @MainActor

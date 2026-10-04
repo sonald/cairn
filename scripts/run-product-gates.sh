@@ -61,7 +61,7 @@ collect_provider_pids() {
 }
 collect_provider_pids >"$provider_baseline"
 
-bash scripts/ci.sh
+bash scripts/ci.sh full
 
 self_test_log="$fixture_root/self-tests.log"
 if ! CODEINSIGHT_INDEX_CACHE_ROOT="$cache_root" \

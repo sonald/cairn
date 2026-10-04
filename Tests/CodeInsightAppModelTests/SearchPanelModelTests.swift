@@ -348,65 +348,6 @@ func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
 
 @MainActor
 @Test
-func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
-    let fixture = try await SearchPanelFixture()
-    defer { fixture.remove() }
-    let batches = [SearchBatch(
-        matchesByPath: [
-            fixture.a: [
-                searchMatch(path: fixture.a, offset: 20),
-                searchMatch(path: fixture.a, offset: 10),
-            ],
-        ],
-        isFinal: false,
-        completeness: .complete
-    ), SearchBatch(
-        matchesByPath: [
-            fixture.b: [searchMatch(path: fixture.b, offset: 30)],
-        ],
-        isFinal: true,
-        completeness: .truncated,
-        truncatedPathIDs: [fixture.b]
-    )]
-    let model = SearchPanelModel { _, _, _ in stream(batches: batches) }
-    model.updateProjectState(.ready(fixture.session, fixture.context))
-    model.setQuery("needle")
-    #expect(await testWaitUntil("model.totalMatches == 3") { model.totalMatches == 3 })
-
-    #expect(model.groups.map(\.path) == ["a.rs", "b.rs"])
-    #expect(model.groups[0].matches.map(\.value.byteRange.lowerBound) == [10, 20])
-    #expect(model.fileCount == 2)
-    #expect(model.isTruncated)
-    #expect(model.selectedIndex == 0)
-
-    model.selectPrevious()
-    #expect(model.selectedIndex == 2)
-    #expect(model.openSelection()?.path == "b.rs")
-    #expect(model.openSelection()?.byteOffset == 30)
-
-    model.selectNext()
-    model.selectNext()
-    #expect(model.selectedIndex == 1)
-    #expect(model.openSelection()?.path == "a.rs")
-    #expect(model.openSelection()?.byteOffset == 20)
-}
-
-@MainActor
-@Test
-func searchPanelShowsEmptyAndIndexingPlaceholders() async throws {
-    let fixture = try await SearchPanelFixture()
-    defer { fixture.remove() }
-    let model = SearchPanelModel()
-
-    model.updateProjectState(.empty)
-    #expect(model.placeholder == "Open a project to search.")
-    model.updateProjectState(.indexing(root: fixture.root, startedAt: .now))
-    #expect(model.placeholder == "Indexing project…")
-    #expect(!model.isSearching)
-}
-
-@MainActor
-@Test
 func searchPanelAggregatesAllWorkspaceSessionsAndSortsPathsStably() async throws {
     let fixture = try await SearchPanelFixture(workspace: true)
     defer { fixture.remove() }

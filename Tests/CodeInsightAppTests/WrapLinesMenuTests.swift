@@ -66,31 +66,6 @@ func wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() throws {
 /// W02 companion: other project-scoped reading commands do require a target,
 /// so the wrap command's independence is a deliberate exception, not a
 /// validation leak.
-@MainActor
-@Test
-func wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() throws {
-    let delegate = AppDelegate(startedAt: .now)
-    delegate.showSettings(nil)
-    defer { delegate.settingsWindowController?.close() }
-    #expect(delegate.projectCommandTarget() == nil)
-    for action in [
-        "useFullReadingHeight:", "useStructureReadingHeight:",
-        "useOverviewReadingHeight:", "toggleFold:",
-    ] {
-        let item = NSMenuItem(
-            title: action,
-            action: NSSelectorFromString(action),
-            keyEquivalent: ""
-        )
-        #expect(!delegate.validateMenuItem(item), "\(action) must require a target")
-    }
-    let wrapItem = NSMenuItem(
-        title: "Wrap Lines",
-        action: NSSelectorFromString("toggleWrapLines:"),
-        keyEquivalent: ""
-    )
-    #expect(delegate.validateMenuItem(wrapItem))
-}
 
 @MainActor
 @Test

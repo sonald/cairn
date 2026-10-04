@@ -1,111 +1,41 @@
 #!/usr/bin/env bash
-
 set -euo pipefail
-
 cd "$(dirname "$0")/.."
 
-python3 scripts/check-localizations.py
-
-export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/clang-module-cache}"
-export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$PWD/.build/swift-module-cache}"
-
-swift_options=()
-if [[ -n "${CODEX_SANDBOX:-}" ]]; then
-    swift_options=(
-        --disable-sandbox
-        --cache-path .build/cache
-        --config-path .build/config
-        --security-path .build/security
-        --manifest-cache local
-    )
-fi
-
-swift build ${swift_options[@]+"${swift_options[@]}"}
-swift_test_log=.build/ci-swift-test.log
-isolated_test_log=.build/ci-swift-test-isolated.log
-panel_test_log=.build/ci-swift-test-panels.log
-mouse_test_log=.build/ci-swift-test-mouse.log
-mouse_test=CodeInsightReaderUITests.nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick
-blank_mouse_test=CodeInsightReaderUITests.nativeBlankClicksKeepTheReadingPositionAndFoldState
-swift_test_summary_regex='^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites?)? passed after '
-font_process_test='readonlyFontProcessReplacementChangesRealFontWithoutChangingReaderSource'
-font_routing_test='readonlyFontDistributedNotificationRoutesToAppDelegateWithoutInstallingFonts'
-bookmark_test_one='CodeInsightAppTests.bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote'
-bookmark_test_two='CodeInsightAppTests.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
-panel_test_one='CodeInsightAppTests.productPolishRestoresUserPanelWidthsAcrossWindowRebuild'
-panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches'
-# AppKit window-state isolation: the bookmark pair and the panel-rebuild pair
-# each finish in their own SwiftPM process. Mixing the rebuild pair with a later
-# async inspector test can exit 0 before the Swift Testing summary. Never accept
-# that exit code alone. Every test must report completion exactly once.
-expected_main_test_count=1325
-expected_isolated_test_count=2
-expected_panel_test_count=2
-
-run_swift_test_batch() {
-    local log_file="$1" expected="$2" summary actual
-    shift 2
-    if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} "$@" \
-            2>&1 | tee "$log_file" >/dev/null; then
-        cat "$log_file" >&2
-        echo "FAIL: swift test command failed: $log_file" >&2
-        return 1
-    fi
-    if grep -qE '^✘ Test run' "$log_file"; then
-        cat "$log_file" >&2
-        echo "FAIL: swift test reported a failed run: $log_file" >&2
-        return 1
-    fi
-    summary="$(grep -E "$swift_test_summary_regex" "$log_file" || true)"
-    if [[ -z "$summary" ]]; then
-        cat "$log_file" >&2
-        echo "FAIL: swift test did not report a complete successful run: $log_file" >&2
-        return 1
-    fi
-    # Older toolchains print one aggregate summary line; newer ones print
-    # one per test target. Summing the passing summary lines matches both
-    # shapes without ever counting a failed or partial run.
-    actual="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$summary" \
-        | awk '{s+=$1} END {print s}')"
-    if [[ "$actual" != "$expected" ]]; then
-        cat "$log_file" >&2
-        echo "FAIL: swift test expected $expected tests got $actual: $log_file" >&2
-        return 1
-    fi
-    echo "PASS: batch total=$actual ($log_file)"
+usage() {
+    cat <<'EOF'
+usage: bash scripts/ci.sh <static|core|reader|engine|exact|app|full> [...]
+  static  localization and architecture checks only
+  core    domain types, Git snapshots, parser transport
+  reader  reader algorithms and native reader integration
+  engine  extractors, indexing, cache, search and navigation
+  exact   language-server protocol and process boundaries
+  app     application model, persistence and native app integration
+  full    all above plus app self-tests and fold performance gate
+No default full run. Choose the domains affected by your change.
+EOF
 }
+if [[ $# -eq 0 ]]; then usage; exit 2; fi
+run_static=false
+run_full=false
+filters=()
+for domain in "$@"; do
+    case "$domain" in
+        -h|--help) usage; exit 0 ;;
+        static) run_static=true ;;
+        core) filters+=('CodeInsightCoreTests\.|CodeInsightGitTests\.|TreeSitterKitTests\.') ;;
+        reader) filters+=('CodeInsightReaderCoreTests\.|CodeInsightReaderUITests\.') ;;
+        engine) filters+=('CodeInsightEngineTests\.|RustExtractorTests\.|PythonExtractorTests\.|TypeScriptExtractorTests\.') ;;
+        exact) filters+=('CodeInsightExactTests\.') ;;
+        app) filters+=('CodeInsightAppModelTests\.|CodeInsightAppTests\.') ;;
+        full) run_static=true; run_full=true; filters+=('.*') ;;
+        *) echo "Unknown domain: $domain" >&2; usage >&2; exit 2 ;;
+    esac
+done
 
-swift_test_failures=0
-run_swift_test_batch "$swift_test_log" "$expected_main_test_count" \
-    --skip "$bookmark_test_one" --skip "$bookmark_test_two" \
-    --skip "$panel_test_one" --skip "$panel_test_two" --skip "$mouse_test" --skip "$blank_mouse_test" \
-    --skip "$font_process_test" --skip "$font_routing_test" \
-    || swift_test_failures=$((swift_test_failures + 1))
-run_swift_test_batch "$isolated_test_log" "$expected_isolated_test_count" \
-    --filter "$bookmark_test_one|$bookmark_test_two" \
-    || swift_test_failures=$((swift_test_failures + 1))
-run_swift_test_batch "$panel_test_log" "$expected_panel_test_count" \
-    --filter "$panel_test_one|$panel_test_two" \
-    || swift_test_failures=$((swift_test_failures + 1))
-# Native mouse tracking also needs its own AppKit process: a combined run
-# can exit before the summary. Its isolated batch must still report completion.
-run_swift_test_batch "$mouse_test_log" 1 --filter "$mouse_test" \
-    || swift_test_failures=$((swift_test_failures + 1))
-run_swift_test_batch .build/ci-swift-test-blank-mouse.log 1 --filter "$blank_mouse_test" \
-    || swift_test_failures=$((swift_test_failures + 1))
-# Each font check needs a fresh registry and notification queue. In particular,
-# a delayed local unregister notification must not satisfy the distributed check.
-run_swift_test_batch .build/ci-swift-test-font-process.log 1 --filter "$font_process_test" \
-    || swift_test_failures=$((swift_test_failures + 1))
-run_swift_test_batch .build/ci-swift-test-font-routing.log 1 --filter "$font_routing_test" \
-    || swift_test_failures=$((swift_test_failures + 1))
-if [[ "$swift_test_failures" -ne 0 ]]; then
-    echo "FAIL: $swift_test_failures Swift test batch(es) failed" >&2
-    exit 1
-fi
-total_swift_test_count=$((expected_main_test_count + expected_isolated_test_count + expected_panel_test_count + 2 + 2))
-echo "PASS: swift test total=$total_swift_test_count (main=$expected_main_test_count isolated=$expected_isolated_test_count panels=$expected_panel_test_count mouse=2 fonts=2)"
-
+if "$run_static"; then
+for script in scripts/*.sh; do bash -n "$script"; done
+python3 scripts/check-localizations.py
 # Interactive readers must consume prepared data, never the synchronous compatibility builder.
 if identifier_scan_hits=$(rg -n 'identifierOccurrences\(' Sources/CodeInsightReaderUI Sources/CodeInsightApp); then
     echo "$identifier_scan_hits"
@@ -197,6 +127,79 @@ if grep -rnE "$swiftui_unstable_identity_regex" Sources; then
     exit 1
 fi
 
+fi
+
+if [[ ${#filters[@]} -eq 0 ]]; then exit 0; fi
+export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/clang-module-cache}"
+export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$PWD/.build/swift-module-cache}"
+swift_options=()
+if [[ -n "${CODEX_SANDBOX:-}" ]]; then
+    swift_options=(--disable-sandbox --cache-path .build/cache --config-path .build/config
+        --security-path .build/security --manifest-cache local)
+fi
+mkdir -p .build
+# Discovery builds the current tests. Never count source annotations or keep a
+# frozen total: deleted tests and parameterized tests are toolchain concerns.
+swift test ${swift_options[@]+"${swift_options[@]}"} list > .build/ci-test-list.txt
+filter="^($(IFS='|'; echo "${filters[*]}"))"
+# These native AppKit checks require a fresh process; shared window/font state
+# previously caused exit 0 without completing all targets.
+isolated=(
+    'CodeInsightAppTests\.bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote'
+    'CodeInsightAppTests\.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
+    'CodeInsightAppTests\.productPolishRestoresUserPanelWidthsAcrossWindowRebuild'
+    'CodeInsightAppTests\.productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches'
+    'CodeInsightReaderUITests\.nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick'
+    'CodeInsightReaderUITests\.nativeBlankClicksKeepTheReadingPositionAndFoldState'
+    'readonlyFontProcessReplacementChangesRealFontWithoutChangingReaderSource'
+    'readonlyFontDistributedNotificationRoutesToAppDelegateWithoutInstallingFonts'
+)
+isolated_filter="$(IFS='|'; echo "${isolated[*]}")"
+if ! grep -E "$filter" .build/ci-test-list.txt > .build/ci-selected-tests.txt; then
+    echo "FAIL: selected domains discovered no tests" >&2; exit 1
+fi
+expected_total=$(wc -l < .build/ci-selected-tests.txt | tr -d ' ')
+completed_total=0
+run_swift_test_batch() {
+    local name="$1" expected="$2" summary actual log_file=".build/ci-swift-test-$1.log"
+    shift 2
+    if [[ "$expected" -eq 0 ]]; then
+        echo "FAIL: empty test batch: $name" >&2; return 1
+    fi
+    if ! swift test --skip-build --no-parallel ${swift_options[@]+"${swift_options[@]}"} "$@" \
+            2>&1 | tee "$log_file" >/dev/null; then
+        cat "$log_file" >&2
+        echo "FAIL: swift test command failed: $log_file" >&2; return 1
+    fi
+    if grep -qE '^✘ Test run' "$log_file"; then
+        cat "$log_file" >&2; return 1
+    fi
+    summary="$(grep -E '^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites?)? passed after ' "$log_file" || true)"
+    actual="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$summary" | awk '{s+=$1} END {print s+0}')"
+    if [[ "$actual" != "$expected" ]]; then
+        cat "$log_file" >&2
+        echo "FAIL: discovered $expected tests but only $actual completed: $log_file" >&2; return 1
+    fi
+    completed_total=$((completed_total + actual))
+    echo "PASS: $name $actual tests ($log_file)"
+}
+main_count=$(grep -Ev "$isolated_filter" .build/ci-selected-tests.txt | wc -l | tr -d ' ')
+run_swift_test_batch selected "$main_count" --filter "$filter" --skip "$isolated_filter"
+index=0
+for isolated_test in "${isolated[@]}"; do
+    count=$(grep -Ec "$isolated_test" .build/ci-selected-tests.txt || true)
+    if [[ "$count" -gt 0 ]]; then
+        run_swift_test_batch "isolated-$index" "$count" --filter "$isolated_test"
+    fi
+    index=$((index + 1))
+done
+if [[ "$completed_total" != "$expected_total" ]]; then
+    echo "FAIL: discovered $expected_total tests, completed $completed_total" >&2; exit 1
+fi
+echo "PASS: selected domains total=$completed_total"
+
+if ! "$run_full"; then exit 0; fi
+swift build ${swift_options[@]+"${swift_options[@]}"}
 .build/debug/codeinsight-app --self-test-exact .
 .build/debug/codeinsight-app --self-test-diff .
 reading_cache="$(mktemp -d "${TMPDIR:-/private/tmp}/codeinsight-ci-reading-cache.XXXXXX")"

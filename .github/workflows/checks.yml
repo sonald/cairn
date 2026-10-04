@@ -1,0 +1,90 @@
+name: Affected checks
+
+on:
+  pull_request:
+    paths: ['Sources/**', 'Tests/**', 'Package.*', 'scripts/**', 'fixtures/**', 'goldset/**', '.github/workflows/checks.yml']
+  push:
+    branches: [main]
+    paths: ['Sources/**', 'Tests/**', 'Package.*', 'scripts/**', 'fixtures/**', 'goldset/**', '.github/workflows/checks.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: affected-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Select affected domains
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import subprocess
+          from pathlib import Path
+
+          base, head = os.environ['BASE_SHA'], os.environ['HEAD_SHA']
+          if not base or set(base) == {'0'}:
+              paths = subprocess.check_output(['git', 'ls-files'], text=True).splitlines()
+          else:
+              paths = subprocess.check_output(['git', 'diff', '--name-only', base, head], text=True).splitlines()
+          domains = {'static'}
+          all_domains = {'core', 'reader', 'engine', 'exact', 'app'}
+          for path in paths:
+              if path.endswith('.md'):
+                  continue
+              if path.startswith(('Sources/', 'Tests/')):
+                  module = path.split('/')[1]
+                  if 'Reader' in module:
+                      domains.update({'reader', 'app'})
+                  elif 'App' in module:
+                      domains.add('app')
+                  elif 'Exact' in module or 'ProcessGuard' in module:
+                      domains.update({'exact', 'app'})
+                  elif 'Extractor' in module or 'Engine' in module or 'CLI' in module:
+                      domains.update({'engine', 'reader', 'app'})
+                  else:
+                      domains.update(all_domains)
+              elif path.startswith(('Package.', 'scripts/ci.sh', '.github/workflows/checks.yml')):
+                  domains.update(all_domains)
+              elif path.startswith('fixtures/'):
+                  domains.update({'reader', 'engine', 'app'})
+              elif path.startswith('goldset/'):
+                  domains.add('engine')
+          selected = ' '.join(sorted(domains))
+          Path('.build').mkdir(exist_ok=True)
+          Path('.build/check-domains.txt').write_text(selected + '\n')
+          print('Selected:', selected)
+          PY
+      - name: Install build tools
+        run: brew install libgit2 ripgrep
+      - name: Run selected checks
+        run: |
+          set -o pipefail
+          read -r -a domains < .build/check-domains.txt
+          bash scripts/ci.sh "${domains[@]}" 2>&1 | tee .build/affected-checks.log
+      - name: Upload completed summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: affected-checks-${{ github.run_id }}
+          include-hidden-files: true
+          retention-days: 14
+          path: |
+            .build/check-domains.txt
+            .build/affected-checks.log
+            .build/ci-*.log
+            .build/ci-test-list.txt
+            .build/ci-selected-tests.txt

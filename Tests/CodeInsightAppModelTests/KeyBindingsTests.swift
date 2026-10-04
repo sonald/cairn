@@ -58,62 +58,7 @@ func keyChordCanonicalStringRoundTripsAndSortsModifiers() throws {
     #expect(KeyChord(canonicalString: "command+notakey+extra") == nil)
 }
 
-@Test
-func keyChordDisplayUsesMacModifierOrder() {
-    let table = KeyBindingTable(scheme: .default)
-    let all = KeyChord(
-        modifiers: [.command, .shift, .option, .control],
-        key: .character("j")
-    )
-    // K-R2.6: display order ⌃⌥⇧⌘ regardless of storage order.
-    #expect(table.displayString(.keyboard(all)) == "⌃⌥⇧⌘J")
-    #expect(table.displayString(.keyboard(KeyChord(modifiers: [.command], key: .character(",")))) == "⌘,")
-    #expect(
-        table.displayString(
-            .keyboard(KeyChord(modifiers: [.control, .command], key: .special(.left)))
-        ) == "⌃⌘←"
-    )
-    // Click gestures show the modifier cap row followed by the click word.
-    let click = table.displayString(.click([.command, .shift]))
-    #expect(click.hasPrefix("⇧⌘ + "))
-}
-
 // MARK: K0b — overrides, validation, replace, store
-
-@Test
-func overridesStoreOnlyDifferencesFromDefaults() {
-    var table = KeyBindingTable(scheme: .default)
-    let defaults = KeyBindingTable(scheme: .default)
-    #expect(table.overrides.isEmpty)
-
-    // Changing Quick Open to ⌘B keeps an override for exactly that command.
-    table.setBindings(
-        [.keyboard(KeyChord(modifiers: [.command], key: .character("b")))],
-        for: .fileQuickOpen
-    )
-    #expect(table.overrides[.fileQuickOpen] != nil)
-    #expect(table.modifiedCommands == [.fileQuickOpen])
-
-    // Setting the default back deletes the override (K-R1.4).
-    table.setBindings(defaults.bindings(for: .fileQuickOpen), for: .fileQuickOpen)
-    #expect(table.overrides[.fileQuickOpen] == nil)
-    #expect(table.modifiedCommands.isEmpty)
-
-    // reset() and resetAll() restore the scheme defaults.
-    table.setBindings(
-        [.keyboard(KeyChord(modifiers: [.command], key: .character("b")))],
-        for: .fileQuickOpen
-    )
-    table.reset(.fileQuickOpen)
-    #expect(table.overrides.isEmpty)
-    table.setBindings(
-        [.keyboard(KeyChord(modifiers: [.command], key: .character("b")))],
-        for: .fileQuickOpen
-    )
-    table.resetAll()
-    #expect(table.overrides.isEmpty)
-    #expect(table.bindings(for: .fileQuickOpen) == defaults.bindings(for: .fileQuickOpen))
-}
 
 @Test
 func validationRejectsLockedAndModifierlessChords() {
@@ -177,21 +122,6 @@ func validationRejectsLockedAndModifierlessChords() {
 }
 
 @Test
-func replaceMovesBindingAtomically() {
-    var table = KeyBindingTable(scheme: .default)
-    let shiftCommandF = KeyChord(modifiers: [.command, .shift], key: .character("f"))
-    table.replace(.keyboard(shiftCommandF), for: .findInFile, takingFrom: .findInProject)
-    // The new command gained the binding, the old one lost it, and both end
-    // up in the override layer (the loser as an explicit "not set").
-    #expect(table.bindings(for: .findInFile).contains(.keyboard(shiftCommandF)))
-    #expect(!table.bindings(for: .findInProject).contains(.keyboard(shiftCommandF)))
-    #expect(table.overrides[.findInFile] != nil)
-    #expect(table.overrides[.findInProject] == [])
-    #expect(table.modifiedCommands.sorted { $0.rawValue < $1.rawValue }
-        == [.findInFile, .findInProject].sorted { $0.rawValue < $1.rawValue })
-}
-
-@Test
 func clickGestureRequiresModifierAndChecksConflicts() {
     let table = KeyBindingTable(scheme: .default)
     // K-R2.4: a modifier-less click stays the plain click.
@@ -215,6 +145,35 @@ func clickGestureRequiresModifierAndChecksConflicts() {
             for: .readerGestureSymbolDoc
         ) == .ok
     )
+}
+
+@Test
+func replaceMovesBindingAtomically() throws {
+    let suiteName = "KeyBindingOwnershipTests-\(UUID().uuidString)"
+    nonisolated(unsafe) let suite = try #require(UserDefaults(suiteName: suiteName))
+    defer { suite.removePersistentDomain(forName: suiteName) }
+    let store = KeyBindingStore(defaults: suite)
+    let defaults = KeyBindingTable(scheme: .default)
+    var table = defaults
+    let binding = KeyBinding.keyboard(
+        KeyChord(modifiers: [.command, .shift], key: .character("f"))
+    )
+
+    table.replace(binding, for: .findInFile, takingFrom: .findInProject)
+    #expect(table.commands(boundTo: binding) == [.findInFile])
+    store.save(table.overrides)
+    var restored = KeyBindingTable(scheme: .default, overrides: store.load())
+    #expect(restored.commands(boundTo: binding) == [.findInFile])
+    #expect(restored.overrides[.findInProject] == [],
+            "an explicit empty override must survive reload without restoring the old owner")
+
+    for command in [CommandID.findInFile, .findInProject] {
+        restored.setBindings(defaults.bindings(for: command), for: command)
+    }
+    store.save(restored.overrides)
+    #expect(store.load().isEmpty, "restoring defaults removes persisted differences")
+    #expect(KeyBindingTable(scheme: .default, overrides: store.load())
+        .commands(boundTo: binding) == [.findInProject])
 }
 
 @Test

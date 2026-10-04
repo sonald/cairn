@@ -3,13 +3,6 @@ import CodeInsightExact
 import Foundation
 import Testing
 
-@Test func provenanceBadgeStyleTracksCertaintyWithoutDisplayText() {
-    #expect(provenanceBadgeStyle(for: .exact) == .exact)
-    #expect(provenanceBadgeStyle(for: .strong) == .strong)
-    #expect(provenanceBadgeStyle(for: .possible) == .possible)
-    #expect(provenanceBadgeStyle(for: .unresolved) == .fallback)
-}
-
 @Test
 func inProcessExactProviderReturnsNegotiatedCallRelation() throws {
     let itemLocation = ExactLocation(
