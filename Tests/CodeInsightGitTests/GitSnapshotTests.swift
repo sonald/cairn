@@ -755,7 +755,7 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
     #expect(Set(commit.listFiles().map(\.path))
         == ["src/lib.rs", "build/gen/schema.rs", "target/debug/out.rs"],
         "tracked files under built-in skipped directories stay visible in commits")
-    #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "vendor/dep/lib.rs"])
+    #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "vendor"], "counted like the worktree walk")
 
     let unruled = try WorktreeSnapshot(repositoryURL: fixture.root, languages: [.rust])
     #expect(Set(unruled.listFiles().map(\.path))

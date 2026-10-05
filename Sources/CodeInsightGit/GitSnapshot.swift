@@ -241,7 +241,10 @@ public final class CommitSnapshot: Snapshot, Sendable {
                         fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
                     )
                 }
-                return (captured, repository.objectFormat, oidString(commitID), excluded.sorted())
+                return (
+                    captured, repository.objectFormat, oidString(commitID),
+                    Self.topmostExcluded(excluded, rules: pathRules)
+                )
             }
 
         snapshotID = SnapshotID(rawValue: UUID())
@@ -281,6 +284,21 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public func readBytes(path: String) throws -> [UInt8] {
         guard let file = files[path] else { throw GitError.missingPath(path) }
         return file.bytes
+    }
+
+    /// Reports excluded files the way a worktree walk does: the topmost
+    /// directory a rule excludes stands for everything below it, so the
+    /// count means the same in both kinds of snapshot.
+    private static func topmostExcluded(_ paths: [String], rules: ProjectPathRules) -> [String] {
+        var result = Set<String>()
+        for path in paths {
+            let components = path.split(separator: "/").map(String.init)
+            let directory = (1..<max(1, components.count)).lazy
+                .map { components.prefix($0).joined(separator: "/") }
+                .first { rules.verdict(for: $0, isDirectory: true, appliesDefaults: false).isExcluded }
+            result.insert(directory ?? path)
+        }
+        return result.sorted()
     }
 }
 
