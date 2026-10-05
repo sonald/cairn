@@ -6,6 +6,26 @@ import TreeSitterKit
 import CTreeSitterRust
 
 @Test
+func damagedRootPreservesConstantInitializerScope() throws {
+    // Reduced from Codex's unified_exec.rs: the root itself is ERROR.
+    let source = """
+        const TIMEOUT: Duration = Duration::from_secs(30);
+        fn output(item: &Value) -> Option<&str> {
+        """
+    let parser = try #require(Parser(language: tree_sitter_rust()))
+    let tree = try #require(parser.parse(Array(source.utf8)))
+    #expect(tree.rootNode.kind == "ERROR")
+    let result = try extract(source)
+    let region = try #require(result.index.executableRegions.first {
+        $0.kind == .constantInitializer
+    })
+    let scope = try #require(result.index.scopes.first { $0.id == region.enclosingScopeID })
+    #expect(scope.kind == .module)
+    #expect(text(in: source, range: region.range) == "Duration::from_secs(30)")
+    #expect(result.index.calls.contains { $0.regionID == region.id })
+}
+
+@Test
 func languageExtractorExistentialMatchesRustExtractionContracts() throws {
     let source = "fn alpha() { alpha(); fn broken( { }"
     let bytes = Array(source.utf8)
@@ -771,4 +791,3 @@ func rustFieldFacetCarriesTypeRef() throws {
     #expect(inner.typeRef == .named(lineRange(of: "Inner", line: 3, in: source)))
     #expect(count.typeRef == .primitive(lineRange(of: "u32", line: 4, in: source)))
 }
-

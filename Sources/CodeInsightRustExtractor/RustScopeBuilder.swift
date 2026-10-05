@@ -57,7 +57,9 @@ struct RustScopeBuilder {
         declaration: RustDeclarationSite,
         byteOffset: UInt32
     ) {
-        if let kind = scopeKind(for: node) {
+        // A damaged file can have an ERROR root with valid declarations inside.
+        // It still needs a file scope for imports and constant initializers.
+        if let kind = scopeKind(for: node) ?? (parent == nil ? .module : nil) {
             pushScope(
                 owner: node,
                 kind: kind,
