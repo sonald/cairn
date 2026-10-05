@@ -72,11 +72,15 @@
 
 ## 项目搜索性能基线
 
-2026-10-05，可组合查询 P0：**停止于性能检查点，P1–P4 尚未实施**。Codex 的罕见单词查询首批结果三次均超过 100ms。采样显示时间主要花在扫描实现上，并非缺少索引：每次搜索前按文件构造 `URL` 做语言分类（约 40ms）、单线程逐字节比较（约 90ms）、无命中文件也建行号表（约 18ms）。因此先提速扫描，不做三元组索引（细节见 [query-plan.md](query-plan.md) P0.5）。
+2026-10-05，P0 已验收，**P0.5 扫描提速已验收；P1–P4 尚未实施**。P0 中 Codex 罕见词首批为 154.12ms，采样显示主要开销是逐文件 URL 分类、逐字节比较和无命中文件的行号表。P0.5 不新增索引或缓存，改为普通路径直接取扩展名、仅为命中文件建行号表、分开大小写扫描，并按 CPU 数并行处理连续内容段。末尾 `.` / `..` 的特殊路径保留原 URL 规范化，分类属性测试与旧实现一致。
 
-环境：MacBook Pro Mac15,6，Apple M3 Pro（11 核，5P+6E），36 GiB 内存；macOS 27.0（26A428），Xcode 27.0（27A266a），Swift 6.4。Release CLI、Homebrew libgit2。源码为 `ec55b9b016dc795c6c94d125a67c1d98f9ca1bf9` 加本工作树未提交的 P0 计时及错误根修复，Rust extractorVersion=9；测量二进制 SHA-256 为 `7ba463cf937736ec709ca51e5c845286704b501b39c0ee255e4c83965d5793cd`。
+工作任务只返回范围；消费者仍按原内容及文件顺序汇总，保持重复内容去重和 5,000 条上限的截断位置。第一批命中立即发送，后续达到 16 个文件、200 条命中或距上次发送 50ms 时发送；计时器也能在等待下一文件时发送已有结果。取消会传播到所有工作任务，5 秒截止后标记未处理路径；没有修改索引格式或抽取器版本。
 
-原始基线先在 Codex 的 `codex-rs/core/tests/suite/unified_exec.rs` 崩溃：tree-sitter 返回 `ERROR` 根，其中的常量初始化器没有文件作用域，触发 `RustScopeBuilder.pushRegionIfNeeded` 的断言。两行复现见 `damagedRootPreservesConstantInitializerScope` 回归测试。修复只为异常根补建模块作用域；抽取器版本 8→9 会使已有 Rust 缓存重建。以下所有数据均来自修复后的同一构建，不把崩溃运行算作成功样本。
+正则共享不可变编译实例，依据 [Apple 的线程安全说明](https://developer.apple.com/documentation/foundation/nsregularexpression?language=objc)。匹配字符串在各工作任务中保持不变。使用进度回调以便无命中的长时间回溯也能停止；每 64 次无命中进度回调检查取消/超时，实际命中始终检查。一次采样确认逐次检查任务状态与时钟会导致性能退化，因此保留间隔检查及无命中回溯超时回归。
+
+环境：MacBook Pro Mac15,6，Apple M3 Pro（11 核，5P+6E），36 GiB 内存；macOS 27.0（26A428），Xcode 27.0（27A266a），Swift 6.4。Release CLI、Homebrew libgit2。P0 测量时源码为 `ec55b9b016dc795c6c94d125a67c1d98f9ca1bf9` 加当时未提交的 P0 计时及错误根修复（现已提交），Rust extractorVersion=9；测量二进制 SHA-256 为 `7ba463cf937736ec709ca51e5c845286704b501b39c0ee255e4c83965d5793cd`。
+
+原始基线先在 Codex 的 `codex-rs/core/tests/suite/unified_exec.rs` 崩溃：tree-sitter 返回 `ERROR` 根，其中的常量初始化器没有文件作用域，触发 `RustScopeBuilder.pushRegionIfNeeded` 的断言。两行复现见 `damagedRootPreservesConstantInitializerScope` 回归测试。修复只为异常根补建模块作用域；抽取器版本 8→9 会使已有 Rust 缓存重建。P0 数据均来自修复后的同一构建，不把崩溃运行算作成功样本。P0.5 基于 `a3dc2b4` 加本次未提交修改，使用相同机器、工具链和语料；二进制 SHA-256 为 `714f7da2f07e03f67275496abaa18e4b1bcddef0a391d069a18ef89ee0c248c5`。
 
 语料均为干净工作区，仅索引 Rust，使用默认目录排除规则：
 
@@ -85,7 +89,7 @@
 | tokio | `/Users/siancao/.cache/cairn-corpora/tokio-tokio-1.47.1` | `be8ee45b3fc2d107174e586141b1cb12c93e2ddf` | 717 / 717 | 0 |
 | Codex | `/Users/siancao/work/readings/codex` | `315195492c80fdade38e917c18f9584efd599304` | 2,612 / 2,608 | 26 |
 
-每个项目使用两个新的隔离缓存目录，每个目录先冷索引一次，再用新进程热索引一次。冷仅指提取缓存为空，未清空操作系统文件缓存。热运行均确认 `extractedContents=0`，`reusedContents=uniqueContents`。进程耗时包含持久化写入完成，内部索引时间不包含该等待；RSS 为 `/usr/bin/time -l` 记录的进程峰值。
+P0 每个项目使用两个新的隔离缓存目录，每个目录先冷索引一次，再用新进程热索引一次。冷仅指提取缓存为空，未清空操作系统文件缓存。热运行均确认 `extractedContents=0`，`reusedContents=uniqueContents`。进程耗时包含持久化写入完成，内部索引时间不包含该等待；RSS 为 `/usr/bin/time -l` 记录的进程峰值。
 
 | 项目 / 缓存 | 内部索引 ms（两次） | 进程耗时 s（两次） | 峰值 RSS MiB（两次） | 退出后缓存总字节（两次） |
 | --- | --- | --- | --- | --- |
@@ -98,17 +102,21 @@
 
 每个查询使用 `search --persist --repeat 3 --json`：索引一次后连搜三次，未剔除第一轮，大小写不敏感。首批指调用 `session.search` 到收到首个非空批次；结束指流结束并完成 CLI 批次合并，不包含索引、最终排序、JSON 编码和 stdout。以下均为三次中位数。
 
-| 项目 | 查询 | 首批 ms | 结束 ms | 命中 / 文件 | 完整性 |
+| 项目 | 查询 | P0 首批 / 结束 ms | P0.5 首批 / 结束 ms | 命中 / 文件 | 完整性 |
 | --- | --- | --- | --- | --- | --- |
-| tokio | `spawn` | 11.58 | 25.69 | 3,033 / 262 | complete |
-| tokio | `IdleNotifiedSet` | 24.92 | 24.92 | 26 / 3 | complete |
-| tokio | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 15.90 | 34.96 | 190 / 58 | complete |
-| Codex | `spawn` | 43.44 | 152.96 | 4,511 / 527 | truncated |
-| Codex | `reconstruct_history_matches_live_compactions` | **154.12** | 154.14 | 1 / 1 | complete |
-| Codex | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 55.49 | 230.75 | 373 / 149 | complete |
+| tokio | `spawn` | 11.58 / 25.69 | **1.25 / 4.03** | 3,033 / 262 | complete |
+| tokio | `IdleNotifiedSet` | 24.92 / 24.92 | **2.01 / 2.12** | 26 / 3 | complete |
+| tokio | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 15.90 / 34.96 | **6.44 / 16.84** | 190 / 58 | complete |
+| Codex | `spawn` | 43.44 / 152.96 | **5.61 / 18.03** | 4,511 / 527 | truncated |
+| Codex | `reconstruct_history_matches_live_compactions` | 154.12 / 154.14 | **9.17 / 9.74** | 1 / 1 | complete |
+| Codex | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 55.49 / 230.75 | **49.87 / 113.35** | 373 / 149 | complete |
 
-Codex 罕见词首批原始样本为 154.120、154.396、153.577ms，均未达到 S8.1。`spawn` 在 `codex-rs/core/src/agent/control_tests.rs` 和 `codex-rs/core/src/tools/handlers/multi_agents_tests.rs` 达到每文件 200 条上限，结束时间不能称为完整结果时间。
+P0.5 的六个最终 JSON（包含坐标、片段、完整性和截断路径）与 P0 逐项相同。Codex 罕见词首批样本为 10.007、9.121、9.171ms，均低于 100ms；六项查询的首批和结束中位数均优于 P0。P0.5 复用 P0 的隔离缓存，每次均确认没有重新抽取；未重新跑冷索引，P1 的索引预算仍以此前基线比较。
 
-局限：当前引擎攒够 16 个命中文件或 200 条命中才发送中间批次，罕见词首批可能等到扫描结束；界面另有 150ms 防抖。本次是引擎/CLI 证据，没有执行原生显示验收，不是端到端 100ms 的 PASS。Codex 的 TypeScript/Python 和非源码文件不在本次范围。少量样本用于检查点决策，不是 p95 或发布承诺；P1 的 +10%/+15% 预算与 S8.2 组合查询尚未验证。
+同样的 Codex 罕见词 `--repeat 3` 命令，本轮对照 P0 二进制峰值 RSS 为 443,498,496 字节（422.95 MiB），P0.5 为 443,269,120 字节（422.73 MiB）；未见明显增加。P0.5 六次进程峰值为 tokio 79.45–82.03 MiB、Codex 418.25–423.77 MiB。这是含索引准备的进程峰值，不是搜索独占内存；并行待汇总数据只持有已有源码数组和每内容至多 201 个范围，大一个数量级的语料仍需重新评估。
 
-复现命令见[开发说明](development.md#性能复现)。本地原始输出在指定工作树 `.build/query-p0/`；修复前输出在 `.build/query-p0-before-root-fix/`，不提交整套日志。验证：Release 构建 PASS；Rust 抽取器 Swift Testing 完整摘要为 35 通过、0 失败、0 跳过；CLI 集成检查 3 通过、0 失败、0 跳过。回归用例修复前已复现 SIGTRAP。
+P0 的 Codex 罕见词首批原始样本为 154.120、154.396、153.577ms，均未达到 S8.1。`spawn` 在 `codex-rs/core/src/agent/control_tests.rs` 和 `codex-rs/core/src/tools/handlers/multi_agents_tests.rs` 达到每文件 200 条上限，结束时间不能称为完整结果时间。
+
+局限：P0.5 只验证引擎/CLI，界面仍有 150ms 防抖。本次是引擎/CLI 证据，没有执行原生显示验收，不是端到端 100ms 的 PASS。Codex 的 TypeScript/Python 和非源码文件不在本次范围。少量样本用于检查点决策，不是 p95 或发布承诺；P1 的 +10%/+15% 预算与 S8.2 组合查询尚未验证。
+
+复现命令见[开发说明](development.md#性能复现)。P0 原始输出在指定工作树 `.build/query-p0/`，崩溃修复前输出在 `.build/query-p0-before-root-fix/`；P0.5 的最终测量、回归摘要和采样在 `.build/query-p05/`，不提交整套日志。P0.5 验证：Release 构建 PASS；Swift Testing 完整摘要为搜索集成 26 通过、Core 属性/扫描 5 通过，总共 31 通过、0 失败、0 跳过；CLI 集成检查 3 通过、0 失败、0 跳过。测试覆盖固定种子的新旧扫描/分类参照、1 与 4 个 worker 的逐条输出及截断、取消全部 worker、首批与定时发送、无命中正则回溯超时；这些均不是原生 UI 验收。

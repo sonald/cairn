@@ -51,34 +51,70 @@ package func literalRanges(
     guard !pattern.isEmpty, pattern.count <= bytes.count else { return [] }
     var ranges: [ByteRange] = []
     var offset = 0
+    var nextCheckpoint = 0
+    let comparisonPattern = caseSensitive ? pattern : pattern.map(asciiFold)
     return try bytes.withUnsafeBufferPointer { haystack in
-        try pattern.withUnsafeBufferPointer { needle in
-            while offset <= haystack.count - needle.count {
-                if offset & 0xFFF == 0 {
-                    try Task.checkCancellation()
-                    if wallClockExpired() { break }
-                }
-                var matches = true
-                for patternOffset in needle.indices {
-                    let lhs = haystack[offset + patternOffset]
-                    let rhs = needle[patternOffset]
-                    if caseSensitive ? lhs != rhs : asciiFold(lhs) != asciiFold(rhs) {
-                        matches = false
-                        break
+        try comparisonPattern.withUnsafeBufferPointer { needle in
+            let lastStart = haystack.count - needle.count
+            let firstByte = needle[0]
+            if caseSensitive {
+                while offset <= lastStart {
+                    if offset >= nextCheckpoint {
+                        try Task.checkCancellation()
+                        if wallClockExpired() { break }
+                        // A match can jump across a 4 KiB boundary without landing on it.
+                        nextCheckpoint = (offset / 4096 + 1) * 4096
                     }
-                }
-                let range = ByteRange(lowerBound: UInt32(offset), upperBound: UInt32(offset + needle.count))
-                if matches, let wordBoundary, !wordBoundary.isWholeWord(range, in: bytes) {
-                    // Not a whole word here; a later overlapping start may still be one.
-                    offset += 1
-                } else if matches {
+                    guard haystack[offset] == firstByte else {
+                        offset += 1
+                        continue
+                    }
+                    var patternOffset = 1
+                    while patternOffset < needle.count,
+                          haystack[offset + patternOffset] == needle[patternOffset] {
+                        patternOffset += 1
+                    }
+                    guard patternOffset == needle.count else {
+                        offset += 1
+                        continue
+                    }
+                    let range = ByteRange(lowerBound: UInt32(offset), upperBound: UInt32(offset + needle.count))
+                    if let wordBoundary, !wordBoundary.isWholeWord(range, in: bytes) {
+                        offset += 1
+                        continue
+                    }
                     ranges.append(range)
-                    if let maximumMatches, ranges.count > maximumMatches {
-                        break
-                    }
+                    if let maximumMatches, ranges.count > maximumMatches { break }
                     offset += needle.count
-                } else {
-                    offset += 1
+                }
+            } else {
+                while offset <= lastStart {
+                    if offset >= nextCheckpoint {
+                        try Task.checkCancellation()
+                        if wallClockExpired() { break }
+                        nextCheckpoint = (offset / 4096 + 1) * 4096
+                    }
+                    guard asciiFold(haystack[offset]) == firstByte else {
+                        offset += 1
+                        continue
+                    }
+                    var patternOffset = 1
+                    while patternOffset < needle.count,
+                          asciiFold(haystack[offset + patternOffset]) == needle[patternOffset] {
+                        patternOffset += 1
+                    }
+                    guard patternOffset == needle.count else {
+                        offset += 1
+                        continue
+                    }
+                    let range = ByteRange(lowerBound: UInt32(offset), upperBound: UInt32(offset + needle.count))
+                    if let wordBoundary, !wordBoundary.isWholeWord(range, in: bytes) {
+                        offset += 1
+                        continue
+                    }
+                    ranges.append(range)
+                    if let maximumMatches, ranges.count > maximumMatches { break }
+                    offset += needle.count
                 }
             }
             return ranges

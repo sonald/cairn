@@ -477,7 +477,8 @@ func snapshotSearchCancellationTerminatesConsumer() async throws {
     let stream = try SnapshotSearchService(
         source: source,
         language: .rust,
-        extractor: RustExtractor()
+        extractor: RustExtractor(),
+        workerCount: 1
     ).search(
         ContentSearchQuery(pattern: "needle"),
         context: context(for: source)

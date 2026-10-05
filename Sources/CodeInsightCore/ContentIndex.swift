@@ -18,16 +18,20 @@ public struct LanguageMode: Codable, Hashable, Sendable {
 
     public static func classify(path: String, language: LanguageID) -> LanguageMode? {
         switch language {
-        case .rust:
-            guard URL(fileURLWithPath: path).pathExtension == "rs" else {
+        case .rust, .python:
+            let stringPath = path as NSString
+            var pathExtension = stringPath.pathExtension
+            if pathExtension.isEmpty {
+                let lastComponent = stringPath.lastPathComponent
+                if lastComponent == "." || lastComponent == ".." {
+                    // Preserve URL normalization for callers passing a directory traversal.
+                    pathExtension = URL(fileURLWithPath: path).pathExtension
+                }
+            }
+            guard pathExtension == (language == .rust ? "rs" : "py") else {
                 return nil
             }
-            return LanguageMode(language: .rust)
-        case .python:
-            guard URL(fileURLWithPath: path).pathExtension == "py" else {
-                return nil
-            }
-            return LanguageMode(language: .python)
+            return LanguageMode(language: language)
         case .typescript, .javascript:
             guard language == .typescript else { return nil }
             if path.hasSuffix(".ts")

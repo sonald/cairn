@@ -102,6 +102,16 @@ public struct SnapshotSearchService: Sendable {
     private let language: LanguageID
     private let extractor: any LanguageExtractor
     private let wallClockLimit: Duration
+    private let workerCount: Int
+    private let searchMatchesPerFile: Int
+    private let searchTotalMatches: Int
+
+    // Workers report ranges; only the consumer projects and publishes ordered results.
+    private enum ScanEvent: Sendable {
+        case content(Int, [UInt8]?, [ByteRange]?)
+        case workerFinished
+        case flush
+    }
 
     public init(source: any SnapshotContentSource) {
         self.init(
@@ -114,26 +124,21 @@ public struct SnapshotSearchService: Sendable {
     init(
         source: any SnapshotContentSource,
         language: LanguageID,
-        extractor: any LanguageExtractor
-    ) {
-        precondition(extractor.language == language)
-        self.source = source
-        self.language = language
-        self.extractor = extractor
-        wallClockLimit = .seconds(5)
-    }
-
-    init(
-        source: any SnapshotContentSource,
-        language: LanguageID,
         extractor: any LanguageExtractor,
-        wallClockLimit: Duration
+        wallClockLimit: Duration = .seconds(5),
+        workerCount: Int = ProcessInfo.processInfo.activeProcessorCount,
+        matchesPerFile: Int = 200,
+        totalMatches: Int = 5_000
     ) {
         precondition(extractor.language == language)
+        precondition(workerCount > 0 && matchesPerFile > 0 && totalMatches > 0)
         self.source = source
         self.language = language
         self.extractor = extractor
         self.wallClockLimit = wallClockLimit
+        self.workerCount = workerCount
+        searchMatchesPerFile = matchesPerFile
+        searchTotalMatches = totalMatches
     }
 
     public func search(
@@ -174,14 +179,16 @@ public struct SnapshotSearchService: Sendable {
         let searchedPathCount = files.count
         let excludedPathCount = candidates.count - files.count
         let wallClockLimit = wallClockLimit
+        let matchesPerFile = searchMatchesPerFile
+        let totalMatches = searchTotalMatches
+        let workerCount = workerCount
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 let startedAt = ContinuousClock.now
                 let filesByContent = Dictionary(grouping: files, by: \.contentID)
                 var seenContentIDs: Set<ContentID> = []
                 let contentIDs = files.compactMap {
-                    seenContentIDs.insert($0.contentID).inserted
-                        ? $0.contentID : nil
+                    seenContentIDs.insert($0.contentID).inserted ? $0.contentID : nil
                 }
                 let allPathIDs = Set(files.map(\.pathID))
                 var processedPathIDs: Set<PathID> = []
@@ -190,8 +197,15 @@ public struct SnapshotSearchService: Sendable {
                 var totalMatchCount = 0
                 var batchMatches: [PathID: [SearchMatch]] = [:]
                 var batchMatchCount = 0
+                var hasSentResults = false
+                var lastSentAt = startedAt
+                var flushTask: Task<Void, Never>?
+                defer { flushTask?.cancel() }
 
                 func flush(isFinal: Bool) {
+                    guard !Task.isCancelled else { return }
+                    flushTask?.cancel()
+                    flushTask = nil
                     continuation.yield(SearchBatch(
                         matchesByPath: batchMatches,
                         isFinal: isFinal,
@@ -200,146 +214,161 @@ public struct SnapshotSearchService: Sendable {
                         searchedPathCount: searchedPathCount,
                         excludedPathCount: excludedPathCount
                     ))
+                    hasSentResults = hasSentResults || !batchMatches.isEmpty
+                    lastSentAt = .now
                     batchMatches.removeAll(keepingCapacity: true)
                     batchMatchCount = 0
                 }
 
-                contentLoop: for contentID in contentIDs {
-                    if Task.isCancelled {
-                        continuation.finish()
-                        return
-                    }
-                    if Self.expired(startedAt, limit: wallClockLimit) {
-                        completeness = .truncated
-                        truncatedPathIDs.formUnion(allPathIDs.subtracting(processedPathIDs))
-                        break
-                    }
-
-                    let occurrences = filesByContent[contentID] ?? []
-                    guard let bytes = source.bytes(for: contentID) else {
-                        completeness = .truncated
-                        truncatedPathIDs.formUnion(occurrences.map(\.pathID))
-                        processedPathIDs.formUnion(occurrences.map(\.pathID))
-                        continue
-                    }
-                    if Task.isCancelled {
-                        continuation.finish()
-                        return
-                    }
-                    if Self.expired(startedAt, limit: wallClockLimit) {
-                        completeness = .truncated
-                        truncatedPathIDs.formUnion(allPathIDs.subtracting(processedPathIDs))
-                        break
-                    }
-
-                    let ranges: [ByteRange]
-                    if let regularExpression {
-                        guard bytes.count <= Self.regexContentBytes,
-                              let string = String(bytes: bytes, encoding: .utf8)
-                        else {
-                            completeness = .truncated
-                            truncatedPathIDs.formUnion(occurrences.map(\.pathID))
-                            processedPathIDs.formUnion(occurrences.map(\.pathID))
-                            continue
+                let events = AsyncThrowingStream<ScanEvent, Error>.makeStream()
+                do {
+                    try await withThrowingTaskGroup(of: Void.self) { group in
+                        defer {
+                            group.cancelAll()
+                            events.continuation.finish()
                         }
-                        ranges = Self.regexRanges(
-                            regularExpression,
-                            string: string,
-                            accepting: { range in
-                                wordBoundary?.isWholeWord(range, in: bytes) ?? true
-                            },
-                            startedAt: startedAt,
-                            wallClockLimit: wallClockLimit
-                        )
-                    } else {
-                        ranges = try literalRanges(
-                            literalPattern,
-                            in: bytes,
-                            caseSensitive: query.caseSensitive,
-                            wordBoundary: wordBoundary,
-                            maximumMatches: Self.matchesPerFile,
-                            wallClockExpired: {
-                                Self.expired(startedAt, limit: wallClockLimit)
-                            }
-                        )
-                    }
-
-                    if Task.isCancelled {
-                        continuation.finish()
-                        return
-                    }
-                    if Self.expired(startedAt, limit: wallClockLimit) {
-                        completeness = .truncated
-                        truncatedPathIDs.formUnion(allPathIDs.subtracting(processedPathIDs))
-                        break
-                    }
-
-                    let fileWasTruncated = ranges.count > Self.matchesPerFile
-                    let visibleRanges = ranges.prefix(Self.matchesPerFile)
-                    let lineTable = LineTable(bytes: bytes)
-                    for occurrence in occurrences {
-                        if Task.isCancelled {
-                            continuation.finish()
-                            return
-                        }
-                        if Self.expired(startedAt, limit: wallClockLimit) {
-                            completeness = .truncated
-                            truncatedPathIDs.formUnion(
-                                allPathIDs.subtracting(processedPathIDs)
-                            )
-                            break contentLoop
-                        }
-
-                        let remaining = Self.totalMatches - totalMatchCount
-                        let projectedRanges = visibleRanges.prefix(max(0, remaining))
-                        let matches = projectedRanges.compactMap { range -> SearchMatch? in
-                            guard let coordinate = lineTable.lineColumn(
-                                at: range.lowerBound
-                            ) else { return nil }
-                            let excerpt = Self.lineExcerpt(
-                                in: bytes,
-                                range: range,
-                                lineTable: lineTable
-                            )
-                            return SearchMatch(
-                                pathID: occurrence.pathID,
-                                byteRange: range,
-                                line: coordinate.line,
-                                column: coordinate.column,
-                                lineText: excerpt.text,
-                                lineTextRange: excerpt.range
-                            )
-                        }
-                        processedPathIDs.insert(occurrence.pathID)
-                        if !matches.isEmpty {
-                            batchMatches[occurrence.pathID] = matches
-                            batchMatchCount += matches.count
-                            totalMatchCount += matches.count
-                        }
-                        if fileWasTruncated || matches.count < visibleRanges.count {
-                            completeness = .truncated
-                            truncatedPathIDs.insert(occurrence.pathID)
-                        }
-
-                        if batchMatches.count >= Self.filesPerBatch
-                            || batchMatchCount >= Self.matchesPerBatch
-                        {
-                            flush(isFinal: false)
-                        }
-
-                        if totalMatchCount == Self.totalMatches {
-                            let unprocessed = allPathIDs.subtracting(processedPathIDs)
-                            if !unprocessed.isEmpty {
-                                completeness = .truncated
-                                truncatedPathIDs.formUnion(unprocessed)
-                                break contentLoop
+                        let count = min(workerCount, contentIDs.count)
+                        for worker in 0..<count {
+                            let lower = worker * contentIDs.count / count
+                            let upper = (worker + 1) * contentIDs.count / count
+                            group.addTask {
+                                defer { events.continuation.yield(.workerFinished) }
+                                for offset in lower..<upper {
+                                    try Task.checkCancellation()
+                                    if Self.expired(startedAt, limit: wallClockLimit) { return }
+                                    let bytes = source.bytes(for: contentIDs[offset])
+                                    try Task.checkCancellation()
+                                    if Self.expired(startedAt, limit: wallClockLimit) { return }
+                                    var ranges: [ByteRange]?
+                                    if let bytes {
+                                        if let regularExpression {
+                                            if bytes.count <= Self.regexContentBytes,
+                                               let string = String(bytes: bytes, encoding: .utf8) {
+                                                ranges = Self.regexRanges(
+                                                    regularExpression,
+                                                    string: string,
+                                                    accepting: { range in
+                                                        wordBoundary?.isWholeWord(range, in: bytes) ?? true
+                                                    },
+                                                    startedAt: startedAt,
+                                                    wallClockLimit: wallClockLimit,
+                                                    maximumMatches: matchesPerFile
+                                                )
+                                            }
+                                        } else {
+                                            ranges = try literalRanges(
+                                                literalPattern,
+                                                in: bytes,
+                                                caseSensitive: query.caseSensitive,
+                                                wordBoundary: wordBoundary,
+                                                maximumMatches: matchesPerFile,
+                                                wallClockExpired: {
+                                                    Self.expired(startedAt, limit: wallClockLimit)
+                                                }
+                                            )
+                                        }
+                                    }
+                                    try Task.checkCancellation()
+                                    if Self.expired(startedAt, limit: wallClockLimit) { return }
+                                    events.continuation.yield(.content(offset, bytes, ranges))
+                                }
                             }
                         }
+                        var finishedWorkers = 0
+                        var nextContent = 0
+                        var pending: [Int: (bytes: [UInt8]?, ranges: [ByteRange]?)] = [:]
+                        if count == 0 { return }
+                        eventLoop: for try await event in events.stream {
+                            try Task.checkCancellation()
+                            if Self.expired(startedAt, limit: wallClockLimit) { break }
+                            switch event {
+                            case .flush:
+                                if !batchMatches.isEmpty { flush(isFinal: false) }
+                            case .workerFinished:
+                                finishedWorkers += 1
+                                if finishedWorkers == count { break eventLoop }
+                            case let .content(offset, bytes, ranges):
+                                pending[offset] = (bytes, ranges)
+                                while let scanned = pending.removeValue(forKey: nextContent) {
+                                    try Task.checkCancellation()
+                                    if Self.expired(startedAt, limit: wallClockLimit) { break eventLoop }
+                                    let occurrences = filesByContent[contentIDs[nextContent]] ?? []
+                                    nextContent += 1
+                                    guard let bytes = scanned.bytes, let ranges = scanned.ranges else {
+                                        completeness = .truncated
+                                        truncatedPathIDs.formUnion(occurrences.map(\.pathID))
+                                        processedPathIDs.formUnion(occurrences.map(\.pathID))
+                                        continue
+                                    }
+                                    guard !ranges.isEmpty else {
+                                        processedPathIDs.formUnion(occurrences.map(\.pathID))
+                                        continue
+                                    }
+                                    let fileWasTruncated = ranges.count > matchesPerFile
+                                    let visibleRanges = ranges.prefix(matchesPerFile)
+                                    let lineTable = LineTable(bytes: bytes)
+                                    for occurrence in occurrences {
+                                        try Task.checkCancellation()
+                                        if Self.expired(startedAt, limit: wallClockLimit) { break eventLoop }
+                                        let remaining = totalMatches - totalMatchCount
+                                        let projectedRanges = visibleRanges.prefix(max(0, remaining))
+                                        let matches = projectedRanges.compactMap { range -> SearchMatch? in
+                                            guard let coordinate = lineTable.lineColumn(at: range.lowerBound)
+                                            else { return nil }
+                                            let excerpt = Self.lineExcerpt(in: bytes, range: range, lineTable: lineTable)
+                                            return SearchMatch(
+                                                pathID: occurrence.pathID,
+                                                byteRange: range,
+                                                line: coordinate.line,
+                                                column: coordinate.column,
+                                                lineText: excerpt.text,
+                                                lineTextRange: excerpt.range
+                                            )
+                                        }
+                                        processedPathIDs.insert(occurrence.pathID)
+                                        batchMatches[occurrence.pathID] = matches
+                                        batchMatchCount += matches.count
+                                        totalMatchCount += matches.count
+                                        if fileWasTruncated || matches.count < visibleRanges.count {
+                                            completeness = .truncated
+                                            truncatedPathIDs.insert(occurrence.pathID)
+                                        }
+                                        if !hasSentResults || batchMatches.count >= Self.filesPerBatch
+                                            || batchMatchCount >= Self.matchesPerBatch
+                                            || lastSentAt.duration(to: .now) >= .milliseconds(50) {
+                                            flush(isFinal: false)
+                                        } else if flushTask == nil {
+                                            let deadline = lastSentAt.advanced(by: .milliseconds(50))
+                                            flushTask = Task {
+                                                do {
+                                                    try await ContinuousClock().sleep(until: deadline)
+                                                    try Task.checkCancellation()
+                                                    events.continuation.yield(.flush)
+                                                } catch {}
+                                            }
+                                        }
+                                        if totalMatchCount == totalMatches {
+                                            break eventLoop
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
+                    if !Task.isCancelled {
+                        let unprocessed = allPathIDs.subtracting(processedPathIDs)
+                        if !unprocessed.isEmpty {
+                            completeness = .truncated
+                            truncatedPathIDs.formUnion(unprocessed)
+                        }
+                        flush(isFinal: true)
+                    }
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
                 }
-
-                flush(isFinal: true)
-                continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -567,17 +596,28 @@ public struct SnapshotSearchService: Sendable {
         string: String,
         accepting accepts: (ByteRange) -> Bool,
         startedAt: ContinuousClock.Instant,
-        wallClockLimit: Duration
+        wallClockLimit: Duration,
+        maximumMatches: Int = Self.matchesPerFile
     ) -> [ByteRange] {
         var ranges: [ByteRange] = []
+        var progressCallbacks = 0
         regex.enumerateMatches(
             in: string,
+            options: .reportProgress,
             range: NSRange(string.startIndex..., in: string)
         ) { result, _, stop in
-            guard !Task.isCancelled,
-                  !expired(startedAt, limit: wallClockLimit),
-                  let result,
-                  let range = Range(result.range, in: string),
+            if result == nil {
+                // Foundation can report progress at every candidate position.
+                // Sample these callbacks; always check when a match is delivered.
+                progressCallbacks += 1
+                guard progressCallbacks & 63 == 0 else { return }
+            }
+            guard !Task.isCancelled, !expired(startedAt, limit: wallClockLimit) else {
+                stop.pointee = true
+                return
+            }
+            guard let result else { return }
+            guard let range = Range(result.range, in: string),
                   let lower = range.lowerBound.samePosition(in: string.utf8),
                   let upper = range.upperBound.samePosition(in: string.utf8),
                   let lowerBound = UInt32(exactly: string.utf8.distance(
@@ -595,7 +635,7 @@ public struct SnapshotSearchService: Sendable {
             let hit = ByteRange(lowerBound: lowerBound, upperBound: upperBound)
             guard accepts(hit) else { return }
             ranges.append(hit)
-            if ranges.count > matchesPerFile { stop.pointee = true }
+            if ranges.count > maximumMatches { stop.pointee = true }
         }
         return ranges
     }

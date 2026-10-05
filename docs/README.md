@@ -14,7 +14,7 @@
 
 | 计划 | 内容 |
 | --- | --- |
-| [可组合查询](query-plan.md) | P0 测量已完成；下一步 P0.5 扫描提速（不做三元组索引），P1–P4 未实现，附[交互原型](query-prototype.html) |
+| [可组合查询](query-plan.md) | P0 已验收；P0、P0.5 已验收，P1–P4 未实现，附[交互原型](query-prototype.html) |
 
 仓库工作规则集中在 [AGENTS.md](../AGENTS.md)。README 面向使用者；源码中的类型、命令和脚本参数是实现细节的查证入口，不在文档复制一份完整清单。
 
