@@ -1052,29 +1052,62 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         @Flag(name: .long, help: "Match case sensitively.")
         var caseSensitive = false
 
+        @Option(name: .customLong("repeat"), help: "Run the search N times after indexing once; report timings to stderr.")
+        var repeatCount: Int?
+
+        func validate() throws {
+            if let repeatCount, repeatCount < 1 {
+                throw ValidationError("--repeat must be a positive integer.")
+            }
+        }
+
         func run() async throws {
+            let indexStarted = ContinuousClock.now
             let session = try indexProject(
                 options.project,
                 persist: options.persist,
                 language: options.languageID()
             )
-            let stream = try session.search(
-                ContentSearchQuery(
-                    pattern: pattern,
-                    isRegex: regex,
-                    caseSensitive: caseSensitive
-                ),
-                context: queryContext(for: session)
+            if repeatCount != nil {
+                timing("index ready_ms=\(milliseconds(since: indexStarted)) files=\(session.stats.fileCount) extracted=\(session.stats.extractedCount) reused=\(session.stats.reusedCount)")
+            }
+            let query = ContentSearchQuery(
+                pattern: pattern,
+                isRegex: regex,
+                caseSensitive: caseSensitive
             )
+            let context = queryContext(for: session)
             var matchesByPath: [PathID: [SearchMatch]] = [:]
             var completeness = Completeness.complete
             var truncatedPathIDs: Set<PathID> = []
-            for try await batch in stream {
-                for (pathID, matches) in batch.matchesByPath {
-                    matchesByPath[pathID, default: []].append(contentsOf: matches)
+            var firstResultTimes: [Double] = []
+            var completeTimes: [Double] = []
+            for iteration in 1...(repeatCount ?? 1) {
+                matchesByPath.removeAll(keepingCapacity: true)
+                truncatedPathIDs.removeAll(keepingCapacity: true)
+                completeness = .complete
+                let started = ContinuousClock.now
+                let stream = try session.search(query, context: context)
+                var firstResult: Double?
+                for try await batch in stream {
+                    if firstResult == nil, batch.matchesByPath.values.contains(where: { !$0.isEmpty }) {
+                        firstResult = milliseconds(since: started)
+                    }
+                    for (pathID, matches) in batch.matchesByPath {
+                        matchesByPath[pathID, default: []].append(contentsOf: matches)
+                    }
+                    completeness = batch.completeness
+                    truncatedPathIDs.formUnion(batch.truncatedPathIDs)
                 }
-                completeness = batch.completeness
-                truncatedPathIDs.formUnion(batch.truncatedPathIDs)
+                let complete = milliseconds(since: started)
+                if repeatCount != nil {
+                    if let firstResult { firstResultTimes.append(firstResult) }
+                    completeTimes.append(complete)
+                    timing("search run=\(iteration) first_result_ms=\(firstResult.map { String($0) } ?? "none") complete_ms=\(complete) matches=\(matchesByPath.values.reduce(0) { $0 + $1.count }) completeness=\(completeness)")
+                }
+            }
+            if repeatCount != nil {
+                timing("search median first_result_ms=\(median(firstResultTimes).map { String($0) } ?? "none") complete_ms=\(median(completeTimes)!) runs=\(completeTimes.count)")
             }
 
             let files = matchesByPath.map { pathID, matches in
@@ -1108,6 +1141,21 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                     print("Results truncated.")
                 }
             }
+        }
+
+        private func milliseconds(since start: ContinuousClock.Instant) -> Double {
+            let parts = start.duration(to: .now).components
+            return Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1e15
+        }
+
+        private func median(_ samples: [Double]) -> Double? {
+            guard !samples.isEmpty else { return nil }
+            let sorted = samples.sorted()
+            return (sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2
+        }
+
+        private func timing(_ message: String) {
+            FileHandle.standardError.write(Data((message + "\n").utf8))
         }
     }
 
@@ -1271,6 +1319,8 @@ private struct IndexStatsJSON: Codable {
     let calls: Int
     let imports: Int
     let elapsedMilliseconds: UInt64
+    let reusedContents: Int
+    let extractedContents: Int
     let filesWithErrorNodes: Int
 
     init(_ stats: IndexStats) {
@@ -1282,6 +1332,8 @@ private struct IndexStatsJSON: Codable {
         calls = stats.callCount
         imports = stats.importCount
         elapsedMilliseconds = stats.elapsedMilliseconds
+        reusedContents = stats.reusedCount
+        extractedContents = stats.extractedCount
         filesWithErrorNodes = stats.filesWithErrorNodes
     }
 }

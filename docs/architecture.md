@@ -69,3 +69,46 @@
 [KeyBindings](../Sources/CodeInsightAppModel/KeyBindings.swift) 是快捷键定义与用户覆盖的唯一来源。AppKit 接线消费有效绑定，设置页修改同一份模型，命令面板从菜单读取当前绑定；不要在工具栏另写一份默认键。
 
 本地化资源归各 target 的 bundle。AppModel 的 `model.*` 文案由模型 bundle 读取；App 调用相应的 `modelText`/`modelTextFormat`，不能用自己的 `localized` 查另一个 bundle。身份、状态与样式取结构化字段，不从已翻译标签反推。资源数量和测试数量不作为架构合同。
+
+## 项目搜索性能基线
+
+2026-10-05，可组合查询 P0：**停止于性能检查点，P1–P4 尚未实施**。Codex 的罕见单词查询首批结果三次均超过 100ms。采样显示时间主要花在扫描实现上，并非缺少索引：每次搜索前按文件构造 `URL` 做语言分类（约 40ms）、单线程逐字节比较（约 90ms）、无命中文件也建行号表（约 18ms）。因此先提速扫描，不做三元组索引（细节见 [query-plan.md](query-plan.md) P0.5）。
+
+环境：MacBook Pro Mac15,6，Apple M3 Pro（11 核，5P+6E），36 GiB 内存；macOS 27.0（26A428），Xcode 27.0（27A266a），Swift 6.4。Release CLI、Homebrew libgit2。源码为 `ec55b9b016dc795c6c94d125a67c1d98f9ca1bf9` 加本工作树未提交的 P0 计时及错误根修复，Rust extractorVersion=9；测量二进制 SHA-256 为 `7ba463cf937736ec709ca51e5c845286704b501b39c0ee255e4c83965d5793cd`。
+
+原始基线先在 Codex 的 `codex-rs/core/tests/suite/unified_exec.rs` 崩溃：tree-sitter 返回 `ERROR` 根，其中的常量初始化器没有文件作用域，触发 `RustScopeBuilder.pushRegionIfNeeded` 的断言。两行复现见 `damagedRootPreservesConstantInitializerScope` 回归测试。修复只为异常根补建模块作用域；抽取器版本 8→9 会使已有 Rust 缓存重建。以下所有数据均来自修复后的同一构建，不把崩溃运行算作成功样本。
+
+语料均为干净工作区，仅索引 Rust，使用默认目录排除规则：
+
+| 项目 | 本地路径 | 版本 | 文件 / 唯一内容 | 含语法错误的文件 |
+| --- | --- | --- | --- | --- |
+| tokio | `/Users/siancao/.cache/cairn-corpora/tokio-tokio-1.47.1` | `be8ee45b3fc2d107174e586141b1cb12c93e2ddf` | 717 / 717 | 0 |
+| Codex | `/Users/siancao/work/readings/codex` | `315195492c80fdade38e917c18f9584efd599304` | 2,612 / 2,608 | 26 |
+
+每个项目使用两个新的隔离缓存目录，每个目录先冷索引一次，再用新进程热索引一次。冷仅指提取缓存为空，未清空操作系统文件缓存。热运行均确认 `extractedContents=0`，`reusedContents=uniqueContents`。进程耗时包含持久化写入完成，内部索引时间不包含该等待；RSS 为 `/usr/bin/time -l` 记录的进程峰值。
+
+| 项目 / 缓存 | 内部索引 ms（两次） | 进程耗时 s（两次） | 峰值 RSS MiB（两次） | 退出后缓存总字节（两次） |
+| --- | --- | --- | --- | --- |
+| tokio / 冷 | 575、516 | 1.26、1.18 | 84.77、84.50 | 5,726,208、5,730,304 |
+| tokio / 热 | 365、349 | 0.41、0.39 | 81.30、79.52 | 5,726,208、5,730,304 |
+| Codex / 冷 | 4,082、3,813 | 9.47、9.31 | 510.61、512.12 | 36,569,088、36,995,072 |
+| Codex / 热 | 2,671、2,683 | 2.85、2.86 | 414.92、422.33 | 36,503,552、36,929,536 |
+
+缓存统计包含 SQLite 主文件及仍存在的 WAL/SHM；并发提取与 SQLite 布局会带来少量体积差异。P1 的首次建索引与缓存增幅应与相同语料、相同冷缓存持久化口径比较，不能把内部索引时间与进程耗时互换。
+
+每个查询使用 `search --persist --repeat 3 --json`：索引一次后连搜三次，未剔除第一轮，大小写不敏感。首批指调用 `session.search` 到收到首个非空批次；结束指流结束并完成 CLI 批次合并，不包含索引、最终排序、JSON 编码和 stdout。以下均为三次中位数。
+
+| 项目 | 查询 | 首批 ms | 结束 ms | 命中 / 文件 | 完整性 |
+| --- | --- | --- | --- | --- | --- |
+| tokio | `spawn` | 11.58 | 25.69 | 3,033 / 262 | complete |
+| tokio | `IdleNotifiedSet` | 24.92 | 24.92 | 26 / 3 | complete |
+| tokio | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 15.90 | 34.96 | 190 / 58 | complete |
+| Codex | `spawn` | 43.44 | 152.96 | 4,511 / 527 | truncated |
+| Codex | `reconstruct_history_matches_live_compactions` | **154.12** | 154.14 | 1 / 1 | complete |
+| Codex | `fn\s+[a-z_]*spawn\w*`（`--regex`） | 55.49 | 230.75 | 373 / 149 | complete |
+
+Codex 罕见词首批原始样本为 154.120、154.396、153.577ms，均未达到 S8.1。`spawn` 在 `codex-rs/core/src/agent/control_tests.rs` 和 `codex-rs/core/src/tools/handlers/multi_agents_tests.rs` 达到每文件 200 条上限，结束时间不能称为完整结果时间。
+
+局限：当前引擎攒够 16 个命中文件或 200 条命中才发送中间批次，罕见词首批可能等到扫描结束；界面另有 150ms 防抖。本次是引擎/CLI 证据，没有执行原生显示验收，不是端到端 100ms 的 PASS。Codex 的 TypeScript/Python 和非源码文件不在本次范围。少量样本用于检查点决策，不是 p95 或发布承诺；P1 的 +10%/+15% 预算与 S8.2 组合查询尚未验证。
+
+复现命令见[开发说明](development.md#性能复现)。本地原始输出在指定工作树 `.build/query-p0/`；修复前输出在 `.build/query-p0-before-root-fix/`，不提交整套日志。验证：Release 构建 PASS；Rust 抽取器 Swift Testing 完整摘要为 35 通过、0 失败、0 跳过；CLI 集成检查 3 通过、0 失败、0 跳过。回归用例修复前已复现 SIGTRAP。

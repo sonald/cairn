@@ -71,6 +71,28 @@ swift build --product codeinsight
 bash scripts/bench.sh /path/to/project 3
 ```
 
+项目搜索的索引后延迟使用 Release CLI，同一进程只建一次索引：
+
+```bash
+swift build -c release --product codeinsight
+python3 scripts/check-search-repeat.py .build/release/codeinsight
+.build/release/codeinsight search spawn --project /path/to/project --repeat 3 --json \
+  > /tmp/search-result.json 2> /tmp/search-timing.log
+```
+
+`--repeat N` 要求正整数；stdout 只输出最后一次搜索结果，stderr 记录索引就绪时间、每轮首个非空批次与流结束的毫秒数及中位数。无命中时首批为 `none`。搜索计时包含查询准备和批次合并，不包含建索引、最后的排序、JSON 编码与打印；`completeness=truncated` 表示结束时仍有截断，不等于完整扫描。省略 `--repeat` 不输出计时。原生输入防抖和绘制另行测量。
+
+冷/热持久化索引用新的隔离目录，先后执行两次；不要清理日常缓存：
+
+```bash
+query_cache=$(mktemp -d /tmp/cairn-query-cache.XXXXXX)
+CODEINSIGHT_INDEX_CACHE_ROOT="$query_cache" /usr/bin/time -l \
+  .build/release/codeinsight index /path/to/project --persist --json
+# 原命令再执行一次，reusedContents 应覆盖全部 uniqueContents，extractedContents 为 0。
+```
+
+JSON 的 `elapsedMilliseconds` 是内部索引时间；进程 wall time 另包含持久化写入完成和进程开销。`/usr/bin/time -l` 的 maximum resident set size 在 macOS 上以字节计。退出后统计缓存目录所有文件的字节数，包含仍存在的 WAL。当前测量及限制见[搜索性能基线](architecture.md#项目搜索性能基线)。
+
 Reader 真实工作量样本可选择相关 suite（`identifiers`、`gutter`、`projection`、`reflow`、`lifetime`）：
 
 ```bash
