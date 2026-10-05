@@ -53,6 +53,14 @@ public extension ReaderTheme {
         dynamicColor { isDark in highlightRGB(slot: slot, isDark: isDark) }
     }
 
+    func overviewHighlightColor(slot: UInt8) -> NSColor {
+        dynamicColor { isDark in overviewHighlightRGB(slot: slot, isDark: isDark) }
+    }
+
+    var overviewOccurrenceColor: NSColor {
+        dynamicColor(overviewOccurrenceRGB(isDark:))
+    }
+
     var chromeColor: NSColor {
         dynamicColor(chromeRGB(isDark:))
     }
@@ -534,7 +542,9 @@ public final class ReaderTextView {
     /// keyboard navigation — not for programmatic reveals/restores.
     package var onUserCaretChange: ((UInt32) -> Void)?
     private let backingTextStorage: NSTextStorage
-    private var displayMap: DisplayMap?
+    private var displayMap: DisplayMap? {
+        didSet { invalidateOverview() }
+    }
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
     private var typographyKey: ReaderTypographyKey
@@ -567,6 +577,9 @@ public final class ReaderTextView {
     private var occurrenceSelectionByteOffset: UInt32?
     /// Highlighted names and their color slots, shared by the project window.
     private var highlightedNames: [String: UInt8] = [:]
+    private var overviewRulerView: OverviewRulerView?
+    private var overviewCache: (content: OverviewContent, lines: ProjectedLines)?
+    private var overviewGeneration = 0
     /// The bracket beside the caret and its partner, as source byte offsets.
     private var bracketMatch: (bracket: UInt32, partner: UInt32?)?
     private var caretByteOffset: UInt32?
@@ -776,6 +789,9 @@ public final class ReaderTextView {
             return true
         }
         textView.layoutCompleted = { [weak self] in
+            // A scroll notifies before TextKit lays out the new viewport; the
+            // ruler's band reads that layout, so draw it again afterwards.
+            self?.overviewRulerView?.needsDisplay = true
             guard let self, !self.readerWorkStopped, !self.isCommittingProjection, !self.isRestoringViewport,
                   self.renderingCoordinator.hasRenderingAttributes,
                   let manager = self.view.textLayoutManager else { return }
@@ -918,6 +934,116 @@ public final class ReaderTextView {
         return identifierIndex
     }
 
+    // MARK: Overview ruler
+
+    /// The strip of whole-file marks; the host places it beside the scroll view.
+    public var overviewRuler: NSView {
+        if let overviewRulerView { return overviewRulerView }
+        let ruler = OverviewRulerView(reader: self)
+        overviewRulerView = ruler
+        return ruler
+    }
+
+    public static let overviewRulerWidth = OverviewRulerView.width
+
+    var overviewTheme: ReaderTheme { theme }
+
+    private func invalidateOverview() {
+        overviewCache = nil
+        overviewGeneration += 1
+        overviewRulerView?.needsDisplay = true
+    }
+
+    /// Marks by display line; rebuilt lazily after any source of marks changes.
+    func overviewContent() -> (content: OverviewContent, generation: Int) {
+        if let overviewCache { return (overviewCache.content, overviewGeneration) }
+        guard !isCommittingProjection, let document = displayedDocument, let map = displayMap
+        else { return (OverviewContent(), overviewGeneration) }
+        let lines = ProjectedLines(projection: map.projection, lineStarts: document.lineTable.lineStarts)
+        let lineStarts = document.lineTable.lineStarts
+        var content = OverviewContent(lineCount: lines.count)
+        func add(_ kind: OverviewContent.Kind, _ byte: UInt32, _ label: String) {
+            let position = lines.displayLine(ofByte: byte)
+            content.marks.append(.init(kind: kind, line: position.line, folded: position.folded, byteOffset: byte, label: label))
+        }
+        for (line, kind) in diffMarkers where lineStarts.indices.contains(line - 1) {
+            let label = switch kind {
+            case .added: localized("reader.overview.added")
+            case .removed: localized("reader.overview.removed")
+            case .changed: localized("reader.overview.changed")
+            }
+            add(.diff(kind), lineStarts[line - 1], label)
+        }
+        if let findMatchByteRanges {
+            let label = localized("reader.overview.find")
+            for range in findMatchByteRanges { add(.occurrence, range.lowerBound, label) }
+        } else if let offset = occurrenceSelectionByteOffset, let index = preparedIdentifierIndex {
+            let label = index.name(at: offset) ?? ""
+            for range in preparedOccurrences(in: document, at: offset) { add(.occurrence, range.lowerBound, label) }
+        }
+        if let index = preparedIdentifierIndex {
+            for (name, slot) in highlightedNames {
+                for range in index.occurrences(named: name) { add(.highlight(slot), range.lowerBound, name) }
+            }
+        }
+        for (line, labels) in bookmarkMarkers where lineStarts.indices.contains(line - 1) {
+            add(.bookmark, lineStarts[line - 1], localizedFormat("reader.bookmarks", labels.joined(separator: ", ")))
+        }
+        overviewCache = (content, lines)
+        return (content, overviewGeneration)
+    }
+
+    /// Display lines in view and the caret's display line.
+    func overviewViewport() -> (lines: Range<Int>?, caret: Int?) {
+        _ = overviewContent()
+        guard let lines = overviewCache?.lines, let document = displayedDocument
+        else { return (nil, nil) }
+        let caret = currentLineNumber.flatMap { line in
+            document.lineTable.lineStarts.indices.contains(line - 1)
+                ? lines.displayLine(ofByte: document.lineTable.lineStarts[line - 1]).line : nil
+        }
+        guard let manager = view.textLayoutManager, let content = manager.textContentManager,
+              let viewport = manager.textViewportLayoutController.viewportRange
+        else { return (nil, caret) }
+        // The viewport range includes overdraw; keep fragments actually in view.
+        let visible = view.visibleRect.offsetBy(dx: -view.textContainerOrigin.x, dy: -view.textContainerOrigin.y)
+        var top: Int?, bottom: Int?
+        manager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            guard frame.minY < visible.maxY else { return false }
+            guard frame.maxY > visible.minY else { return true }
+            let offset = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+            if offset != NSNotFound, let byte = self.sourceByteOffset(forDisplay: offset) {
+                let line = lines.displayLine(ofByte: byte).line
+                top = top ?? line
+                bottom = line
+            }
+            return true
+        }
+        guard let top, let bottom else { return (nil, caret) }
+        return (top..<max(top + 1, bottom + 1), caret)
+    }
+
+    /// Centers display line `line`, as dragging the ruler does.
+    func scrollToOverviewLine(_ line: Int) {
+        guard let lines = overviewCache?.lines,
+              let location = visibleDisplayOffset(forByte: lines.sourceByte(ofDisplayLine: line)),
+              let scrollView = view.enclosingScrollView
+        else { return }
+        view.scrollRangeToVisible(NSRange(location: location, length: 0))
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        let clipView = scrollView.contentView
+        let targetY = ReaderViewportGeometry.characterRect(displayLocation: location, in: view)
+            .map { $0.midY - clipView.bounds.height / 2 } ?? clipView.bounds.minY
+        clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: clampVerticalScrollOrigin(targetY, clipView: clipView)))
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    /// 1-based source line of `byte`, for the ruler's tooltips.
+    func overviewSourceLine(ofByte byte: UInt32) -> Int {
+        displayedDocument?.lineTable.lineColumn(at: byte).map { Int($0.line) } ?? 0
+    }
+
     // MARK: Highlighted names
 
     /// Names to paint with their color slots. Matching is lexical: same
@@ -979,6 +1105,7 @@ public final class ReaderTextView {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
         redisplayRenderedText()
+        invalidateOverview()
     }
 
     /// TextKit 2 draws each line fragment in its own subview, which the text
@@ -3327,6 +3454,7 @@ public final class ReaderTextView {
         // an unchanged gutter can move TextKit's wrapped viewport.
         guard diffMarkers != markers else { return }
         diffMarkers = markers
+        invalidateOverview()
         refreshFoldedDiffMarkers()
         refreshFoldExposures()
         if let scrollView = view.enclosingScrollView ?? scrollView {
@@ -3343,6 +3471,7 @@ public final class ReaderTextView {
         }
         guard bookmarkMarkers != markers else { return }
         bookmarkMarkers = markers
+        invalidateOverview()
         refreshVisibleBookmarkMarkers()
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
@@ -3767,6 +3896,7 @@ public final class ReaderTextView {
         updateLayout: Bool = true
     ) {
         occurrenceCount = logicalCount ?? ranges.count
+        invalidateOverview()
         renderingCoordinator.setOccurrences(
             ranges.filter { $0 != primarySelectionRange },
             primary: primarySelectionRange
@@ -3991,6 +4121,7 @@ public final class ReaderTextView {
         guard currentLineNumber != line else { return }
         currentLineNumber = line
         view.needsDisplay = true
+        overviewRulerView?.needsDisplay = true
     }
 
     private func updateRulerThickness() {
@@ -4654,6 +4785,7 @@ public final class ReaderTextView {
 
     private func applyThemeColors() {
         view.backgroundColor = historicalSnapshot ? theme.histReaderColor : theme.backgroundColor
+        overviewRulerView?.needsDisplay = true
     }
 
     private static func project(

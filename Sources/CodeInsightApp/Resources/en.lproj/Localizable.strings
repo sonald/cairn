@@ -650,6 +650,8 @@
 "main.highlight.full" = "All %lld highlight colors are in use; remove one first";
 "main.bracket.none" = "No bracket beside the caret";
 "main.bracket.notInside" = "The caret is not inside brackets";
+"settings.overviewRuler" = "Show overview marks beside the scroller";
+"settings.overviewRuler.help" = "A narrow strip at the reader’s right edge marks highlights, find matches, bookmarks and differences across the whole file. Click a mark to go there; drag along the strip to scroll.";
 "settings.blockEndAnnotations" = "Label the end of long blocks";
 "settings.blockEndAnnotations.help" = "Rust and TypeScript: after the closing brace of a block of 12 lines or more, show which block it ends. Click the label to go to the block's start.";
 "panel.search.word" = "Whole word";

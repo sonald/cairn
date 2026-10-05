@@ -5143,6 +5143,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let findStatusLabel = NSTextField(labelWithString: "")
     private let findCloseButton = NSButton()
     private weak var scrollView: NSScrollView?
+    private var overviewRulerWidth: NSLayoutConstraint?
+    private var showsOverviewRuler = true
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
     private var displayedLanguageMode: LanguageMode?
@@ -5323,6 +5325,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(scrollView)
+        let overviewRuler = textView.overviewRuler
+        overviewRuler.translatesAutoresizingMaskIntoConstraints = false
+        readerArea.addSubview(overviewRuler)
+        let overviewRulerWidth = overviewRuler.widthAnchor.constraint(equalToConstant: ReaderTextView.overviewRulerWidth)
+        self.overviewRulerWidth = overviewRulerWidth
         readerArea.addSubview(readingSetView)
         readerArea.addSubview(previewArea)
         readerArea.addSubview(label)
@@ -5330,9 +5337,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewArea.wantsLayer = true
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: overviewRuler.leadingAnchor),
             scrollView.topAnchor.constraint(equalTo: readerArea.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+            overviewRuler.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            overviewRuler.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            overviewRuler.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+            overviewRulerWidth,
             readingSetView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
             readingSetView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
             readingSetView.topAnchor.constraint(equalTo: readerArea.topAnchor),
@@ -5617,7 +5628,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         scopeHeader.addSubview(scopeHeaderDivider)
         NSLayoutConstraint.activate([
             scopeHeader.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
-            scopeHeader.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            // The overview ruler stays uncovered: its top marks the file's start.
+            scopeHeader.trailingAnchor.constraint(equalTo: textView.overviewRuler.leadingAnchor),
             scopeHeader.topAnchor.constraint(equalTo: readerArea.topAnchor),
             scopeHeader.heightAnchor.constraint(equalToConstant: 26),
             scopeHeaderContent.leadingAnchor.constraint(
@@ -6280,6 +6292,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         exclusionBadge.update(style: .limited, text: localized("main.rules.fileExcluded"), theme: readerTheme)
         if showsCompareControls { renderFunctionSummary() }
         textView.apply(settings: settings)
+        showsOverviewRuler = settings.overviewRuler
+        updateOverviewRulerVisibility()
         readingSetView.apply(settings: settings)
         emptyStateView?.apply(theme: readerTheme)
         previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
@@ -6353,7 +6367,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         pathRow.isHidden = true
         readingHeightControl.isEnabled = false
         label.isHidden = true
-        scrollView?.isHidden = true
+        setCodeViewHidden(true)
         if let emptyStateView {
             emptyStateView.updateRecentLanguages(recentLanguages)
             emptyStateView.updateRecentStatus(trusted: recentStatus.trusted, lastRead: recentStatus.lastRead)
@@ -6391,11 +6405,23 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         self.emptyStateView = emptyStateView
     }
 
+    /// The overview ruler belongs to the code view and hides with it.
+    private func setCodeViewHidden(_ hidden: Bool) {
+        scrollView?.isHidden = hidden
+        updateOverviewRulerVisibility()
+    }
+
+    private func updateOverviewRulerVisibility() {
+        let hidden = !showsOverviewRuler || scrollView?.isHidden != false
+        textView.overviewRuler.isHidden = hidden
+        overviewRulerWidth?.constant = hidden ? 0 : ReaderTextView.overviewRulerWidth
+    }
+
     func removeEmptyState(placeholder: String) {
         emptyStateView?.removeFromSuperview()
         emptyStateView = nil
         guard displayedReadingSetKey == nil else { return }
-        scrollView?.isHidden = false
+        setCodeViewHidden(false)
         readingHeightControl.isEnabled = displayedDocument != nil
         if displayedFile == nil {
             label.stringValue = placeholder
@@ -7171,7 +7197,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         label.isHidden = true
         clearPreview()
         textView.clear()
-        scrollView?.isHidden = true
+        setCodeViewHidden(true)
         readingSetView.isHidden = false
         readingHeightControl.isHidden = true
         readingHeightControl.isEnabled = false
@@ -7233,7 +7259,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewView = view
         previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
         previewArea.isHidden = false
-        scrollView?.isHidden = true
+        setCodeViewHidden(true)
         label.isHidden = true
         readingSetView.isHidden = true
     }
@@ -7648,7 +7674,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         else { return }
         displayedReadingSetKey = nil
         readingSetView.isHidden = true
-        scrollView?.isHidden = false
+        setCodeViewHidden(false)
         readingHeightControl.isHidden = false
         readingHeightControl.isEnabled = false
         readingHeightShortcutLabel.isHidden = true

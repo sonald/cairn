@@ -122,6 +122,8 @@ public struct ReaderSettings: Equatable, Sendable {
     public var hoverDocs: Bool
     /// Name long blocks after their closing `}` (Rust, TypeScript).
     public var blockEndAnnotations: Bool
+    /// Show the overview ruler beside the reader's scroller.
+    public var overviewRuler: Bool
 
     public init(
         lineHeightMultiple: Double = 1.3,
@@ -166,6 +168,7 @@ public struct ReaderSettings: Equatable, Sendable {
         wrapLines = false
         hoverDocs = true
         blockEndAnnotations = true
+        overviewRuler = true
     }
 
     public init(defaults: UserDefaults) {
@@ -225,6 +228,9 @@ public struct ReaderSettings: Equatable, Sendable {
         blockEndAnnotations = (defaults.object(forKey: Keys.blockEndAnnotations) as? NSNumber)?
             .boolValue
             ?? true
+        overviewRuler = (defaults.object(forKey: Keys.overviewRuler) as? NSNumber)?
+            .boolValue
+            ?? true
         // Revision 2 (UI redesign): settings saved before it hold the old
         // defaults for every key; adopt the new ones once where unchanged.
         if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
@@ -257,6 +263,7 @@ public struct ReaderSettings: Equatable, Sendable {
         validated.wrapLines = wrapLines
         validated.hoverDocs = hoverDocs
         validated.blockEndAnnotations = blockEndAnnotations
+        validated.overviewRuler = overviewRuler
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -294,6 +301,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.wrapLines, forKey: Keys.wrapLines)
         defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
         defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
+        defaults.set(validated.overviewRuler, forKey: Keys.overviewRuler)
     }
 
     private enum Keys {
@@ -318,6 +326,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let wrapLines = "reader.wrapLines"
         static let hoverDocs = "reader.hoverDocs"
         static let blockEndAnnotations = "reader.blockEndAnnotations"
+        static let overviewRuler = "reader.overviewRuler"
     }
 }
 
@@ -368,6 +377,29 @@ public struct ReaderTheme: Equatable, Sendable {
             return [0xBFEFEF, 0xE6D5FF, 0xCFF5C4, 0xFFD3DC, 0xCCE0FF, 0xFFDDB3][index]
         case .auto, .light:
             return [0xCDE6E4, 0xE3DAF0, 0xD8E8C8, 0xF2D6D9, 0xD3DEEF, 0xF4DCC2][index]
+        }
+    }
+
+    /// Overview-ruler mark of highlight slot `slot`: the fill's hue at a
+    /// strength that stays visible as a 3pt mark.
+    public func overviewHighlightRGB(slot: UInt8, isDark: Bool) -> UInt32 {
+        let index = Int((max(slot, 1) - 1) % Self.highlightSlotCount)
+        switch resolvedSelection(isDark: isDark) {
+        case .dark:
+            return [0x5FC4BC, 0xA890DA, 0x8CC46A, 0xE07C88, 0x7AA3E0, 0xE8A55C][index]
+        case .siClassic:
+            return [0x00A0A0, 0x8A4FE0, 0x3AAA2A, 0xE0406A, 0x2F6FE0, 0xF08A1A][index]
+        case .auto, .light:
+            return [0x2E9C94, 0x8A6BC2, 0x5E9A3A, 0xC8505E, 0x3F74C4, 0xD9822B][index]
+        }
+    }
+
+    /// Overview-ruler mark of find matches and the clicked name's occurrences.
+    public func overviewOccurrenceRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xE6BE5A
+        case .siClassic: 0xE0A800
+        case .auto, .light: 0xC08A1E
         }
     }
 

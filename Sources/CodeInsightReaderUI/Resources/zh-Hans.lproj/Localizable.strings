@@ -10,6 +10,12 @@
 "reader.height.full" = "完整";
 "reader.height.overview" = "概览";
 "reader.height.structure" = "结构";
+"reader.overview.line" = "第 %lld 行 · %@";
+"reader.overview.folded" = "%@（已折叠）";
+"reader.overview.find" = "查找命中";
+"reader.overview.added" = "新增";
+"reader.overview.removed" = "删除";
+"reader.overview.changed" = "修改";
 "reader.tests" = "⋯ 测试 · %@ · %@";
 
 /* 符号悬浮文档卡片。 */

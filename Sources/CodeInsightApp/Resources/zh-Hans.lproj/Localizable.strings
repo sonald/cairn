@@ -650,6 +650,8 @@
 "main.highlight.full" = "已用满 %lld 种高亮颜色，请先取消一个";
 "main.bracket.none" = "光标旁没有括号";
 "main.bracket.notInside" = "光标不在括号内";
+"settings.overviewRuler" = "在滚动条旁显示概览标记";
+"settings.overviewRuler.help" = "在阅读区右缘用短线标出全文的高亮、查找命中、书签和差异位置。点击标记跳到那里，在竖条上拖动可以滚动。";
 "settings.blockEndAnnotations" = "标注长代码块的结尾";
 "settings.blockEndAnnotations.help" = "Rust 和 TypeScript：块长 12 行以上时，在闭合的 } 后显示它属于哪个块。点击标注跳到块开头。";
 "panel.search.word" = "全词匹配";
