@@ -975,14 +975,22 @@ public final class ReaderTextView {
         guard let layoutManager = view.textLayoutManager, displayedDocument != nil else { return }
         installRenderingValidator(in: layoutManager)
         if let viewportRange = layoutManager.textViewportLayoutController.viewportRange {
-            // A menu command changes no selection, and TextKit keeps drawing
-            // the fragments it already rendered. Rebuilding just the viewport's
-            // fragments (same text, same geometry) makes the new fills appear.
-            layoutManager.invalidateLayout(for: viewportRange)
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
             validateVisibleRenderingAttributes(in: layoutManager)
         }
-        view.needsDisplay = true
+        redisplayRenderedText()
+    }
+
+    /// TextKit 2 draws each line fragment in its own subview, which the text
+    /// view's own `needsDisplay` never reaches. A change of fills alone (a
+    /// menu command moves no selection) must ask every fragment to redraw, or
+    /// added and removed fills appear only after the lines scroll.
+    private func redisplayRenderedText() {
+        func mark(_ view: NSView) {
+            view.needsDisplay = true
+            view.subviews.forEach(mark)
+        }
+        mark(view)
     }
 
     /// When the clicked name is also highlighted its fill stays the

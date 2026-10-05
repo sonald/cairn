@@ -381,3 +381,44 @@ func readonlyScrollStylesFragmentsTextKitValidatedOutsideTheViewport() throws {
     let expected = ReaderTheme(settings: ReaderSettings()).color(for: .functionName)
     #expect(readonlyRGBA(color) == readonlyRGBA(expected))
 }
+
+@MainActor
+private func readonlyBackground(at offset: Int, reader: ReaderTextView) -> NSColor? {
+    guard let manager = reader.view.textLayoutManager, let content = manager.textContentManager else { return nil }
+    var color: NSColor?
+    manager.enumerateRenderingAttributes(from: content.documentRange.location, reverse: false) { _, attributes, range in
+        let lower = content.offset(from: content.documentRange.location, to: range.location)
+        let upper = content.offset(from: content.documentRange.location, to: range.endLocation)
+        if lower <= offset, offset < upper { color = attributes[.backgroundColor] as? NSColor; return false }
+        return true
+    }
+    return color
+}
+
+/// Regression (2026-10-04 native acceptance 1.4): a highlight change made
+/// from a menu moves no selection; the fills changed but lines already on
+/// screen kept their old paint until they scrolled away. TextKit 2 draws
+/// fragments in subviews, so every one of them must be asked to redraw.
+@MainActor @Test
+func highlightChangesClearFillsAndRedrawEveryRenderedFragment() async throws {
+    let document = try readonlyInvalidationDocument()
+    let (reader, window) = readonlyInvalidationReader(document)
+    defer { window.close() }
+    await reader.waitForIdentifierPreparation()
+    let other = (String(decoding: document.bytes, as: UTF8.self) as NSString).range(of: "other").location
+    func descendants(_ view: NSView) -> [NSView] { view.subviews + view.subviews.flatMap(descendants) }
+
+    // Fragment views are layer-backed; the pending redraw lives on the layer.
+    func undrawn() -> [NSView] { descendants(reader.view).filter { $0.layer?.needsDisplay() != true } }
+    window.displayIfNeeded()
+    #expect(!descendants(reader.view).isEmpty, "TextKit renders fragments in subviews")
+
+    reader.setHighlightedNames(["other": 1])
+    #expect(readonlyBackground(at: other, reader: reader) != nil)
+    #expect(undrawn().isEmpty, "an added fill redraws every rendered fragment")
+    window.displayIfNeeded()
+
+    reader.setHighlightedNames([:])
+    #expect(readonlyBackground(at: other, reader: reader) == nil, "a cleared name keeps no fill")
+    #expect(undrawn().isEmpty, "a removed fill redraws every rendered fragment")
+}
