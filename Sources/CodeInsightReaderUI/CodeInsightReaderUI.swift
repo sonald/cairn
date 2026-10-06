@@ -2404,7 +2404,11 @@ public final class ReaderTextView {
         // During a wrapped width hook the clip already has its new width,
         // while character geometry still belongs to the old document-view width.
         // Reuse that old horizontal probe position instead of choosing another source character.
-        if let previousViewportWidth { visible.size.width = previousViewportWidth }
+        // visibleRect starts behind the ruler inset, which the wrapped document width excludes.
+        if let previousViewportWidth {
+            let insets = view.enclosingScrollView?.contentView.contentInsets
+            visible.size.width = previousViewportWidth + (insets?.left ?? 0) + (insets?.right ?? 0)
+        }
         // Zero-size or unmounted surfaces keep only settings and selection;
         // a stable anchor forms once real geometry exists (D3.2).
         guard visible.height > 1, visible.width > 1 else {
@@ -4744,7 +4748,10 @@ public final class ReaderTextView {
     }
 
     private func configureWrapping(in scrollView: NSScrollView, previousViewportStart: (any NSTextLocation)?) {
-        let width = scrollView.contentView.bounds.width
+        // The clip's bounds start behind the ruler (negative x by its inset);
+        // wrapped text may only use the part the reader can actually see.
+        let clipView = scrollView.contentView
+        let width = clipView.bounds.width - clipView.contentInsets.left - clipView.contentInsets.right
         // Do not consume the container-width transition before a real viewport exists.
         guard width > 1, scrollView.contentView.bounds.height > 1 else {
             lastViewportRestoreWasLimited = true

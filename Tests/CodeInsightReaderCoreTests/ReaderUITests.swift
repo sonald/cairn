@@ -290,6 +290,23 @@ func readingGeometryUsesClipWidthWithLegacyScroller() {
     #expect(abs(disabledReaderWidth - disabledAvailableWidth) <= 1)
     #expect(abs(disabledReaderWidth - readerWidth - rulerWidth) <= 1)
     #expect(abs(disabledAvailableWidth - availableWidth - rulerWidth) <= 1)
+
+    // Wrapped text must end at the visible edge: the clip's bounds start
+    // behind the ruler, so its full width overshoots by the ruler inset.
+    reader.display(document: ReaderDocument(bytes: Array(String(repeating: "wrapped words ", count: 400).utf8)))
+    var wrapped = ReaderSettings()
+    wrapped.wrapLines = true
+    for settings in [wrapped, { var larger = wrapped; larger.fontSize += 2; return larger }()] {
+        reader.apply(settings: settings)
+        window.displayIfNeeded()
+        let clip = scrollView.contentView
+        let visibleWidth = clip.bounds.width - clip.contentInsets.left - clip.contentInsets.right
+        #expect(clip.contentInsets.left > 0)
+        #expect(abs(reader.view.frame.width - visibleWidth) <= 0.5,
+                "frame=\(reader.view.frame.width), visible=\(visibleWidth), insets=\(clip.contentInsets)")
+        #expect(abs((reader.view.textContainer?.size.width ?? 0)
+                    - (visibleWidth - reader.view.textContainerInset.width * 2)) <= 0.5)
+    }
     withExtendedLifetime(window) {}
 }
 
