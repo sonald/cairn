@@ -130,7 +130,7 @@ func readonlyNaturalBoundsMovementDoesNotCancelReflow() {
 }
 
 @MainActor
-@Test
+@Test(.readerFontEnvironment)
 func readonlyFontEnvironmentChangeRejectsQueuedOldCorrection() {
     let document = ReaderDocument(bytes: Array(String(repeating: "// source line\n", count: 100).utf8))
     let (reader, _, window) = s6NativeReader(document)

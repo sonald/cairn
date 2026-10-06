@@ -12,7 +12,7 @@ private func readonlyMergedTicketMainQueueTurn() async {
 }
 
 @MainActor
-@Test
+@Test(.readerFontEnvironment)
 func readonlyReflowWidthFontWidthBeforeQueueDrainPreservesSourceAndPixelAnchor() async throws {
     _ = NSApplication.shared
     let source = (0..<160).map { i in

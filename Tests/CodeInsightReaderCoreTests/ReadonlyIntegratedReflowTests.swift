@@ -108,7 +108,7 @@ private func readonlyIntegratedCopy(_ reader: ReaderTextView) throws -> String {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(2)))
+@Test(.timeLimit(.minutes(2)), .readerFontEnvironment)
 func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async throws {
     let source = readonlyIntegratedSource()
     for entry in [90, 172] {
@@ -194,7 +194,7 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(2)))
+@Test(.timeLimit(.minutes(2)), .readerFontEnvironment)
 func readonlyIntegratedTwoWindowFontEnvironmentKeepsIndependentAnchorsAndSelections() async throws {
     let source = readonlyIntegratedSource()
     let document = try await readonlyIntegratedSyntax(readonlyIntegratedPlain(source))

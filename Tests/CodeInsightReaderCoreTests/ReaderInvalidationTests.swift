@@ -251,7 +251,7 @@ func readonlyInvalidationSyntaxReusesUnchangedFoldProjection() throws {
     #expect(reader.view.string != projected)
 }
 
-@MainActor @Test
+@MainActor @Test(.readerFontEnvironment)
 func readonlyInvalidationFontEnvironmentRefreshesAttributesWithoutCharacters() throws {
     let document = try readonlyInvalidationDocument()
     let (reader, window) = readonlyInvalidationReader(document)
