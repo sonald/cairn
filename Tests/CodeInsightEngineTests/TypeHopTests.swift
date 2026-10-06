@@ -161,7 +161,7 @@ func draftCodecRejectsOutOfRangeTypeRef() throws {
         containsErrorNodes: original.containsErrorNodes
     )
     let tamperedJSON = try JSONEncoder().encode(tampered)
-    var data = Data([0x43, 0x49, 0x44, 0x58, 0x03])
+    var data = Data(encoded.prefix(5))
     data.append(try (tamperedJSON as NSData).compressed(using: .lzfse) as Data)
 
     #expect(throws: DraftCodecError.self) {

@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct TypeScriptExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 2
+    public static let extractorVersion: UInt32 = 4
 
     #if DEBUG
     @TaskLocal
@@ -434,7 +434,9 @@ let tsPrimitiveNames: Set<String> = [
         }
         let scopeID = pushScope(body, kind: .function, parent: currentScope())
         pushRegion(
-            body,
+            // Nested declarations deliberately have no facet. Retain their header
+            // here for same:fn queries without widening the lexical body scope.
+            emitted ? body : node,
             kind: isMethod ? .method : .function,
             scopeID: scopeID,
             facetIndex: emitted ? UInt32(symbols.count - 1) : nil
@@ -913,6 +915,7 @@ let tsPrimitiveNames: Set<String> = [
         calls: calls,
         imports: imports,
         exports: exports,
-        lineTable: LineTable(bytes: bytes)
+        lineTable: LineTable(bytes: bytes),
+        regions: contentRegions(in: root, language: .typescript)
     )
 }

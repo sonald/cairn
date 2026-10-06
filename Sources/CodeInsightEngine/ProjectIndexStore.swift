@@ -125,7 +125,9 @@ struct SnapshotView: Sendable {
         }
         let activeManifest = SnapshotManifest(
             snapshotID: manifest.snapshotID,
-            files: activeFiles
+            files: activeFiles,
+            ruleExcludedPathCount: manifest.ruleExcludedPathCount,
+            nonSourcePathCount: manifest.nonSourcePathCount
         )
         var contentIndexes: [ContentIndexKey: ContentIndex] = [:]
         var contentKeysByPath: [PathID: ContentIndexKey] = [:]

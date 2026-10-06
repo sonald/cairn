@@ -9,7 +9,7 @@
 
 **Cairn** is a native, read-only macOS code reader for understanding unfamiliar projects. CodeInsight remains the Swift package and module name. Browse source, follow symbols and relations, and compare Git snapshots without editing files or checking out another commit.
 
-- Rust, Python, and TypeScript/TSX syntax indexing, symbol search, and text search.
+- Rust, Python, and TypeScript/TSX syntax indexing, symbol search, and composable project queries.
 - A Context window that follows symbols or the enclosing function, previews binding types, and can be pinned.
 - Optional rust-analyzer, Pyright, and typescript-language-server analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
@@ -48,12 +48,15 @@ These are default shortcuts; Settings → Keybindings shows effective bindings. 
 
 Source indexing currently classifies `.rs`, `.py`, `.ts`, and `.tsx`; JavaScript/JSX and declaration-only or alternate extensions are not full source-analysis modes. Non-source previews do not offer relations, folding, bookmarks, comparison, or search controls. Exact results depend on provider capabilities and the local environment; “Verified” is not a claim of complete runtime knowledge.
 
+Use `⇧⌘F` for docked project search: `lock await same:fn`, `lock OR mutex`, `-path:tests/`, and `in:code` combine text, paths, and syntax regions. Query history restores with the project; `⌥⌘G` / `⇧⌥⌘G` browse results. See [query behavior and current validation limits](docs/product.md#搜索选项).
+
 ## CLI
 
 ```bash
 swift build --product codeinsight
 .build/debug/codeinsight --help
 .build/debug/codeinsight index /path/to/project --stats
+.build/debug/codeinsight search 'lock await same:fn -path:tests/' --project /path/to/project --json
 .build/debug/codeinsight resolve src/main.rs:12:9 --project /path/to/project --type-hop
 ```
 

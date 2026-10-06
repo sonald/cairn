@@ -92,9 +92,10 @@ private func typeScriptGrammar(for mode: LanguageMode) -> OpaquePointer? {
 }
 
 private func typeScriptTokenKind(_ node: Node) -> HighlightKind? {
+    if let kind = contentRegionKind(nodeKind: node.kind, language: .typescript) {
+        return kind == .comment ? .comment : .string
+    }
     switch node.kind {
-    case "comment": return .comment
-    case "string", "regex", "string_fragment", "escape_sequence", "`": return .string
     case "number": return .number
     case "true", "false", "null", "undefined": return .keyword
     case "type_identifier", "predefined_type": return .typeName
@@ -196,7 +197,8 @@ private func typeScriptWalk(
         if ["function_declaration", "generator_function_declaration", "class_declaration",
             "method_definition", "public_field_definition", "enum_declaration"].contains(node.kind),
            child.byteRange == node.child(namedField: "name")?.byteRange,
-           child.kind != "computed_property_name"
+           child.kind != "computed_property_name",
+           contentRegionKind(nodeKind: child.kind, language: .typescript) == nil
         { continue }
         let isBody = node.kind == "function_declaration"
             || node.kind == "generator_function_declaration"
@@ -245,7 +247,8 @@ private func appendTypeScriptDeclaration(
           let name = typeScriptText(bytes, range: coreRange(nameNode))
     else { return }
     let nameRange = coreRange(nameNode)
-    if nameNode.kind != "computed_property_name" {
+    if nameNode.kind != "computed_property_name",
+       contentRegionKind(nodeKind: nameNode.kind, language: .typescript) == nil {
         let highlight: HighlightKind = kind == .field ? .property
             : (kind == .class || kind == .enum ? .declarationTitle : .functionName)
         spans.append(HighlightSpan(range: nameRange, kind: highlight))

@@ -53,6 +53,11 @@ public extension ReaderTheme {
         dynamicColor { isDark in highlightRGB(slot: slot, isDark: isDark) }
     }
 
+    /// Project-search condition color; drawn as an underline, never a fill.
+    func queryConditionColor(index: Int) -> NSColor {
+        dynamicColor { isDark in queryConditionRGB(index: index, isDark: isDark) }
+    }
+
     func overviewHighlightColor(slot: UInt8) -> NSColor {
         dynamicColor { isDark in overviewHighlightRGB(slot: slot, isDark: isDark) }
     }
@@ -577,6 +582,7 @@ public final class ReaderTextView {
     private var occurrenceSelectionByteOffset: UInt32?
     /// Highlighted names and their color slots, shared by the project window.
     private var highlightedNames: [String: UInt8] = [:]
+    private var queryHits: (hits: [(range: ByteRange, condition: Int)], contentID: ContentID?) = ([], nil)
     private var overviewRulerView: OverviewRulerView?
     private var overviewCache: (content: OverviewContent, lines: ProjectedLines)?
     private var overviewGeneration = 0
@@ -780,6 +786,7 @@ public final class ReaderTextView {
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
             self.drawHighlightRings(in: textView, dirtyRect: rect)
+            self.drawQueryHitUnderlines(in: textView, dirtyRect: rect)
             self.drawBracketMatch(in: textView, dirtyRect: rect)
             self.drawBlockEndAnnotations(in: textView, dirtyRect: rect)
         }
@@ -1054,6 +1061,17 @@ public final class ReaderTextView {
         refreshHighlights()
     }
 
+    /// Project-search hits for one file, underlined in their condition colors.
+    /// Ignored unless `contentID` is the displayed document's content.
+    public func setQueryHits(_ hits: [(range: ByteRange, condition: Int)], contentID: ContentID?) {
+        // Results re-render often while streaming; repaint only on a real change.
+        guard contentID != queryHits.contentID || hits.count != queryHits.hits.count
+            || !zip(hits, queryHits.hits).allSatisfy({ $0.range == $1.range && $0.condition == $1.condition })
+        else { return }
+        queryHits = (hits, contentID)
+        redisplayRenderedText()
+    }
+
     /// The identifier at the caret, or at the active click occurrence.
     public var identifierAtCaret: String? {
         guard let index = preparedIdentifierIndex else { return nil }
@@ -1145,6 +1163,27 @@ public final class ReaderTextView {
                 path.lineWidth = 1
                 ring.setStroke()
                 path.stroke()
+            }
+        }
+    }
+
+    /// Project-search hits in the displayed file, as condition-colored underlines.
+    /// TextKit 2 ignores underline rendering attributes, so they are drawn here.
+    private func drawQueryHitUnderlines(in textView: NSTextView, dirtyRect: NSRect) {
+        guard !queryHits.hits.isEmpty, let contentID = queryHits.contentID,
+              displayedDocument?.contentID == contentID, let map = displayMap,
+              let viewport = viewportDisplayRange()
+        else { return }
+        for hit in queryHits.hits {
+            guard let projected = map.project(byteRange: hit.range) else { continue }
+            let color = theme.queryConditionColor(index: hit.condition)
+            for range in projected.visible where NSIntersectionRange(range, viewport).length > 0 {
+                for segment in ReaderViewportGeometry.visibleRects(
+                    forDisplayRange: range, in: textView, clipTo: textView.visibleRect
+                ) where segment.intersects(dirtyRect) {
+                    color.setFill()
+                    NSRect(x: segment.minX, y: segment.maxY - 2.5, width: segment.width, height: 2).fill()
+                }
             }
         }
     }
@@ -3652,6 +3691,24 @@ public final class ReaderTextView {
         view.scrollRangeToVisible(displayRange)
         view.showFindIndicator(for: displayRange)
         return true
+    }
+
+    public var selectedSourceText: String? { sourceText(forDisplaySelection: view.selectedRange()) }
+
+    /// Reuses the reader's projection when selecting a project-search hit.
+    public func revealSearchMatch(range: ByteRange) {
+        clearProjectionSelection()
+        invalidateReflowSequence()
+        if isFocusMode { _ = followFocusForExplicitNavigation(to: range.lowerBound) }
+        else { _ = unfoldAncestors(containing: range.lowerBound) }
+        guard let displayRange = displayMap?.project(byteRange: range)?.visible.first else { return }
+        primarySelectionRange = nil
+        pendingOccurrenceActivation = nil
+        view.selectedTextAttributes = nativeSelectedTextAttributes
+        view.setSelectedRange(displayRange)
+        updateCurrentLine(byteOffset: range.lowerBound)
+        view.scrollRangeToVisible(displayRange)
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { view.showFindIndicator(for: displayRange) }
     }
 
     public func captureVisibleDecorationState() {

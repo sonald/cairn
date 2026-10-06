@@ -6,6 +6,16 @@ import TreeSitterKit
 import CTreeSitterRust
 
 @Test
+func implementationNamesUseReceiverTypeInsteadOfLifetime() throws {
+    let result = try extract("struct Synced; trait Lock {} impl<'a> Lock for &'a mut Synced { fn lock(self) {} }")
+    let relation = try #require(result.index.implRelations.first)
+    #expect(result.names.resolve(relation.typeNameID) == "Synced")
+    #expect(relation.traitNameID.map(result.names.resolve) == "Lock")
+    let implementation = try #require(result.index.symbols.first { $0.kind == .rustImpl })
+    #expect(result.names.resolve(implementation.nameID) == "Synced")
+}
+
+@Test
 func damagedRootPreservesConstantInitializerScope() throws {
     // Reduced from Codex's unified_exec.rs: the root itself is ERROR.
     let source = """

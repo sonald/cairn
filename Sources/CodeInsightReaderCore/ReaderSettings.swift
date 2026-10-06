@@ -124,6 +124,7 @@ public struct ReaderSettings: Equatable, Sendable {
     public var blockEndAnnotations: Bool
     /// Show the overview ruler beside the reader's scroller.
     public var overviewRuler: Bool
+    public var showQuerySuggestions: Bool
 
     public init(
         lineHeightMultiple: Double = 1.3,
@@ -169,6 +170,7 @@ public struct ReaderSettings: Equatable, Sendable {
         hoverDocs = true
         blockEndAnnotations = true
         overviewRuler = true
+        showQuerySuggestions = true
     }
 
     public init(defaults: UserDefaults) {
@@ -231,6 +233,9 @@ public struct ReaderSettings: Equatable, Sendable {
         overviewRuler = (defaults.object(forKey: Keys.overviewRuler) as? NSNumber)?
             .boolValue
             ?? true
+        showQuerySuggestions = (defaults.object(forKey: Keys.showQuerySuggestions) as? NSNumber)?
+            .boolValue
+            ?? true
         // Revision 2 (UI redesign): settings saved before it hold the old
         // defaults for every key; adopt the new ones once where unchanged.
         if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
@@ -264,6 +269,7 @@ public struct ReaderSettings: Equatable, Sendable {
         validated.hoverDocs = hoverDocs
         validated.blockEndAnnotations = blockEndAnnotations
         validated.overviewRuler = overviewRuler
+        validated.showQuerySuggestions = showQuerySuggestions
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -302,6 +308,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
         defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
         defaults.set(validated.overviewRuler, forKey: Keys.overviewRuler)
+        defaults.set(validated.showQuerySuggestions, forKey: Keys.showQuerySuggestions)
     }
 
     private enum Keys {
@@ -327,6 +334,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let hoverDocs = "reader.hoverDocs"
         static let blockEndAnnotations = "reader.blockEndAnnotations"
         static let overviewRuler = "reader.overviewRuler"
+        static let showQuerySuggestions = "reader.showQuerySuggestions"
     }
 }
 
@@ -361,6 +369,19 @@ public struct ReaderTheme: Equatable, Sendable {
         syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
         blockEndAnnotations = settings.blockEndAnnotations
+    }
+
+    /// Zero-based inclusion condition color for result markers and underlines.
+    public func queryConditionRGB(index: Int, isDark: Bool) -> UInt32 {
+        let slot = max(0, index) % 4
+        switch resolvedSelection(isDark: isDark) {
+        case .dark:
+            return [0x7EA8E6, 0xDB8CC0, 0x6CC4A2, 0xE2A55E][slot]
+        case .siClassic:
+            return [0x1F4FB8, 0x9C2A7A, 0x1F7A52, 0xA35A00][slot]
+        case .auto, .light:
+            return [0x2F67B1, 0xA0457F, 0x2E8064, 0xA8661C][slot]
+        }
     }
 
     /// Number of colors a reader can assign to highlighted names.

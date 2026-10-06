@@ -132,7 +132,7 @@ let package = Package(
         ),
         .target(
             name: "TreeSitterKit",
-            dependencies: ["CTreeSitter"]
+            dependencies: ["CTreeSitter", "CodeInsightCore"]
         ),
         .target(name: "CodeInsightCore"),
         .target(
@@ -328,6 +328,8 @@ let package = Package(
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
                 "CodeInsightTypeScriptExtractor",
+                "CodeInsightRustExtractor",
+                "CodeInsightPythonExtractor",
             ]
         ),
         .testTarget(

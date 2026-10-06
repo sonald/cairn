@@ -193,6 +193,44 @@ public struct ImplRelation: Codable, Sendable {
     }
 }
 
+public enum ContentRegionKind: UInt8, Codable, Sendable {
+    case comment
+    case string
+}
+
+/// A syntax region. Indexes store these in source order without overlaps.
+public struct ContentRegion: Codable, Equatable, Sendable {
+    public let range: ByteRange
+    public let kind: ContentRegionKind
+
+    public init(range: ByteRange, kind: ContentRegionKind) {
+        self.range = range
+        self.kind = kind
+    }
+
+    // A compact tuple avoids repeating field names for every literal and comment.
+    public init(from decoder: Decoder) throws {
+        var values = try decoder.unkeyedContainer()
+        let lower = try values.decode(UInt32.self)
+        let upper = try values.decode(UInt32.self)
+        guard lower < upper else {
+            throw DecodingError.dataCorruptedError(in: values, debugDescription: "Empty or reversed content region")
+        }
+        range = ByteRange(lowerBound: lower, upperBound: upper)
+        kind = try values.decode(ContentRegionKind.self)
+        guard values.isAtEnd else {
+            throw DecodingError.dataCorruptedError(in: values, debugDescription: "Extra content region fields")
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.unkeyedContainer()
+        try values.encode(range.lowerBound)
+        try values.encode(range.upperBound)
+        try values.encode(kind)
+    }
+}
+
 public struct ContentIndex: Codable, Sendable {
     public let key: ContentIndexKey
     public let scopes: [ScopeRecord]
@@ -204,6 +242,7 @@ public struct ContentIndex: Codable, Sendable {
     public let imports: [ImportBinding]
     public let exports: [ExportRecord]
     public let lineTable: LineTable
+    public let regions: [ContentRegion]
 
     public init(
         key: ContentIndexKey,
@@ -215,7 +254,8 @@ public struct ContentIndex: Codable, Sendable {
         calls: [UnresolvedCall],
         imports: [ImportBinding],
         exports: [ExportRecord],
-        lineTable: LineTable
+        lineTable: LineTable,
+        regions: [ContentRegion] = []
     ) {
         self.key = key
         self.scopes = scopes
@@ -227,6 +267,7 @@ public struct ContentIndex: Codable, Sendable {
         self.imports = imports
         self.exports = exports
         self.lineTable = lineTable
+        self.regions = regions
     }
 }
 

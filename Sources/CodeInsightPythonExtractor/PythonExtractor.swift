@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 3
+    public static let extractorVersion: UInt32 = 4
 
     public init() {}
 
@@ -704,7 +704,8 @@ private func buildIndex(
         calls: calls,
         imports: imports,
         exports: [],
-        lineTable: LineTable(bytes: bytes)
+        lineTable: LineTable(bytes: bytes),
+        regions: contentRegions(in: root, language: .python)
     )
 }
 

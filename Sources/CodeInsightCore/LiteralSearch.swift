@@ -46,6 +46,7 @@ package func literalRanges(
     caseSensitive: Bool,
     wordBoundary: WordBoundary? = nil,
     maximumMatches: Int? = nil,
+    accepting: ((ByteRange) -> Bool)? = nil,
     wallClockExpired: @Sendable () -> Bool = { false }
 ) throws -> [ByteRange] {
     guard !pattern.isEmpty, pattern.count <= bytes.count else { return [] }
@@ -83,6 +84,10 @@ package func literalRanges(
                         offset += 1
                         continue
                     }
+                    if let accepting, !accepting(range) {
+                        offset += needle.count
+                        continue
+                    }
                     ranges.append(range)
                     if let maximumMatches, ranges.count > maximumMatches { break }
                     offset += needle.count
@@ -110,6 +115,10 @@ package func literalRanges(
                     let range = ByteRange(lowerBound: UInt32(offset), upperBound: UInt32(offset + needle.count))
                     if let wordBoundary, !wordBoundary.isWholeWord(range, in: bytes) {
                         offset += 1
+                        continue
+                    }
+                    if let accepting, !accepting(range) {
+                        offset += needle.count
                         continue
                     }
                     ranges.append(range)

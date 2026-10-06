@@ -1135,6 +1135,7 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
             snapshotID: nil
         )
     )
+    model.projectSearch.restoreHistory([QueryState(text: "main")], lastQuery: QueryState(text: "main"))
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 2)
 
@@ -1156,6 +1157,9 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
         model.loadSessionSnapshot(forProject: root).snapshot
     )
     #expect(cleared.tabs.isEmpty)
+    #expect(cleared.queryHistory.isEmpty)
+    #expect(cleared.lastQuery?.text.isEmpty == true)
+    #expect(model.projectSearch.history.isEmpty)
     #expect(cleared.projectRoot == root.path)
     #expect(store.lastSessionProjectPath == root.path)
 }
@@ -1743,4 +1747,25 @@ func sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema: Bool
     #expect(model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99))
     try model.clearSessionForCurrentProject(panelPreset: .reading)
     #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
+}
+
+@MainActor
+@Test
+func savedQueryExecutesAfterProjectRestoration() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn needle() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let query = QueryState(text: "needle", caseSensitive: true, wholeWord: true)
+    let snapshot = SessionCodec.Snapshot(projectRoot: root.path, language: .rust,
+                                         revision: nil, activeTabOrdinal: nil,
+                                         panelPreset: "reading", tabs: [],
+                                         queryHistory: [query], lastQuery: query)
+    let model = AppModel(indexService: SessionRestoreIndexService())
+    #expect(await model.restoreSession(snapshot))
+    #expect(await testWaitUntil("restored query finishes") {
+        !model.projectSearch.isSearching && model.projectSearch.totalMatches == 1
+    })
+    #expect(model.projectSearch.currentQueryState == query)
+    #expect(model.projectSearch.history == [query])
+    #expect(model.projectSearch.openSelection()?.path == "main.rs")
+    await model.closeProject()
 }

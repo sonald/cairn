@@ -68,6 +68,7 @@ public struct PanelLayoutDescription: Codable, Equatable, Sendable {
     public let contextFraction: Double
     public let relationsFraction: Double
     public let secondaryReaderFraction: Double
+    public let bottomTab: String?
 
     public init(
         sidebarCollapsed: Bool,
@@ -78,7 +79,8 @@ public struct PanelLayoutDescription: Codable, Equatable, Sendable {
         sidebarFraction: Double,
         contextFraction: Double,
         relationsFraction: Double,
-        secondaryReaderFraction: Double
+        secondaryReaderFraction: Double,
+        bottomTab: String? = nil
     ) {
         self.sidebarCollapsed = sidebarCollapsed
         self.readerCollapsed = readerCollapsed
@@ -89,5 +91,6 @@ public struct PanelLayoutDescription: Codable, Equatable, Sendable {
         self.contextFraction = contextFraction
         self.relationsFraction = relationsFraction
         self.secondaryReaderFraction = secondaryReaderFraction
+        self.bottomTab = bottomTab
     }
 }

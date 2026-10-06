@@ -61,9 +61,18 @@ public struct FileOccurrence: Sendable {
 public struct SnapshotManifest: Sendable {
     public let snapshotID: SnapshotID
     public let files: [FileOccurrence]
+    public let ruleExcludedPathCount: Int?
+    public let nonSourcePathCount: Int?
 
-    public init(snapshotID: SnapshotID, files: [FileOccurrence]) {
+    public init(
+        snapshotID: SnapshotID,
+        files: [FileOccurrence],
+        ruleExcludedPathCount: Int? = nil,
+        nonSourcePathCount: Int? = nil
+    ) {
         self.snapshotID = snapshotID
         self.files = files
+        self.ruleExcludedPathCount = ruleExcludedPathCount
+        self.nonSourcePathCount = nonSourcePathCount
     }
 }

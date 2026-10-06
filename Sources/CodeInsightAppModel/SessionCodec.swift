@@ -25,6 +25,8 @@ package enum SessionCodec {
         package let highlights: [HighlightedNames.Entry]
         /// Schema 4: the split reference pane, a project-relative file and offset.
         package let referencePane: ReferencePane?
+        package let queryHistory: [QueryState]
+        package let lastQuery: QueryState?
 
         package init(
             projectRoot: String,
@@ -37,7 +39,9 @@ package enum SessionCodec {
             readingTrail: TrailState? = nil,
             contextTracking: String? = nil,
             highlights: [HighlightedNames.Entry] = [],
-            referencePane: ReferencePane? = nil
+            referencePane: ReferencePane? = nil,
+            queryHistory: [QueryState] = [],
+            lastQuery: QueryState? = nil
         ) {
             self.init(
                 projectRoot: projectRoot,
@@ -50,7 +54,9 @@ package enum SessionCodec {
                 readingTrail: readingTrail,
                 contextTracking: contextTracking,
                 highlights: highlights,
-                referencePane: referencePane
+                referencePane: referencePane,
+                queryHistory: queryHistory,
+                lastQuery: lastQuery
             )
         }
 
@@ -65,11 +71,15 @@ package enum SessionCodec {
             readingTrail: TrailState? = nil,
             contextTracking: String? = nil,
             highlights: [HighlightedNames.Entry] = [],
-            referencePane: ReferencePane? = nil
+            referencePane: ReferencePane? = nil,
+            queryHistory: [QueryState] = [],
+            lastQuery: QueryState? = nil
         ) {
             self.contextTracking = contextTracking
             self.highlights = highlights
             self.referencePane = referencePane
+            self.queryHistory = Array(queryHistory.prefix(20))
+            self.lastQuery = lastQuery
             self.projectRoot = projectRoot
             self.languages = languages
             self.revision = revision
@@ -311,13 +321,13 @@ package enum SessionCodec {
             // check the version before treating the data as corrupt so
             // future snapshots are preserved rather than quarantined.
             if let probe = try? decoder.decode(VersionProbe.self, from: data),
-               !(1...4).contains(probe.schemaVersion)
+               !(1...5).contains(probe.schemaVersion)
             {
                 throw DecodeError.unsupportedSchemaVersion(probe.schemaVersion)
             }
             throw error
         }
-        guard (1...4).contains(envelope.schemaVersion) else {
+        guard (1...5).contains(envelope.schemaVersion) else {
             throw DecodeError.unsupportedSchemaVersion(envelope.schemaVersion)
         }
         // Validate stored fields before language selection can replace the outer copy.
@@ -598,9 +608,13 @@ package enum SessionCodec {
         let contextTracking: String?
         let highlights: [HighlightDTO]?
         let referencePane: ReferencePaneDTO?
+        let queryHistory: [QueryState]?
+        let lastQuery: QueryState?
 
         init(_ snapshot: Snapshot) {
-            schemaVersion = 4
+            queryHistory = snapshot.queryHistory.isEmpty ? nil : snapshot.queryHistory
+            lastQuery = snapshot.lastQuery
+            schemaVersion = 5
             projectRoot = snapshot.projectRoot
             languages = snapshot.languages
             language = nil
@@ -636,7 +650,7 @@ package enum SessionCodec {
                     panelPreset: panelPreset,
                     tabs: try decodeTabs()
                 )
-            case 2, 3, 4:
+            case 2, 3, 4, 5:
                 guard language == nil,
                       let languages
                 else { throw CodecError.invalid }
@@ -681,7 +695,9 @@ package enum SessionCodec {
                     referencePane: referencePane.flatMap { pane in
                         (try? SessionCodec.validateProjectPath(pane.path)) == nil
                             ? nil : ReferencePane(path: pane.path, byteOffset: pane.byteOffset)
-                    }
+                    },
+                    queryHistory: (queryHistory ?? []).filter { $0.text.utf8.count <= 16_384 },
+                    lastQuery: lastQuery.flatMap { $0.text.utf8.count <= 16_384 ? $0 : nil }
                 )
             default:
                 throw DecodeError.unsupportedSchemaVersion(schemaVersion)

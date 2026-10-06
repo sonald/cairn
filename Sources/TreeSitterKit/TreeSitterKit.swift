@@ -1,3 +1,4 @@
+import CodeInsightCore
 import CTreeSitter
 import Darwin
 
@@ -191,5 +192,34 @@ public struct Node {
         }
 
         return nodes
+    }
+}
+
+// A cursor visits the existing tree without allocating child arrays or retaining a node stack.
+extension Node {
+    func contentRegions(language: LanguageID) -> [ContentRegion] {
+        var regions: [ContentRegion] = []
+        var cursor = ts_tree_cursor_new(raw)
+        defer { ts_tree_cursor_delete(&cursor) }
+        while true {
+            let node = ts_tree_cursor_current_node(&cursor)
+            let kind = contentRegionKind(nodeKind: String(cString: ts_node_type(node)), language: language)
+            if let kind {
+                let lower = ts_node_start_byte(node)
+                let upper = ts_node_end_byte(node)
+                if lower < upper {
+                    regions.append(ContentRegion(
+                        range: CodeInsightCore.ByteRange(lowerBound: lower, upperBound: upper),
+                        kind: kind
+                    ))
+                }
+            } else if ts_tree_cursor_goto_first_child(&cursor) {
+                continue
+            }
+            // A recognized parent covers its children, matching reader highlighting.
+            while !ts_tree_cursor_goto_next_sibling(&cursor) {
+                guard ts_tree_cursor_goto_parent(&cursor) else { return regions }
+            }
+        }
     }
 }

@@ -224,6 +224,8 @@ struct RustDeclarations {
 
     private func typeName(in node: Node) -> Node? {
         switch node.kind {
+        case "lifetime":
+            return nil
         case "identifier", "type_identifier", "primitive_type":
             return node
         case "scoped_type_identifier":

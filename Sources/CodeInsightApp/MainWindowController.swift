@@ -104,6 +104,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let sidebarItem: NSSplitViewItem
     private let readerGroupItem: NSSplitViewItem
     private let secondaryReaderItem: NSSplitViewItem
+    private let queryDockController = NSViewController()
+    private let queryDockTabs = NSStackView()
+    private let queryDockBody = NSView()
+    private var selectedBottomTab = "context"
     private let contextItem: NSSplitViewItem
     private let relationItem: NSSplitViewItem
     private let projectLabel = NSTextField(labelWithString: "Cairn")
@@ -189,6 +193,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         pendingRecentProjectLanguages?.first
     }
     private var pendingTabRestore: TabStripModel.Tab?
+    private var pendingRefreshContentID: ContentID?
+    private var searchDockHasBeenShown = false
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
@@ -285,7 +291,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             viewController: secondaryReaderController
         )
         readerGroupItem = NSSplitViewItem(viewController: readerSplitController)
-        contextItem = NSSplitViewItem(viewController: contextController)
+        queryDockController.view = NSView()
+        contextItem = NSSplitViewItem(viewController: queryDockController)
 
         outerSplitController.splitView.isVertical = true
         outerSplitController.splitView.dividerStyle = .thin
@@ -469,6 +476,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.contentViewController = contentViewController
         window.setContentSize(frame.size)
         super.init(window: window)
+        configureQueryDock()
         exactInfoButton.target = self
         contextButton.target = self
         window.delegate = self
@@ -485,6 +493,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 return nil
             }
             guard event.window === window else { return event }
+            if self.searchPanel?.hasSearchFocus == true { return event }
             if self.isFindBarVisible {
                 _ = self.closeFindBar()
                 return nil
@@ -657,6 +666,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.tabStrip.setActiveDocument(document, for: file)
             captureActiveTabState()
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+            refreshProjectSearchHits()
         }
         readerController.onOpenPreviewLink = { [weak self] url in
             self?.openPreviewLink(url)
@@ -1022,7 +1032,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func controls(window candidate: NSWindow?) -> Bool {
         guard let candidate else { return false }
         if candidate === window { return true }
-        if let searchPanel, searchPanel.window === candidate { return true }
         if let bookmarkPanel, bookmarkPanel.window === candidate { return true }
         if let palettePanel, palettePanel.window === candidate { return true }
         if candidate.sheetParent === window { return true }
@@ -1033,7 +1042,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// exposed for tests.
     func panelKind(of candidate: NSWindow?) -> String? {
         guard let candidate, candidate !== window else { return nil }
-        if let searchPanel, searchPanel.window === candidate { return "search" }
         if let bookmarkPanel, bookmarkPanel.window === candidate {
             return "bookmarks"
         }
@@ -1921,21 +1929,134 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    func showProjectSearch() {
-        if searchPanel == nil {
-            searchPanel = SearchPanel(
-                appModel: model
-            ) { [weak self] file, offset, expectedContentID in
-                self?.navigate(
-                    to: file,
-                    byteOffset: offset,
-                    cause: .search,
-                    expectedContentID: expectedContentID
-                )
+    private func configureQueryDock() {
+        queryDockController.addChild(contextController)
+        let panel = SearchPanel(appModel: model, onOpen: { [weak self] file, range, contentID, focusReader in
+            guard let self else { return }
+            if self.model.selectedFile?.standardizedFileURL != file.standardizedFileURL || self.model.selectedByteOffset != range.lowerBound {
+                self.navigate(to: file, byteOffset: range.lowerBound, cause: .search, expectedContentID: contentID)
             }
-            searchPanel?.apply(settings: currentReaderSettings)
+            self.readerController.revealProjectSearchMatch(range, expectedContentID: contentID)
+            self.refreshProjectSearchHits()
+            if focusReader { self.readerController.focusText() }
+        }, onReturnToReader: { [weak self] in self?.readerController.focusText() })
+        panel.onResultsChanged = { [weak self] in self?.refreshProjectSearchHits() }
+        searchPanel = panel
+        queryDockController.addChild(panel)
+        for (title, tag) in [(localized("main.context"), 0), (localized("panel.query.results"), 1), ("×", 2)] {
+            let button = NSButton(title: title, target: self, action: #selector(selectBottomTab(_:)))
+            button.tag = tag
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 11.5)
+            let titleWidth = (title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold)]).width
+            button.widthAnchor.constraint(equalToConstant: tag == 2 ? 32 : ceil(titleWidth) + 24).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+            if tag == 2 {
+                let spacer = NSView()
+                spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                queryDockTabs.addArrangedSubview(spacer)
+                button.setAccessibilityLabel(localized("panel.query.close"))
+            }
+            queryDockTabs.addArrangedSubview(button)
         }
-        searchPanel?.show(relativeTo: window)
+        queryDockTabs.spacing = 0
+        queryDockTabs.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        queryDockTabs.wantsLayer = true
+        let stack = NSStackView(views: [queryDockTabs, queryDockBody])
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.alignment = .leading
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        queryDockController.view.addSubview(stack)
+        for controller in [contextController as NSViewController, panel] {
+            let child = controller.view
+            child.translatesAutoresizingMaskIntoConstraints = false
+            queryDockBody.addSubview(child)
+            NSLayoutConstraint.activate([
+                child.leadingAnchor.constraint(equalTo: queryDockBody.leadingAnchor), child.trailingAnchor.constraint(equalTo: queryDockBody.trailingAnchor),
+                child.topAnchor.constraint(equalTo: queryDockBody.topAnchor), child.bottomAnchor.constraint(equalTo: queryDockBody.bottomAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: queryDockController.view.leadingAnchor), stack.trailingAnchor.constraint(equalTo: queryDockController.view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: queryDockController.view.topAnchor), stack.bottomAnchor.constraint(equalTo: queryDockController.view.bottomAnchor),
+            queryDockTabs.widthAnchor.constraint(equalTo: stack.widthAnchor), queryDockBody.widthAnchor.constraint(equalTo: stack.widthAnchor),
+        ])
+        model.projectSearch.onStateChanged = { [weak self] in
+            guard let self else { return }
+            self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
+        }
+        renderBottomTab()
+    }
+
+    @objc private func selectBottomTab(_ sender: NSButton) {
+        if sender.tag == 2 {
+            if selectedBottomTab == "search" { model.projectSearch.commitQuery() }
+            contextVisibilityOverride = false
+            contextItem.isCollapsed = true
+            searchPanel?.dismissHints()
+            refreshProjectSearchHits()
+            readerController.focusText()
+        } else {
+            selectedBottomTab = sender.tag == 1 ? "search" : "context"
+            renderBottomTab()
+        }
+        savePanelLayout()
+    }
+    private func renderBottomTab() {
+        let firstSearchPresentation = selectedBottomTab == "search" && !searchDockHasBeenShown
+        if selectedBottomTab == "search" { searchDockHasBeenShown = true }
+        contextItem.minimumThickness = selectedBottomTab == "search" ? 240 : 120
+        contextController.view.isHidden = selectedBottomTab == "search"
+        searchPanel?.view.isHidden = selectedBottomTab != "search"
+        let theme = ReaderTheme(settings: currentReaderSettings)
+        queryDockTabs.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        for case let button as NSButton in queryDockTabs.arrangedSubviews {
+            let selected = button.tag == (selectedBottomTab == "search" ? 1 : 0)
+            button.font = .systemFont(ofSize: 11.5, weight: selected ? .semibold : .regular)
+            button.contentTintColor = selected ? theme.foregroundColor : theme.chromeSecondaryColor
+            button.wantsLayer = true
+            button.layer?.backgroundColor = (selected ? theme.backgroundColor : theme.chromeHeaderColor).cgColor
+        }
+        if selectedBottomTab != "search" { searchPanel?.dismissHints() }
+        if firstSearchPresentation, !contextItem.isCollapsed {
+            window?.contentView?.layoutSubtreeIfNeeded()
+            let split = contentSplitController.splitView
+            let height = min(360, split.bounds.height * 0.45)
+            split.setPosition(split.bounds.height - height - split.dividerThickness, ofDividerAt: 0)
+        }
+        refreshProjectSearchHits()
+    }
+    /// Underlines the visible search results in the main reader while the
+    /// results tab is showing; hiding results clears the underlines.
+    private func refreshProjectSearchHits() {
+        let showing = selectedBottomTab == "search" && !contextItem.isCollapsed
+        let contentID = readerController.displayedContentID
+        readerController.setQueryHits(
+            showing ? searchPanel?.queryHits(forContent: contentID) ?? [] : [],
+            contentID: contentID
+        )
+    }
+    func showProjectSearch() {
+        let selection = focusedReader.hasFocusedText ? focusedReader.selectedSourceText : nil
+        selectedBottomTab = "search"
+        contextVisibilityOverride = true
+        contextItem.isCollapsed = false
+        renderBottomTab()
+        searchPanel?.focusInput(selection: selection)
+        savePanelLayout()
+    }
+    func nextProjectSearchResult() { searchPanel?.moveResult(by: 1) }
+    func previousProjectSearchResult() { searchPanel?.moveResult(by: -1) }
+    func toggleProjectSearchResults() {
+        if selectedBottomTab == "search", !contextItem.isCollapsed {
+            model.projectSearch.commitQuery()
+            contextVisibilityOverride = false
+            contextItem.isCollapsed = true
+            searchPanel?.dismissHints()
+            refreshProjectSearchHits()
+        } else { showProjectSearch() }
+        savePanelLayout()
     }
 
     func selfTestSetProjectSearchQuery(_ query: String) {
@@ -2021,7 +2142,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             || lens.activeEnclosingScope != nil
             || lens.tracking == .enclosing
             || lens.isPinned
-        let visible = contextVisibilityOverride ?? (panelPreset != .focus && hasContext)
+        let visible = contextVisibilityOverride ?? (panelPreset != .focus && (selectedBottomTab == "search" || hasContext))
         contextItem.isCollapsed = !visible
         contextButton.setAccessibilityLabel(visible ? localized("main.hide.definition.context") : localized("main.show.definition.context"))
         let theme = ReaderTheme(settings: currentReaderSettings)
@@ -2266,6 +2387,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// late to ask. Nothing irreversible happens yet.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if isClosing { return true }
+        model.projectSearch.commitQuery()
         while true {
             do {
                 try checkpointSessionSynchronouslyReportingFailure()
@@ -2348,7 +2470,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func closeAuxiliaryPanels() {
         palettePanel?.window?.orderOut(nil)
         palettePanel = nil
-        searchPanel?.window?.orderOut(nil)
+        searchPanel?.dismissHints()
         searchPanel = nil
         bookmarkPanel?.closePanel()
         bookmarkPanel = nil
@@ -2486,11 +2608,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             sidebarFraction: sidebarFraction,
             contextFraction: contextFraction,
             relationsFraction: relationsFraction,
-            secondaryReaderFraction: secondaryFraction
+            secondaryReaderFraction: secondaryFraction,
+            bottomTab: selectedBottomTab
         )
     }
 
     private func applyPanelLayout(_ layout: PanelLayoutDescription) {
+        selectedBottomTab = layout.bottomTab == "search" ? "search" : "context"
+        if selectedBottomTab == "search" { contextVisibilityOverride = !layout.contextCollapsed }
+        renderBottomTab()
         sidebarItem.isCollapsed = layout.sidebarCollapsed
         readerGroupItem.isCollapsed = layout.readerCollapsed
         contextItem.isCollapsed = layout.contextCollapsed
@@ -2556,6 +2682,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.apply(settings: settings)
         palettePanel?.apply(settings: settings)
         searchPanel?.apply(settings: settings)
+        renderBottomTab()
         bookmarkPanel?.apply(settings: settings)
         commitPickerPopover?.apply(settings: settings)
         compareCommitPickerPopover?.apply(settings: settings)
@@ -3053,11 +3180,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             errorMessage: model.compare.errorMessage
         )
         renderTrail()
+        if pendingRefreshContentID != nil, model.indexRefreshNotice != nil {
+            pendingTabRestore = nil
+            pendingRefreshContentID = nil
+        }
         if displayedNavigationGeneration != model.navigationGeneration {
             // Trail and file headers can resize the viewport on first navigation.
             // Settle them before the reader computes its centered destination.
             window?.contentView?.layoutSubtreeIfNeeded()
-            if let restore = pendingTabRestore,
+            defer { pendingRefreshContentID = nil }
+            let canRestoreRefresh = pendingRefreshContentID == nil
+                || (model.activeNavigationRequest?.cause == .historyReplay
+                    && pendingRefreshContentID == model.tabStrip.activeDocument?.contentID)
+            if canRestoreRefresh, let restore = pendingTabRestore,
                let restoreFile = restore.fileURL,
                restoreFile.standardizedFileURL
                     == readerFile?.standardizedFileURL
@@ -3536,7 +3671,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func refreshIndex() {
         captureActiveTabState()
-        model.refreshIndex(leaving: currentJumpRecord())
+        pendingTabRestore = model.tabStrip.activeTab
+        pendingRefreshContentID = pendingTabRestore?.anchorContentID
+        if pendingRefreshContentID == nil { pendingTabRestore = nil }
+        model.refreshIndex(leaving: currentJumpRecord(preferSelection: true))
         render()
     }
 
@@ -3557,8 +3695,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func applyExclusionRules(_ lines: [String]) {
         captureActiveTabState()
         do {
-            try model.updatePathRules(lines: lines, leaving: currentJumpRecord())
+            pendingTabRestore = model.tabStrip.activeTab
+            pendingRefreshContentID = pendingTabRestore?.anchorContentID
+            if pendingRefreshContentID == nil { pendingTabRestore = nil }
+            try model.updatePathRules(lines: lines, leaving: currentJumpRecord(preferSelection: true))
         } catch {
+            pendingTabRestore = nil
+            pendingRefreshContentID = nil
             showTransientStatus(localizedFormat("rules.saveFailed", error.localizedDescription))
         }
         render()
@@ -4678,7 +4821,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
-    private func currentJumpRecord() -> JumpRecord? {
+    private func currentJumpRecord(preferSelection: Bool = false) -> JumpRecord? {
         switch model.projectState {
         case .empty, .failed:
             return nil
@@ -4691,9 +4834,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 ? selectedFile.path
                 : nil)
         guard let path else { return nil }
-        guard let position = readerController.currentReadingPosition(
-            fallbackByteOffset: model.selectedByteOffset
-        ), position.file.standardizedFileURL == selectedFile.standardizedFileURL
+        let position = preferSelection
+            ? readerController.readingPosition(at: readerController.currentSelectionByteOffset ?? model.selectedByteOffset)
+            : readerController.currentReadingPosition(fallbackByteOffset: model.selectedByteOffset)
+        guard let position, position.file.standardizedFileURL == selectedFile.standardizedFileURL
         else {
             return JumpRecord(
                 path: path,
@@ -6962,6 +7106,18 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     func setBookmarkMarkers(_ markers: [Int: [String]]) {
         loadViewIfNeeded()
         textView.setBookmarkMarkers(markers)
+    }
+
+    var selectedSourceText: String? { textView.selectedSourceText }
+    func focusText() { view.window?.makeFirstResponder(textView.view) }
+    func revealProjectSearchMatch(_ range: ByteRange, expectedContentID: ContentID?) {
+        guard let expectedContentID, displayedDocument?.contentID == expectedContentID else { return }
+        textView.revealSearchMatch(range: range)
+    }
+    var displayedContentID: ContentID? { displayedDocument?.contentID }
+    func setQueryHits(_ hits: [(range: ByteRange, condition: Int)], contentID: ContentID?) {
+        loadViewIfNeeded()
+        textView.setQueryHits(hits, contentID: contentID)
     }
 
     var displayedBytes: [UInt8]? { textView.displayedBytes }

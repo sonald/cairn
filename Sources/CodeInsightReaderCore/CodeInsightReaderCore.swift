@@ -449,10 +449,6 @@ public struct RustHighlighter: Sendable {
         "match", "mod", "move", "mut", "pub", "ref", "return", "self", "Self",
         "static", "struct", "super", "trait", "type", "unsafe", "use", "where", "while",
     ]
-    private static let comments: Set<String> = ["line_comment", "block_comment"]
-    private static let strings: Set<String> = [
-        "string_literal", "raw_string_literal", "char_literal",
-    ]
     private static let numbers: Set<String> = [
         "integer_literal", "float_literal", "boolean_literal",
     ]
@@ -541,14 +537,14 @@ public struct RustHighlighter: Sendable {
                 highlight = role
             } else if kind == "field_identifier" {
                 highlight = .property
-            } else if Self.comments.contains(kind) {
+            } else if contentRegionKind(nodeKind: kind, language: .rust) == .comment {
                 let range = coreRange(node)
                 highlight = text(in: bytes, range: range).map {
                     CommentContentKind.classify($0) == .figure
                         ? .commentFigure
                         : .comment
                 } ?? .comment
-            } else if Self.strings.contains(kind) {
+            } else if contentRegionKind(nodeKind: kind, language: .rust) == .string {
                 highlight = .string
             } else if Self.numbers.contains(kind) {
                 highlight = .number

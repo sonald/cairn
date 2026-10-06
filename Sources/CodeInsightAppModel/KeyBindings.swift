@@ -152,6 +152,9 @@ extension CommandID {
     public static let findNext = CommandID(rawValue: "find.next")
     public static let findPrevious = CommandID(rawValue: "find.previous")
     public static let findInProject = CommandID(rawValue: "find.inProject")
+    public static let nextProjectSearchResult = CommandID(rawValue: "find.nextProjectSearchResult")
+    public static let previousProjectSearchResult = CommandID(rawValue: "find.previousProjectSearchResult")
+    public static let toggleProjectSearchResults = CommandID(rawValue: "find.toggleProjectSearchResults")
     public static let findToggleHighlight = CommandID(rawValue: "find.toggleHighlight")
     public static let findClearHighlights = CommandID(rawValue: "find.clearHighlights")
 
@@ -318,6 +321,13 @@ public extension KeyBindingScheme {
             def(.findInProject, .find, "app.menu.find.in.project", [
                 keyboard([.command, .shift], .character("f")),
             ]),
+            def(.nextProjectSearchResult, .find, "app.menu.find.project.next", [
+                keyboard([.option, .command], .character("g")),
+            ]),
+            def(.previousProjectSearchResult, .find, "app.menu.find.project.previous", [
+                keyboard([.shift, .option, .command], .character("g")),
+            ]),
+            def(.toggleProjectSearchResults, .find, "app.menu.find.project.toggle.results", []),
             def(.findToggleHighlight, .find, "app.menu.toggle.highlight", [
                 keyboard([.control, .command], .character("h")),
             ]),

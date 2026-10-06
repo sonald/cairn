@@ -2319,3 +2319,48 @@ func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
     fixture.controller.renderForSelfTest()
     #expect(fixture.controller.selfTestSidebarPaneCollapsed)
 }
+
+
+@MainActor
+@Test
+func projectSearchRefreshKeepsReaderSelectionSeparateFromViewport() async throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("query-refresh-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let config = root.appendingPathComponent("config.rs")
+    let conn = root.appendingPathComponent("conn.rs")
+    try (String(repeating: "// config filler\n", count: 25) + "fn needle() {}\n").write(to: config, atomically: true, encoding: .utf8)
+    let prefix = "fn work() {\n" + String(repeating: "    // connection filler\n", count: 19)
+    let source = prefix + "    needle();\n" + String(repeating: "    // tail filler\n", count: 80) + "}\n"
+    try source.write(to: conn, atomically: true, encoding: .utf8)
+    let selectedOffset = UInt32(prefix.utf8.count + 4)
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
+    defer { controller.close(); try? FileManager.default.removeItem(at: root) }
+    try await model.openProject(root: root, language: .rust)
+    try #require(await relationTestWaitUntil("query fixture ready") { model.snapshotPhase == .fullReady })
+    controller.showProjectSearch()
+    controller.selfTestSetProjectSearchQuery("needle")
+    try #require(await relationTestWaitUntil("query results") { !model.projectSearch.isSearching && model.projectSearch.totalMatches == 2 })
+    controller.nextProjectSearchResult()
+    try #require(await relationTestWaitUntil("second file preview") {
+        model.selectedFile?.standardizedFileURL == conn.standardizedFileURL
+            && model.selectedByteOffset == selectedOffset
+            && controller.displayedReaderFile?.standardizedFileURL == conn.standardizedFileURL
+    })
+    await pumpRunLoop()
+    let viewportOffset = try #require(controller.selfTestReadingByteOffset)
+    #expect(viewportOffset != selectedOffset, "Fixture must distinguish viewport from selected match")
+    let generation = model.navigationGeneration
+    controller.refreshIndex()
+    try #require(await relationTestWaitUntil("refresh and query complete") {
+        !model.isRefreshingIndex && model.navigationGeneration > generation && !model.projectSearch.isSearching
+    })
+    await pumpRunLoop()
+    #expect(model.selectedFile?.standardizedFileURL == conn.standardizedFileURL)
+    #expect(model.selectedByteOffset == selectedOffset)
+    #expect(controller.selfTestReaderCaretByteOffset == selectedOffset)
+    #expect(controller.selfTestReadingByteOffset == viewportOffset)
+    #expect(model.projectSearch.openSelection()?.path == "conn.rs")
+    #expect(model.projectSearch.openSelection()?.byteOffset == selectedOffset)
+}

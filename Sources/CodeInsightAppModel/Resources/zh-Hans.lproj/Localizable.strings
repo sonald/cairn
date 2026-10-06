@@ -238,3 +238,30 @@
 "model.typehop.resolving" = "类型解析中…";
 "model.typehop.pendingExact" = "类型需要精确分析 · 未就绪";
 "model.typehop.accessibility" = "%1$@，%2$@，类型 %3$@";
+
+"model.query.suggest.same" = "在同一个函数里查找两个词";
+"model.query.suggest.path" = "排除测试目录";
+"model.query.suggest.comment" = "只在注释里找";
+"model.query.suggest.or" = "任一个都算";
+"model.query.suggest.near" = "放宽为相距 10 行以内";
+"model.query.suggest.distance" = "把行距放宽到三倍";
+"model.query.suggest.area" = "不限区域";
+"model.query.suggest.exclude" = "取消最后一个排除条件";
+"model.query.suggest.code" = "去掉注释和字符串里的命中";
+
+"search.query.error.unfinishedQuote" = "请补上短语末尾的引号。";
+"search.query.error.unfinishedRegex" = "请补上正则表达式末尾的 /。";
+"search.query.error.missingValue" = "请在冒号后填写条件值。";
+"search.query.error.unexpectedToken" = "这里不支持这个写法。";
+"search.query.error.missingAlternative" = "OR 两侧都需要搜索词。";
+"search.query.error.excludedAlternative" = "OR 不能连接排除条件。";
+"search.query.error.qualifierAlternative" = "OR 只能连接搜索词。";
+"search.query.error.invalidArea" = "区域可填写 code、comment 或 string。";
+"search.query.error.invalidNear" = "请填写大于或等于 0 的行距。";
+"search.query.error.invalidSame" = "目前只支持 same:fn。";
+"search.query.error.invalidRegex" = "正则表达式无效。";
+"search.query.error.excludedScope" = "不能排除行距或函数范围。";
+"search.query.error.duplicateScope" = "只能使用一个行距或函数范围条件。";
+"search.query.error.missingPositiveTerm" = "请至少添加一个包含条件。";
+"search.query.error.emptyTerm" = "搜索词不能为空。";
+"search.query.error.unsupportedGrouping" = "暂不支持括号分组。";

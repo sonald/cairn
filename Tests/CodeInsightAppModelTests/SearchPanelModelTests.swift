@@ -780,3 +780,204 @@ private func activeWorkspacePathID(
         return nil
     }
 }
+
+@MainActor
+@Test
+func searchPanelKeepsLastValidResultsDuringSyntaxErrorAndSnapshotRefresh() async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let gate = GatedSearcher()
+    let model = SearchPanelModel(searcher: gate.search)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+    #expect(await testWaitUntil("initial search pending") { await gate.pending("needle") })
+    await gate.release("needle", batches: [SearchBatch(matchesByPath: [fixture.a: [searchMatch(path: fixture.a, offset: 3)]], isFinal: true, completeness: .complete)])
+    #expect(await testWaitUntil("initial result") { model.totalMatches == 1 })
+    let valid = model.parsedQuery
+    model.setQuery("needle OR")
+    #expect(model.syntaxError == nil)
+    #expect(model.totalMatches == 1)
+    #expect(await testWaitUntil("delayed syntax error") { model.syntaxError != nil })
+    #expect(model.parsedQuery == valid)
+    #expect(model.syntaxError?.range == 7..<9)
+    model.setQuery("needle")
+    let refreshed = QueryContext(snapshotID: fixture.context.snapshotID,
+                                 analysisProfileID: fixture.context.analysisProfileID, generation: 2)
+    model.updateProjectState(.ready(fixture.session, refreshed))
+    #expect(model.isStale)
+    #expect(model.groups.count == 1)
+    #expect(model.openSelection() == nil)
+    #expect(await testWaitUntil("refresh pending") { await gate.pending("needle") })
+    await gate.release("needle", batches: [SearchBatch(matchesByPath: [fixture.b: [searchMatch(path: fixture.b, offset: 7)]], isFinal: true, completeness: .complete)])
+    #expect(await testWaitUntil("replacement results") { !model.isStale })
+    #expect(model.groups.map(\.path) == ["b.rs"])
+    #expect(model.selectedIndex == nil)
+    #expect(model.openSelection() == nil)
+}
+
+@MainActor
+@Test
+func searchPanelHistoryRestoresOptionsAndClearsWithSession() async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = SearchPanelModel { _, _, _ in stream(batches: []) }
+    let history = (0..<25).map { QueryState(text: "q\($0)", caseSensitive: true, wholeWord: true) }
+    model.restoreHistory(history, lastQuery: history[2])
+    #expect(model.history.count == 20)
+    #expect(model.currentQueryState == history[2])
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    #expect(await testWaitUntil("restored live query finishes") { !model.isSearching })
+    #expect(model.history.first == history[0])
+    model.applyHistory(history[2])
+    #expect(model.history.first == history[2])
+    #expect(model.history.filter { $0 == history[2] }.count == 1)
+    model.clearSession()
+    #expect(model.history.isEmpty)
+    #expect(model.query.isEmpty)
+    #expect(model.groups.isEmpty)
+}
+
+@MainActor
+@Test
+func querySuggestionsFollowResultsAndFilterLearnedSyntax() throws {
+    let empty = SearchPanelModel.suggestions(text: "", parsed: nil, total: 0, truncated: false, testDirectory: nil, learned: [])
+    #expect(empty.count == 3)
+    let learned = SearchPanelModel.suggestions(text: "", parsed: nil, total: 0, truncated: false, testDirectory: nil, learned: ["same", "path", "in", "or"])
+    #expect(learned.isEmpty)
+    let narrow = try ProjectSearchQuery.parse("lock await same:fn in:comment")
+    let relaxed = SearchPanelModel.suggestions(text: narrow.serialized, parsed: narrow, total: 0, truncated: false, testDirectory: nil, learned: [])
+    #expect(relaxed.contains { $0.query.contains("near:10") && !$0.query.contains("same:fn") })
+    #expect(relaxed.contains { !$0.query.contains("in:comment") })
+    let broad = try ProjectSearchQuery.parse("lock await")
+    let tightened = SearchPanelModel.suggestions(text: "lock await", parsed: broad, total: 5_001, truncated: true, testDirectory: "tests/", learned: [])
+    #expect(tightened.map(\.query) == ["lock await same:fn", "lock await in:code", "lock await -path:tests/"])
+    #expect(SearchPanelModel.suggestions(text: "lock await", parsed: broad, total: 10, truncated: false, testDirectory: nil, learned: []).isEmpty)
+}
+
+@MainActor
+@Test
+func searchPanelLiveSearchDoesNotRecordHalfTypedHistory() async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let counter = CountingSearcher()
+    let model = SearchPanelModel(searcher: counter.search)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("nee")
+    #expect(await testWaitUntil("partial live query completed") { await counter.queries.count == 1 && !model.isSearching })
+    #expect(model.history.isEmpty)
+    model.setQuery("needle")
+    #expect(await testWaitUntil("full live query completed") { await counter.queries.count == 2 && !model.isSearching })
+    #expect(model.history.isEmpty)
+}
+
+@MainActor
+@Test
+func searchPanelTypingKeepsCurrentSnapshotResultsNavigable() async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let gate = GatedSearcher()
+    let model = SearchPanelModel(searcher: gate.search)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("old")
+    #expect(await testWaitUntil("old query pending") { await gate.pending("old") })
+    await gate.release("old", batches: [SearchBatch(matchesByPath: [fixture.a: [searchMatch(path: fixture.a, offset: 3)]], isFinal: true, completeness: .complete)])
+    #expect(await testWaitUntil("old query complete") { !model.isSearching && model.totalMatches == 1 })
+    model.setQuery("new")
+    #expect(!model.isStale)
+    #expect(model.history.isEmpty)
+    #expect(model.openSelection()?.byteOffset == 3)
+    #expect(model.history == [QueryState(text: "old")])
+    #expect(await testWaitUntil("new query pending") { await gate.pending("new") })
+    #expect(!model.isStale)
+    #expect(model.openSelection()?.byteOffset == 3)
+    await gate.release("new", batches: [SearchBatch(matchesByPath: [fixture.b: [searchMatch(path: fixture.b, offset: 7)]], isFinal: true, completeness: .complete)])
+    #expect(await testWaitUntil("replacement query complete") { !model.isSearching && model.groups.first?.path == "b.rs" })
+    #expect(model.openSelection()?.byteOffset == 7)
+}
+
+@MainActor
+@Test
+func searchPanelExplicitQueryCommitValidatesAndDeduplicatesHistory() {
+    let model = SearchPanelModel()
+    model.setQuery("needle")
+    model.setCaseSensitive(true)
+    model.commitQuery()
+    model.commitQuery()
+    let first = QueryState(text: "needle", caseSensitive: true)
+    #expect(model.history == [first])
+    model.setQuery("needle OR")
+    model.commitQuery()
+    #expect(model.history == [first])
+    model.setQuery(" ")
+    model.commitQuery()
+    #expect(model.history == [first])
+    for index in 0..<25 {
+        model.setQuery("query\(index)")
+        model.commitQuery()
+    }
+    #expect(model.history.count == 20)
+    #expect(model.history.first?.text == "query24")
+    model.applyHistory(first)
+    #expect(model.history.first == first)
+    #expect(model.currentQueryState == first)
+    #expect(model.history.count == 20)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func searchPanelRefreshPreservesSelectedLocationAcrossBatchesOrClearsItWhenMissing(missing: Bool) async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let refreshed = try ProjectIndexer().index(root: fixture.root)
+    let a = try #require(refreshed.manifest.files.first { refreshed.paths.resolve($0.pathID) == "a.rs" }?.pathID)
+    let b = try #require(refreshed.manifest.files.first { refreshed.paths.resolve($0.pathID) == "b.rs" }?.pathID)
+    let (initial, initialSender) = AsyncThrowingStream<SearchBatch, Error>.makeStream()
+    let (updates, updateSender) = AsyncThrowingStream<SearchBatch, Error>.makeStream()
+    let model = SearchPanelModel { session, _, _ in session === fixture.session ? initial : updates }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+    initialSender.yield(SearchBatch(matchesByPath: [fixture.a: [searchMatch(path: fixture.a, offset: 1)], fixture.b: [searchMatch(path: fixture.b, offset: 10), searchMatch(path: fixture.b, offset: 20)]], isFinal: true, completeness: .complete))
+    initialSender.finish()
+    #expect(await testWaitUntil("initial refresh fixture results") { !model.isSearching && model.totalMatches == 3 })
+    model.select(2)
+    let contentID = try #require(model.openSelection()?.contentID)
+    #expect(model.openSelection()?.path == "b.rs")
+    model.updateProjectState(.ready(refreshed, QueryContext(snapshotID: refreshed.snapshotID, analysisProfileID: refreshed.analysisProfile.id, generation: 2)))
+    #expect(model.isStale)
+    #expect(model.openSelection() == nil)
+    updateSender.yield(SearchBatch(matchesByPath: [a: [searchMatch(path: a, offset: 1)]], isFinal: false, completeness: .complete))
+    #expect(await testWaitUntil("first refresh batch") { !model.isStale && model.totalMatches == 1 })
+    #expect(model.selectedIndex == nil)
+    #expect(model.openSelection() == nil)
+    updateSender.yield(SearchBatch(matchesByPath: [b: missing ? [searchMatch(path: b, offset: 10)] : [searchMatch(path: b, offset: 10), searchMatch(path: b, offset: 20)]], isFinal: true, completeness: .complete))
+    updateSender.finish()
+    #expect(await testWaitUntil("refresh stream complete") { !model.isSearching })
+    if missing {
+        #expect(model.selectedIndex == nil)
+        #expect(model.openSelection() == nil)
+    } else {
+        #expect(model.selectedIndex == 2)
+        #expect(model.openSelection()?.path == "b.rs")
+        #expect(model.openSelection()?.byteOffset == 20)
+        #expect(model.openSelection()?.contentID == contentID)
+    }
+}
+
+@MainActor
+@Test
+func searchPanelRejectsNavigationToResultOutsideSnapshotManifest() async throws {
+    let fixture = try await SearchPanelFixture()
+    defer { fixture.remove() }
+    let absentPath = fixture.session.paths.intern("absent.rs")
+    #expect(!fixture.session.manifest.files.contains { $0.pathID == absentPath })
+    let model = SearchPanelModel { _, _, _ in
+        stream(batches: [SearchBatch(matchesByPath: [absentPath: [searchMatch(path: absentPath, offset: 1)]], isFinal: true, completeness: .complete)])
+    }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+    #expect(await testWaitUntil("result absent from manifest arrives") { !model.isSearching && model.totalMatches == 1 })
+    #expect(model.groups.first?.contentID == nil)
+    #expect(model.openSelection() == nil)
+    #expect(model.selectedMatch == nil)
+    #expect(model.history.isEmpty)
+}

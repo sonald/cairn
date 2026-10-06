@@ -2,8 +2,8 @@ import CodeInsightCore
 import Foundation
 
 package enum ContentIndexDraftCodec {
-    private static let formatVersion: UInt32 = 3
-    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x03])
+    private static let formatVersion: UInt32 = 4
+    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x04])
 
     private struct Payload: Codable {
         let formatVersion: UInt32
@@ -75,6 +75,14 @@ package enum ContentIndexDraftCodec {
         let stringCount = payload.strings.count
         let scopes = Set(index.scopes.map(\.id))
         let regions = Set(index.executableRegions.map(\.id))
+
+        var previousEnd: UInt32 = 0
+        for region in index.regions {
+            guard region.range.lowerBound >= previousEnd,
+                  region.range.lowerBound < region.range.upperBound,
+                  valid(region.range, byteCount: byteCount) else { return false }
+            previousEnd = region.range.upperBound
+        }
 
         guard index.scopes.allSatisfy({
             valid($0.range, byteCount: byteCount)

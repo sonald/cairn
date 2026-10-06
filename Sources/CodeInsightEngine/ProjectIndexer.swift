@@ -77,7 +77,10 @@ public struct ProjectIndexer: Sendable {
         let extractor = try languageExtractor(for: language)
         let startedAt = Date()
         let root = root.standardizedFileURL
-        let files = try sourceFiles(in: root, language: language, rules: pathRules).sorted {
+        let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
+        let files = walked.files.filter {
+            LanguageMode.classify(path: $0.path, language: language) != nil
+        }.sorted {
             relativePath(of: $0, under: root) < relativePath(of: $1, under: root)
         }
         let store = ProjectIndexStore()
@@ -155,7 +158,9 @@ public struct ProjectIndexer: Sendable {
 
         let manifest = SnapshotManifest(
             snapshotID: SnapshotID(rawValue: UUID()),
-            files: occurrences
+            files: occurrences,
+            ruleExcludedPathCount: walked.ruleExcluded.count,
+            nonSourcePathCount: walked.files.count - files.count
         )
         let indexes = store.contentIndexes
         let stats = IndexStats(
@@ -306,7 +311,9 @@ public struct ProjectIndexer: Sendable {
 
         let manifest = SnapshotManifest(
             snapshotID: snapshot.snapshotID,
-            files: occurrences
+            files: occurrences,
+            ruleExcludedPathCount: snapshot.ruleExcludedPaths.count,
+            nonSourcePathCount: occurrences.filter { $0.detectedLanguage == nil }.count
         )
         let stats = try snapshotStats(
             manifest: manifest,
@@ -480,16 +487,6 @@ public struct ProjectIndexer: Sendable {
             reusedCount: reusedCount,
             extractedCount: extractedCount
         )
-    }
-
-    private func sourceFiles(
-        in root: URL,
-        language: LanguageID,
-        rules: ProjectPathRules
-    ) throws -> [URL] {
-        try ProjectTreeWalk.regularFiles(under: root, rules: rules).files.filter {
-            LanguageMode.classify(path: $0.path, language: language) != nil
-        }
     }
 
     private func languageExtractor(
@@ -862,7 +859,8 @@ public struct ProjectIndexer: Sendable {
                     range: $0.range
                 )
             },
-            lineTable: index.lineTable
+            lineTable: index.lineTable,
+            regions: index.regions
         )
     }
 

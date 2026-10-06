@@ -528,6 +528,7 @@ public final class AppModel {
     public let resolutionExplanations = ResolutionExplanationStore()
     public let tabStrip = TabStripModel()
     public let symbolHover = SymbolHoverModel()
+    public let projectSearch = SearchPanelModel()
     /// Names painted in fixed colors in every reader of this window.
     public var highlightedNames = HighlightedNames()
     /// The open project's exclusion rules, from application data.
@@ -846,6 +847,7 @@ public final class AppModel {
         navigationHistory.reset()
         readingTrail.reset()
         highlightedNames.removeAll()
+        projectSearch.clearSession()
         referencePane = nil
         resolutionExplanations.removeAll()
         relationTree.updateProjectState(projectState)
@@ -927,7 +929,9 @@ public final class AppModel {
                 Self.relativePath(of: pane.file, under: root).map {
                     SessionCodec.ReferencePane(path: $0, byteOffset: pane.byteOffset)
                 }
-            }
+            },
+            queryHistory: projectSearch.history,
+            lastQuery: projectSearch.currentQueryState
         )
     }
 
@@ -1089,6 +1093,8 @@ public final class AppModel {
         // surfaces are closing with it, and no late callback may publish a
         // ready/failed state back onto this model (§7.1).
         projectState = .empty
+        projectSearch.clearSession()
+        projectSearch.updateProjectState(.empty)
         contextWindow.updateProjectState(.empty, root: nil, contentSource: nil)
         relationTree.updateProjectState(.empty)
         projectRoot = nil
@@ -1126,6 +1132,7 @@ public final class AppModel {
         let openGeneration = generation
         bookmarkModel.workspaceDidChange(to: openGeneration)
         exactCoordinator.invalidate(generation: openGeneration)
+        if projectRoot != root { projectSearch.clearSession() }
         projectRoot = root
         projectLanguages = languages
         pathRules = pathRulesStore?.load(forProject: root) ?? ProjectPathRules()
@@ -1337,6 +1344,7 @@ public final class AppModel {
 
         let restoreGeneration = generation
         let source = documentSource
+        projectSearch.restoreHistory(snapshot.queryHistory, lastQuery: snapshot.lastQuery)
         var oldToNew: [Int: (
             index: Int,
             scrollFallback: ReplayFallbackKind?,
@@ -3087,22 +3095,12 @@ public final class AppModel {
             } else {
                 fileTree?.root
             }
-            contextWindow.updateProjectState(
-                next,
-                root: root,
-                contentSource: documentSource
-            )
-            relationTree.updateProjectState(next)
+            publishProjectState(next, root: root)
             return true
         case let (.indexing(currentRoot, _), .indexing(nextRoot, _))
             where currentRoot.standardizedFileURL != nextRoot.standardizedFileURL:
             projectState = next
-            contextWindow.updateProjectState(
-                next,
-                root: nextRoot,
-                contentSource: documentSource
-            )
-            relationTree.updateProjectState(next)
+            publishProjectState(next, root: nextRoot)
             return true
         default:
             return false
@@ -3512,6 +3510,13 @@ public final class AppModel {
 
     private func publishProjectState(_ state: ProjectState, root: URL?) {
         projectState = state
+        if case .ready = state {
+            let sessions = querySessionTuples()
+            if sessions.isEmpty { projectSearch.updateProjectState(state) }
+            else { projectSearch.updateWorkspaceSessions(sessions) }
+        } else {
+            projectSearch.updateProjectState(state)
+        }
         contextWindow.updateProjectState(
             state,
             root: root,

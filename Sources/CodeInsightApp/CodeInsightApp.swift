@@ -1000,6 +1000,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 && !skipped.contains(ObjectIdentifier(controller))
             {
                 do {
+                    controller.model.projectSearch.commitQuery()
                     try controller.checkpointSessionSynchronouslyReportingFailure()
                 } catch {
                     failure = (controller, error)
@@ -11423,6 +11424,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.showProjectSearch()
     }
 
+    @objc private func nextProjectSearchResult(_ sender: Any?) {
+        projectCommandTarget()?.nextProjectSearchResult()
+    }
+
+    @objc private func previousProjectSearchResult(_ sender: Any?) {
+        projectCommandTarget()?.previousProjectSearchResult()
+    }
+
+    @objc private func toggleProjectSearchResults(_ sender: Any?) {
+        projectCommandTarget()?.toggleProjectSearchResults()
+    }
+
     @objc private func findInFile(_ sender: Any?) {
         _ = projectCommandTarget()?.showFindBar()
     }
@@ -11712,6 +11725,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return model?.projectRoot != nil
         case #selector(quickOpen(_:)), #selector(openCommandPalette(_:)),
             #selector(goToLine(_:)), #selector(findInProject(_:)),
+            #selector(nextProjectSearchResult(_:)), #selector(previousProjectSearchResult(_:)),
+            #selector(toggleProjectSearchResults(_:)),
             #selector(openSymbol(_:)):
             return target != nil
         default:
@@ -11808,6 +11823,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .findNext: CommandAction(#selector(AppDelegate.findNext(_:))),
         .findPrevious: CommandAction(#selector(AppDelegate.findPrevious(_:))),
         .findInProject: CommandAction(#selector(AppDelegate.findInProject(_:))),
+        .nextProjectSearchResult: CommandAction(#selector(AppDelegate.nextProjectSearchResult(_:))),
+        .previousProjectSearchResult: CommandAction(#selector(AppDelegate.previousProjectSearchResult(_:))),
+        .toggleProjectSearchResults: CommandAction(#selector(AppDelegate.toggleProjectSearchResults(_:))),
         .goCommandPalette: CommandAction(#selector(AppDelegate.openCommandPalette(_:))),
         .goOpenSymbol: CommandAction(#selector(AppDelegate.openSymbol(_:))),
         .goToLine: CommandAction(#selector(AppDelegate.goToLine(_:))),
@@ -12048,6 +12066,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .findPrevious, to: findMenu)
         findMenu.addItem(.separator())
         appendMenuItem(for: .findInProject, to: findMenu)
+        appendMenuItem(for: .nextProjectSearchResult, to: findMenu)
+        appendMenuItem(for: .previousProjectSearchResult, to: findMenu)
+        appendMenuItem(for: .toggleProjectSearchResults, to: findMenu)
         findMenu.addItem(.separator())
         appendMenuItem(for: .findToggleHighlight, to: findMenu)
         appendMenuItem(for: .findClearHighlights, to: findMenu)

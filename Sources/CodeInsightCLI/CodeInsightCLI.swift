@@ -1041,8 +1041,8 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
             abstract: "Search project source contents."
         )
 
-        @Argument(help: "Literal or regular expression to search for.")
-        var pattern: String
+        @Argument(parsing: .allUnrecognized, help: "One quoted query: words, OR, exclusions, path:, in:, near:, same:fn. Use -- before a query that matches an option name.")
+        var patterns: [String] = []
 
         @OptionGroup var options: ProjectOptions
 
@@ -1052,16 +1052,28 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         @Flag(name: .long, help: "Match case sensitively.")
         var caseSensitive = false
 
+        @Flag(name: .long, help: "Match whole words for unquoted terms.")
+        var wholeWord = false
+
         @Option(name: .customLong("repeat"), help: "Run the search N times after indexing once; report timings to stderr.")
         var repeatCount: Int?
 
         func validate() throws {
+            guard patterns.count == 1 else {
+                throw ValidationError("Supply exactly one quoted query; check for unrecognized options. Use -- before a query that matches an option name.")
+            }
             if let repeatCount, repeatCount < 1 {
                 throw ValidationError("--repeat must be a positive integer.")
             }
         }
 
         func run() async throws {
+            let query: ProjectSearchQuery
+            do {
+                query = try ProjectSearchQuery.parse(patterns[0], isRegex: regex)
+            } catch let error as ProjectSearchQuery.ParseError {
+                throw ValidationError("Invalid query at UTF-16 offset \(error.range.lowerBound): \(error.localizedDescription)")
+            }
             let indexStarted = ContinuousClock.now
             let session = try indexProject(
                 options.project,
@@ -1071,13 +1083,9 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
             if repeatCount != nil {
                 timing("index ready_ms=\(milliseconds(since: indexStarted)) files=\(session.stats.fileCount) extracted=\(session.stats.extractedCount) reused=\(session.stats.reusedCount)")
             }
-            let query = ContentSearchQuery(
-                pattern: pattern,
-                isRegex: regex,
-                caseSensitive: caseSensitive
-            )
             let context = queryContext(for: session)
             var matchesByPath: [PathID: [SearchMatch]] = [:]
+            var coverage: SearchBatch?
             var completeness = Completeness.complete
             var truncatedPathIDs: Set<PathID> = []
             var firstResultTimes: [Double] = []
@@ -1087,7 +1095,7 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                 truncatedPathIDs.removeAll(keepingCapacity: true)
                 completeness = .complete
                 let started = ContinuousClock.now
-                let stream = try session.search(query, context: context)
+                let stream = try session.search(query, caseSensitive: caseSensitive, wholeWord: wholeWord, isRegex: regex, context: context)
                 var firstResult: Double?
                 for try await batch in stream {
                     if firstResult == nil, batch.matchesByPath.values.contains(where: { !$0.isEmpty }) {
@@ -1096,6 +1104,7 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                     for (pathID, matches) in batch.matchesByPath {
                         matchesByPath[pathID, default: []].append(contentsOf: matches)
                     }
+                    coverage = batch
                     completeness = batch.completeness
                     truncatedPathIDs.formUnion(batch.truncatedPathIDs)
                 }
@@ -1128,15 +1137,22 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                     totalMatches: totalMatches,
                     fileCount: files.count,
                     files: files,
-                    truncatedFiles: truncatedFiles
+                    truncatedFiles: truncatedFiles,
+                    coverage: ContentSearchCoverageJSON(coverage)
                 ))
             } else {
                 for file in files {
                     for match in file.matches {
-                        print("\(file.file):\(match.line):\(match.column): \(match.lineText)")
+                        print("\(file.file):\(match.line):\(match.column): [\(match.conditionIndices.map { String($0 + 1) }.joined(separator: ","))] \(match.symbolName.map { $0 + ": " } ?? "")\(match.lineText)")
                     }
                 }
                 print("\(totalMatches) matches in \(files.count) files")
+                if let coverage {
+                    print("Searched \(coverage.searchedPathCount) source files (\(coverage.searchedLanguages.map { String(describing: $0) }.joined(separator: ", "))). Path excluded: \(coverage.excludedPathCount); non-source: \(coverage.nonSourcePathCount); project rules: \(coverage.projectExcludedPathCount.map(String.init) ?? "unknown"); regex skipped: \(coverage.regexSkippedPathCount).")
+                    if !coverage.truncatedConditionIndices.isEmpty {
+                        print("Incomplete conditions: \(coverage.truncatedConditionIndices.sorted().map { String($0 + 1) }.joined(separator: ", "))")
+                    }
+                }
                 if completeness == .truncated {
                     print("Results truncated.")
                 }
@@ -1440,6 +1456,27 @@ private struct ContentSearchJSON: Codable {
     let fileCount: Int
     let files: [ContentSearchFileJSON]
     let truncatedFiles: [String]
+    let coverage: ContentSearchCoverageJSON
+}
+
+private struct ContentSearchCoverageJSON: Codable {
+    let searchedPathCount: Int
+    let excludedPathCount: Int
+    let searchedLanguages: [String]
+    let nonSourcePathCount: Int
+    let projectExcludedPathCount: Int?
+    let regexSkippedPathCount: Int
+    let truncatedConditionIndices: [Int]
+
+    init(_ batch: SearchBatch?) {
+        searchedPathCount = batch?.searchedPathCount ?? 0
+        excludedPathCount = batch?.excludedPathCount ?? 0
+        searchedLanguages = batch?.searchedLanguages.map { String(describing: $0) } ?? []
+        nonSourcePathCount = batch?.nonSourcePathCount ?? 0
+        projectExcludedPathCount = batch?.projectExcludedPathCount
+        regexSkippedPathCount = batch?.regexSkippedPathCount ?? 0
+        truncatedConditionIndices = batch?.truncatedConditionIndices.sorted() ?? []
+    }
 }
 
 private struct ContentSearchFileJSON: Codable {
@@ -1453,12 +1490,18 @@ private struct ContentSearchMatchJSON: Codable {
     let column: UInt32
     let byteRange: ByteRangeJSON
     let lineText: String
+    let conditionIndices: [Int]
+    let conditionRanges: [Int: [ByteRangeJSON]]
+    let symbolName: String?
 
     init(_ match: SearchMatch) {
         line = match.line
         column = match.column
         byteRange = ByteRangeJSON(match.byteRange)
         lineText = match.lineText
+        conditionIndices = match.conditionIndices
+        conditionRanges = match.conditionRanges.mapValues { $0.map(ByteRangeJSON.init) }
+        symbolName = match.symbolName
     }
 }
 

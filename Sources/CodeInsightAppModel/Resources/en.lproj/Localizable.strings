@@ -238,3 +238,30 @@
 "model.typehop.resolving" = "Resolving type…";
 "model.typehop.pendingExact" = "Type needs exact analysis · not ready";
 "model.typehop.accessibility" = "%1$@, %2$@, type %3$@";
+
+"model.query.suggest.same" = "Find both terms in the same function";
+"model.query.suggest.path" = "Exclude the test directory";
+"model.query.suggest.comment" = "Search only comments";
+"model.query.suggest.or" = "Match either term";
+"model.query.suggest.near" = "Allow matches within 10 lines";
+"model.query.suggest.distance" = "Allow three times the line distance";
+"model.query.suggest.area" = "Search all areas";
+"model.query.suggest.exclude" = "Remove the last excluded term";
+"model.query.suggest.code" = "Skip comments and strings";
+
+"search.query.error.unfinishedQuote" = "Close the quoted phrase.";
+"search.query.error.unfinishedRegex" = "Close the regular expression with /.";
+"search.query.error.missingValue" = "Enter a value after the colon.";
+"search.query.error.unexpectedToken" = "This token is not supported here.";
+"search.query.error.missingAlternative" = "Enter a term on both sides of OR.";
+"search.query.error.excludedAlternative" = "OR cannot join excluded terms.";
+"search.query.error.qualifierAlternative" = "OR joins search terms, not filters.";
+"search.query.error.invalidArea" = "Use code, comment, or string.";
+"search.query.error.invalidNear" = "Enter a nonnegative line distance.";
+"search.query.error.invalidSame" = "Only same:fn is supported.";
+"search.query.error.invalidRegex" = "The regular expression is invalid.";
+"search.query.error.excludedScope" = "A proximity or function scope cannot be excluded.";
+"search.query.error.duplicateScope" = "Use only one proximity or function scope.";
+"search.query.error.missingPositiveTerm" = "Add at least one included search term.";
+"search.query.error.emptyTerm" = "A search term cannot be empty.";
+"search.query.error.unsupportedGrouping" = "Parenthesized groups are not supported.";

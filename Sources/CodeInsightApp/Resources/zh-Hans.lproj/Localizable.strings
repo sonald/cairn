@@ -678,3 +678,98 @@
 "app.menu.close.split" = "关闭分屏";
 "main.split.projectOnly" = "只有项目内的文件可以在右侧打开";
 "main.split.tooNarrow" = "窗口太窄，放不下两个阅读区";
+
+"app.menu.find.project.next" = "下一处项目搜索结果";
+
+"app.menu.find.project.previous" = "上一处项目搜索结果";
+
+"app.menu.find.project.toggle.results" = "显示/隐藏查询结果";
+
+"settings.querySuggestions" = "显示查询提示";
+
+"panel.query.placeholder" = "搜索代码 · lock await same:fn";
+
+"panel.query.results" = "搜索结果";
+
+"panel.query.close" = "关闭底部区域";
+
+"panel.query.history" = "查询历史";
+
+"panel.query.history.empty" = "没有查询历史";
+
+"panel.query.help" = "查询语法";
+
+"panel.query.add" = "+ 添加条件";
+
+"panel.query.include" = "包含";
+
+"panel.query.or" = "包含（任一）";
+
+"panel.query.exclude" = "排除";
+
+"panel.query.path" = "路径";
+
+"panel.query.notpath" = "不含路径";
+
+"panel.query.code" = "只在代码";
+
+"panel.query.notcomment" = "不在注释";
+
+"panel.query.near" = "相距 N 行内";
+
+"panel.query.same" = "同一函数";
+
+"panel.query.chip.in" = "只在";
+
+"panel.query.chip.notin" = "不在";
+
+"panel.query.chip.near" = "相距 ≤ %lld 行";
+
+"panel.query.hints.actions" = "点一条应用 · Esc 关闭";
+
+"panel.query.area.code" = "代码";
+
+"panel.query.area.comment" = "注释";
+
+"panel.query.area.string" = "字符串";
+
+"panel.query.stale" = "已过期 · 正在重新搜索…";
+
+"panel.query.coverage" = "已搜索 %lld 个源文件（%@）";
+
+"panel.query.path.excluded" = "按 path: 排除 %lld 个";
+
+"panel.query.nonsource" = "未搜索 %lld 个非源码文件";
+
+"panel.query.regex.skipped" = "正则跳过 %lld 个大文件";
+
+"panel.query.help.and" = "空格：同一文件中同时满足";
+
+"panel.query.help.or" = "任一即可；OR 优先结合";
+
+"panel.query.help.exclude" = "按同一范围排除";
+
+"panel.query.help.phrase" = "精确短语";
+
+"panel.query.help.regex" = "正则表达式";
+
+"panel.query.help.path" = "只看 / 不看这些路径";
+
+"panel.query.help.area" = "代码、注释或字符串";
+
+"panel.query.help.near" = "各条件相距不超过 5 行";
+
+"panel.query.help.same" = "各条件在同一个函数里";
+
+"panel.query.hints.empty" = "可以这样写";
+
+"panel.query.hints.relax" = "没有结果，可以放宽条件";
+
+"panel.query.hints.narrow" = "结果较多，可以收紧条件";
+
+"panel.query.previous" = "保留上次查询结果";
+
+"panel.query.rows" = "%lld 行 · %lld 个文件";
+"panel.query.conditions.truncated" = "可能不完整 · 截断条件：%@";
+
+"panel.query.stale.pending" = "已过期 · 等待更新结果…";

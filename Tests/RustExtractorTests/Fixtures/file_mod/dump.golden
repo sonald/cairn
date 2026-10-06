@@ -6,6 +6,8 @@ bindings:
   (none)
 regions:
   - #0 kind=function scope=#1 facet=#2 range=5:1..8:2 bytes=53..<85
+contentRegions:
+  (none)
 facets:
   - #0 kind=rustMod space=module name=db parent=- nameAt=1:5..1:7 bytes=4..<6 range=1:1..1:8 bytes=0..<7
   - #1 kind=rustMod space=module name=cache parent=- nameAt=2:5..2:10 bytes=12..<17 range=2:1..2:11 bytes=8..<18

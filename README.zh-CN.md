@@ -9,7 +9,7 @@
 
 **Cairn** 是 macOS 原生只读代码阅读器，用来理解陌生项目。CodeInsight 保留为 Swift package 和模块名。可以阅读源码、追踪符号与关系、比较 Git 快照，不编辑文件，也不 checkout 另一个提交。
 
-- Rust、Python、TypeScript/TSX 语法索引、符号与全文搜索。
+- Rust、Python、TypeScript/TSX 语法索引、符号与可组合项目查询。
 - 跟随符号或所在函数的 Context 窗口，支持值绑定的类型预览与固定。
 - 可选 rust-analyzer、Pyright、typescript-language-server 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
@@ -48,12 +48,15 @@ bash scripts/make-app.sh
 
 源码索引当前识别 `.rs`、`.py`、`.ts`、`.tsx`，JS/JSX、声明文件及其他变体扩展名不等于完整源码分析模式。非源码预览不提供关系、折叠、书签、比较和搜索控件。Exact 结果依赖 provider 能力与本地环境，“已验证”不代表掌握全部运行时行为。
 
+`⇧⌘F` 打开停靠搜索：`lock await same:fn`、`lock OR mutex`、`-path:tests/`、`in:code` 可组合文本、路径和语法区域。查询历史随项目恢复，`⌥⌘G` / `⇧⌥⌘G` 逐条浏览结果。详见[查询行为与当前验收限制](docs/product.md#搜索选项)。
+
 ## CLI
 
 ```bash
 swift build --product codeinsight
 .build/debug/codeinsight --help
 .build/debug/codeinsight index /path/to/project --stats
+.build/debug/codeinsight search 'lock await same:fn -path:tests/' --project /path/to/project --json
 .build/debug/codeinsight resolve src/main.rs:12:9 --project /path/to/project --type-hop
 ```
 

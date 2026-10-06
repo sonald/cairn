@@ -59,6 +59,12 @@ public enum CanonicalDump {
         }
         appendNoneIfNeeded(to: &lines, count: index.executableRegions.count)
 
+        lines.append("contentRegions:")
+        for region in index.regions {
+            lines.append("  - kind=\(region.kind) range=\(format(region.range, table: index.lineTable))")
+        }
+        appendNoneIfNeeded(to: &lines, count: index.regions.count)
+
         lines.append("facets:")
         for (facetIndex, facet) in index.symbols.enumerated().sorted(by: {
             ordered($0.element.range, $0.offset, $1.element.range, $1.offset)

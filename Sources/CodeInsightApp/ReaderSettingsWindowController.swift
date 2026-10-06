@@ -400,6 +400,7 @@ private struct ReaderSettingsView: View {
                         .help(localized("settings.blockEndAnnotations.help"))
                     Toggle(localized("settings.overviewRuler"), isOn: $settings.overviewRuler)
                         .help(localized("settings.overviewRuler.help"))
+                    Toggle(localized("settings.querySuggestions"), isOn: $settings.showQuerySuggestions)
                     fontControls
 
                     DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {

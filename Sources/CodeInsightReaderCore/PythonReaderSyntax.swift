@@ -79,6 +79,10 @@ private func pythonWalk(
         spans.append(HighlightSpan(range: coreRange(node), kind: .keyword))
         return
     }
+    if let kind = contentRegionKind(nodeKind: node.kind, language: .python) {
+        spans.append(HighlightSpan(range: coreRange(node), kind: kind == .comment ? .comment : .string))
+        return
+    }
     switch node.kind {
     case "identifier":
         if let role {
@@ -90,12 +94,6 @@ private func pythonWalk(
         return
     case "integer", "float":
         spans.append(HighlightSpan(range: coreRange(node), kind: .number))
-        return
-    case "string", "concatenated_string":
-        spans.append(HighlightSpan(range: coreRange(node), kind: .string))
-        return
-    case "comment":
-        spans.append(HighlightSpan(range: coreRange(node), kind: .comment))
         return
     case "decorated_definition":
         for decorator in node.namedChildren where decorator.kind == "decorator" {

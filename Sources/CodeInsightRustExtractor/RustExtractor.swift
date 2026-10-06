@@ -74,7 +74,8 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             calls: calls.calls,
             imports: imports.imports,
             exports: imports.exports,
-            lineTable: LineTable(bytes: bytes)
+            lineTable: LineTable(bytes: bytes),
+            regions: contentRegions(in: tree.rootNode, language: .rust)
         ), tree.rootNode.hasError)
     }
 

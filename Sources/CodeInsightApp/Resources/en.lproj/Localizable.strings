@@ -678,3 +678,98 @@
 "app.menu.close.split" = "Close Split";
 "main.split.projectOnly" = "Only project files open to the side";
 "main.split.tooNarrow" = "The window is too narrow for two readers";
+
+"app.menu.find.project.next" = "Next Project Search Result";
+
+"app.menu.find.project.previous" = "Previous Project Search Result";
+
+"app.menu.find.project.toggle.results" = "Show/Hide Query Results";
+
+"settings.querySuggestions" = "Show query suggestions";
+
+"panel.query.placeholder" = "Search code · lock await same:fn";
+
+"panel.query.results" = "Search results";
+
+"panel.query.close" = "Close bottom area";
+
+"panel.query.history" = "Query history";
+
+"panel.query.history.empty" = "No query history";
+
+"panel.query.help" = "Query syntax";
+
+"panel.query.add" = "+ Add condition";
+
+"panel.query.include" = "Include";
+
+"panel.query.or" = "Include either";
+
+"panel.query.exclude" = "Exclude";
+
+"panel.query.path" = "Path";
+
+"panel.query.notpath" = "Exclude path";
+
+"panel.query.code" = "Only code";
+
+"panel.query.notcomment" = "Exclude comments";
+
+"panel.query.near" = "Within N lines";
+
+"panel.query.same" = "Same function";
+
+"panel.query.chip.in" = "Only in";
+
+"panel.query.chip.notin" = "Not in";
+
+"panel.query.chip.near" = "Within %lld lines";
+
+"panel.query.hints.actions" = "Click to apply · Esc to close";
+
+"panel.query.area.code" = "code";
+
+"panel.query.area.comment" = "comment";
+
+"panel.query.area.string" = "string";
+
+"panel.query.stale" = "Out of date · searching again…";
+
+"panel.query.coverage" = "Searched %lld source files (%@)";
+
+"panel.query.path.excluded" = "%lld excluded by path:";
+
+"panel.query.nonsource" = "%lld non-source files not searched";
+
+"panel.query.regex.skipped" = "Regex skipped %lld large files";
+
+"panel.query.help.and" = "All conditions in one file";
+
+"panel.query.help.or" = "Either alternative; OR binds first";
+
+"panel.query.help.exclude" = "Exclude within the same scope";
+
+"panel.query.help.phrase" = "Exact phrase";
+
+"panel.query.help.regex" = "Regular expression";
+
+"panel.query.help.path" = "Include / exclude paths";
+
+"panel.query.help.area" = "Code, comments, or strings";
+
+"panel.query.help.near" = "Matches within five lines";
+
+"panel.query.help.same" = "Matches in one function";
+
+"panel.query.hints.empty" = "Try a query";
+
+"panel.query.hints.relax" = "No results · try fewer conditions";
+
+"panel.query.hints.narrow" = "Too many results · narrow the query";
+
+"panel.query.previous" = "Previous query results";
+
+"panel.query.rows" = "%lld lines · %lld files";
+"panel.query.conditions.truncated" = "May be incomplete · truncated conditions: %@";
+
+"panel.query.stale.pending" = "Out of date · awaiting updated results…";

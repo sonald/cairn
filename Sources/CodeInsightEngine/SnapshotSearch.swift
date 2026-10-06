@@ -6,6 +6,15 @@ public protocol SnapshotContentSource: Sendable {
     var manifest: SnapshotManifest { get }
     func path(for pathID: PathID) -> String?
     func bytes(for contentID: ContentID) -> [UInt8]?
+    func searchIndex(for pathID: PathID) -> ContentIndex?
+    func searchName(for nameID: NameID) -> String?
+    var searchProjectExcludedPathCount: Int? { get }
+}
+
+public extension SnapshotContentSource {
+    func searchIndex(for pathID: PathID) -> ContentIndex? { nil }
+    func searchName(for nameID: NameID) -> String? { nil }
+    var searchProjectExcludedPathCount: Int? { nil }
 }
 
 public struct ContentSearchQuery: Sendable {
@@ -42,6 +51,9 @@ public struct SearchMatch: Sendable {
     public let column: UInt32
     public let lineText: String
     public let lineTextRange: ByteRange
+    public let conditionIndices: [Int]
+    public let conditionRanges: [Int: [ByteRange]]
+    public let symbolName: String?
 
     public init(
         pathID: PathID,
@@ -49,7 +61,10 @@ public struct SearchMatch: Sendable {
         line: UInt32,
         column: UInt32,
         lineText: String,
-        lineTextRange: ByteRange
+        lineTextRange: ByteRange,
+        conditionIndices: [Int] = [],
+        conditionRanges: [Int: [ByteRange]] = [:],
+        symbolName: String? = nil
     ) {
         self.pathID = pathID
         self.byteRange = byteRange
@@ -57,6 +72,9 @@ public struct SearchMatch: Sendable {
         self.column = column
         self.lineText = lineText
         self.lineTextRange = lineTextRange
+        self.conditionIndices = conditionIndices
+        self.conditionRanges = conditionRanges
+        self.symbolName = symbolName
     }
 }
 
@@ -69,6 +87,11 @@ public struct SearchBatch: Sendable {
     /// and those they removed; the same on every batch of one search.
     public let searchedPathCount: Int
     public let excludedPathCount: Int
+    public let searchedLanguages: [LanguageID]
+    public let nonSourcePathCount: Int
+    public let projectExcludedPathCount: Int?
+    public let regexSkippedPathCount: Int
+    public let truncatedConditionIndices: Set<Int>
 
     public init(
         matchesByPath: [PathID: [SearchMatch]],
@@ -76,7 +99,12 @@ public struct SearchBatch: Sendable {
         completeness: Completeness,
         truncatedPathIDs: Set<PathID> = [],
         searchedPathCount: Int = 0,
-        excludedPathCount: Int = 0
+        excludedPathCount: Int = 0,
+        searchedLanguages: [LanguageID] = [],
+        nonSourcePathCount: Int = 0,
+        projectExcludedPathCount: Int? = nil,
+        regexSkippedPathCount: Int = 0,
+        truncatedConditionIndices: Set<Int> = []
     ) {
         self.matchesByPath = matchesByPath
         self.isFinal = isFinal
@@ -84,6 +112,11 @@ public struct SearchBatch: Sendable {
         self.truncatedPathIDs = truncatedPathIDs
         self.searchedPathCount = searchedPathCount
         self.excludedPathCount = excludedPathCount
+        self.searchedLanguages = searchedLanguages
+        self.nonSourcePathCount = nonSourcePathCount
+        self.projectExcludedPathCount = projectExcludedPathCount
+        self.regexSkippedPathCount = regexSkippedPathCount
+        self.truncatedConditionIndices = truncatedConditionIndices
     }
 }
 
@@ -94,21 +127,22 @@ public enum SnapshotSearchError: Error {
 public struct SnapshotSearchService: Sendable {
     private static let matchesPerFile = 200
     private static let totalMatches = 5_000
-    private static let regexContentBytes = 4 * 1_024 * 1_024
+    static let regexContentBytes = 4 * 1_024 * 1_024
     private static let filesPerBatch = 16
     private static let matchesPerBatch = 200
 
-    private let source: any SnapshotContentSource
-    private let language: LanguageID
-    private let extractor: any LanguageExtractor
-    private let wallClockLimit: Duration
-    private let workerCount: Int
-    private let searchMatchesPerFile: Int
-    private let searchTotalMatches: Int
+    let source: any SnapshotContentSource
+    let language: LanguageID
+    let extractor: any LanguageExtractor
+    let wallClockLimit: Duration
+    let batchInterval: Duration
+    let workerCount: Int
+    let searchMatchesPerFile: Int
+    let searchTotalMatches: Int
 
     // Workers report ranges; only the consumer projects and publishes ordered results.
     private enum ScanEvent: Sendable {
-        case content(Int, [UInt8]?, [ByteRange]?)
+        case content(Int, [UInt8]?, [ByteRange]?, regexSkipped: Bool, incompleteConditions: Set<Int>)
         case workerFinished
         case flush
     }
@@ -126,6 +160,7 @@ public struct SnapshotSearchService: Sendable {
         language: LanguageID,
         extractor: any LanguageExtractor,
         wallClockLimit: Duration = .seconds(5),
+        batchInterval: Duration = .milliseconds(50),
         workerCount: Int = ProcessInfo.processInfo.activeProcessorCount,
         matchesPerFile: Int = 200,
         totalMatches: Int = 5_000
@@ -136,6 +171,7 @@ public struct SnapshotSearchService: Sendable {
         self.language = language
         self.extractor = extractor
         self.wallClockLimit = wallClockLimit
+        self.batchInterval = batchInterval
         self.workerCount = workerCount
         searchMatchesPerFile = matchesPerFile
         searchTotalMatches = totalMatches
@@ -143,6 +179,16 @@ public struct SnapshotSearchService: Sendable {
 
     public func search(
         _ query: ContentSearchQuery,
+        context: QueryContext
+    ) throws -> AsyncThrowingStream<SearchBatch, Error> {
+        try search(query, filters: nil, regexForWords: query.isRegex, wholeWordForWords: query.wholeWord, context: context)
+    }
+
+    func search(
+        _ query: ContentSearchQuery,
+        filters: ProjectSearchQuery?,
+        regexForWords: Bool,
+        wholeWordForWords: Bool,
         context: QueryContext
     ) throws -> AsyncThrowingStream<SearchBatch, Error> {
         guard !query.pattern.isEmpty else {
@@ -166,6 +212,12 @@ public struct SnapshotSearchService: Sendable {
             regularExpression = nil
         }
         let literalPattern = Array(query.pattern.utf8)
+        let exclusionTerms = filters?.excludes ?? []
+        let exclusionRegexes = try exclusionTerms.map { term -> NSRegularExpression? in
+            guard term.kind == .regex || (term.kind == .word && regexForWords) else { return nil }
+            return try NSRegularExpression(pattern: term.text, options: query.caseSensitive ? [] : [.caseInsensitive])
+        }
+
 
         let source = source
         let candidates = activeFiles().map(\.file)
@@ -181,18 +233,24 @@ public struct SnapshotSearchService: Sendable {
         let wallClockLimit = wallClockLimit
         let matchesPerFile = searchMatchesPerFile
         let totalMatches = searchTotalMatches
+        let batchInterval = batchInterval
         let workerCount = workerCount
+        let needsRegions = !(filters?.includedAreas.isEmpty ?? true) || !(filters?.excludedAreas.isEmpty ?? true)
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 let startedAt = ContinuousClock.now
                 let filesByContent = Dictionary(grouping: files, by: \.contentID)
                 var seenContentIDs: Set<ContentID> = []
-                let contentIDs = files.compactMap {
-                    seenContentIDs.insert($0.contentID).inserted ? $0.contentID : nil
+                // Equal bytes can have different syntax in .ts and .tsx. Region
+                // filters must use each path's actual index; plain text can deduplicate.
+                let scanGroups = needsRegions ? files.map { [$0] } : files.compactMap {
+                    seenContentIDs.insert($0.contentID).inserted ? filesByContent[$0.contentID] : nil
                 }
                 let allPathIDs = Set(files.map(\.pathID))
                 var processedPathIDs: Set<PathID> = []
                 var truncatedPathIDs: Set<PathID> = []
+                var regexSkippedPathIDs: Set<PathID> = []
+                var truncatedConditionIndices: Set<Int> = []
                 var completeness = Completeness.complete
                 var totalMatchCount = 0
                 var batchMatches: [PathID: [SearchMatch]] = [:]
@@ -212,7 +270,9 @@ public struct SnapshotSearchService: Sendable {
                         completeness: completeness,
                         truncatedPathIDs: truncatedPathIDs,
                         searchedPathCount: searchedPathCount,
-                        excludedPathCount: excludedPathCount
+                        excludedPathCount: excludedPathCount,
+                        regexSkippedPathCount: regexSkippedPathIDs.count,
+                        truncatedConditionIndices: truncatedConditionIndices
                     ))
                     hasSentResults = hasSentResults || !batchMatches.isEmpty
                     lastSentAt = .now
@@ -227,56 +287,83 @@ public struct SnapshotSearchService: Sendable {
                             group.cancelAll()
                             events.continuation.finish()
                         }
-                        let count = min(workerCount, contentIDs.count)
+                        let count = min(workerCount, scanGroups.count)
                         for worker in 0..<count {
-                            let lower = worker * contentIDs.count / count
-                            let upper = (worker + 1) * contentIDs.count / count
+                            let lower = worker * scanGroups.count / count
+                            let upper = (worker + 1) * scanGroups.count / count
                             group.addTask {
                                 defer { events.continuation.yield(.workerFinished) }
                                 for offset in lower..<upper {
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { return }
-                                    let bytes = source.bytes(for: contentIDs[offset])
+                                    let bytes = source.bytes(for: scanGroups[offset][0].contentID)
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { return }
                                     var ranges: [ByteRange]?
+                                    var skippedRegex = false
+                                    var incompleteConditions: Set<Int> = []
                                     if let bytes {
-                                        if let regularExpression {
-                                            if bytes.count <= Self.regexContentBytes,
-                                               let string = String(bytes: bytes, encoding: .utf8) {
-                                                ranges = Self.regexRanges(
-                                                    regularExpression,
-                                                    string: string,
-                                                    accepting: { range in
-                                                        wordBoundary?.isWholeWord(range, in: bytes) ?? true
-                                                    },
-                                                    startedAt: startedAt,
-                                                    wallClockLimit: wallClockLimit,
-                                                    maximumMatches: matchesPerFile
-                                                )
-                                            }
-                                        } else {
-                                            ranges = try literalRanges(
-                                                literalPattern,
-                                                in: bytes,
-                                                caseSensitive: query.caseSensitive,
-                                                wordBoundary: wordBoundary,
-                                                maximumMatches: matchesPerFile,
-                                                wallClockExpired: {
-                                                    Self.expired(startedAt, limit: wallClockLimit)
-                                                }
-                                            )
+                                        let index = needsRegions ? source.searchIndex(for: scanGroups[offset][0].pathID) : nil
+                                        let accepts: (ByteRange) -> Bool = { range in
+                                            guard needsRegions, let filters else { return true }
+                                            let area = Self.area(at: range.lowerBound, index: index)
+                                            return (filters.includedAreas.isEmpty || filters.includedAreas.contains(area))
+                                                && !filters.excludedAreas.contains(area)
                                         }
-                                    }
+                                        var mayInclude = !needsRegions || index != nil
+                                        if !mayInclude { incompleteConditions.formUnion(0...exclusionTerms.count) }
+                                        // Negative predicates only ask whether a match exists in this file.
+                                        // They never consume the positive match budget.
+                                        for (number, term) in exclusionTerms.enumerated() where mayInclude {
+                                            let boundary = wholeWordForWords && term.kind == .word ? WordBoundary(allowsDollar: language == .typescript) : nil
+                                            let excluded: [ByteRange]
+                                            if let regex = exclusionRegexes[number] {
+                                                guard bytes.count <= Self.regexContentBytes,
+                                                      let string = String(bytes: bytes, encoding: .utf8) else {
+                                                    mayInclude = false
+                                                    skippedRegex = true
+                                                    incompleteConditions.insert(number + 1)
+                                                    break
+                                                }
+                                                excluded = Self.regexRanges(regex, string: string,
+                                                    accepting: { accepts($0) && (boundary?.isWholeWord($0, in: bytes) ?? true) },
+                                                    startedAt: startedAt, wallClockLimit: wallClockLimit, maximumMatches: 0)
+                                            } else {
+                                                excluded = try literalRanges(Array(term.text.utf8), in: bytes,
+                                                    caseSensitive: query.caseSensitive, wordBoundary: boundary,
+                                                    maximumMatches: 0, accepting: accepts,
+                                                    wallClockExpired: { Self.expired(startedAt, limit: wallClockLimit) })
+                                            }
+                                            try Task.checkCancellation()
+                                            if Self.expired(startedAt, limit: wallClockLimit) { return }
+                                            if !excluded.isEmpty { mayInclude = false; ranges = [] }
+                                        }
+                                        if mayInclude {
+                                            if let regularExpression {
+                                                if bytes.count <= Self.regexContentBytes,
+                                                   let string = String(bytes: bytes, encoding: .utf8) {
+                                                    ranges = Self.regexRanges(regularExpression, string: string,
+                                                        accepting: { accepts($0) && (wordBoundary?.isWholeWord($0, in: bytes) ?? true) },
+                                                        startedAt: startedAt, wallClockLimit: wallClockLimit, maximumMatches: matchesPerFile)
+                                                } else { skippedRegex = true; incompleteConditions.insert(0) }
+                                            } else {
+                                                ranges = try literalRanges(literalPattern, in: bytes,
+                                                    caseSensitive: query.caseSensitive, wordBoundary: wordBoundary,
+                                                    maximumMatches: matchesPerFile,
+                                                    accepting: needsRegions ? accepts : nil,
+                                                    wallClockExpired: { Self.expired(startedAt, limit: wallClockLimit) })
+                                            }
+                                        }
+                                    } else { incompleteConditions.formUnion(0...exclusionTerms.count) }
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { return }
-                                    events.continuation.yield(.content(offset, bytes, ranges))
+                                    events.continuation.yield(.content(offset, bytes, ranges, regexSkipped: skippedRegex, incompleteConditions: incompleteConditions))
                                 }
                             }
                         }
                         var finishedWorkers = 0
                         var nextContent = 0
-                        var pending: [Int: (bytes: [UInt8]?, ranges: [ByteRange]?)] = [:]
+                        var pending: [Int: (bytes: [UInt8]?, ranges: [ByteRange]?, regexSkipped: Bool, incompleteConditions: Set<Int>)] = [:]
                         if count == 0 { return }
                         eventLoop: for try await event in events.stream {
                             try Task.checkCancellation()
@@ -287,15 +374,19 @@ public struct SnapshotSearchService: Sendable {
                             case .workerFinished:
                                 finishedWorkers += 1
                                 if finishedWorkers == count { break eventLoop }
-                            case let .content(offset, bytes, ranges):
-                                pending[offset] = (bytes, ranges)
+                            case let .content(offset, bytes, ranges, regexSkipped, incompleteConditions):
+                                pending[offset] = (bytes, ranges, regexSkipped, incompleteConditions)
                                 while let scanned = pending.removeValue(forKey: nextContent) {
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { break eventLoop }
-                                    let occurrences = filesByContent[contentIDs[nextContent]] ?? []
+                                    let occurrences = scanGroups[nextContent]
                                     nextContent += 1
                                     guard let bytes = scanned.bytes, let ranges = scanned.ranges else {
+                                        if scanned.regexSkipped {
+                                            regexSkippedPathIDs.formUnion(occurrences.map(\.pathID))
+                                        }
                                         completeness = .truncated
+                                        truncatedConditionIndices.formUnion(scanned.incompleteConditions)
                                         truncatedPathIDs.formUnion(occurrences.map(\.pathID))
                                         processedPathIDs.formUnion(occurrences.map(\.pathID))
                                         continue
@@ -330,15 +421,16 @@ public struct SnapshotSearchService: Sendable {
                                         batchMatchCount += matches.count
                                         totalMatchCount += matches.count
                                         if fileWasTruncated || matches.count < visibleRanges.count {
+                                            truncatedConditionIndices.insert(0)
                                             completeness = .truncated
                                             truncatedPathIDs.insert(occurrence.pathID)
                                         }
                                         if !hasSentResults || batchMatches.count >= Self.filesPerBatch
                                             || batchMatchCount >= Self.matchesPerBatch
-                                            || lastSentAt.duration(to: .now) >= .milliseconds(50) {
+                                            || lastSentAt.duration(to: .now) >= batchInterval {
                                             flush(isFinal: false)
                                         } else if flushTask == nil {
-                                            let deadline = lastSentAt.advanced(by: .milliseconds(50))
+                                            let deadline = lastSentAt.advanced(by: batchInterval)
                                             flushTask = Task {
                                                 do {
                                                     try await ContinuousClock().sleep(until: deadline)
@@ -358,6 +450,10 @@ public struct SnapshotSearchService: Sendable {
                     if !Task.isCancelled {
                         let unprocessed = allPathIDs.subtracting(processedPathIDs)
                         if !unprocessed.isEmpty {
+                            truncatedConditionIndices.insert(0)
+                            if Self.expired(startedAt, limit: wallClockLimit) {
+                                truncatedConditionIndices.formUnion(1..<(exclusionTerms.count + 1))
+                            }
                             completeness = .truncated
                             truncatedPathIDs.formUnion(unprocessed)
                         }
@@ -579,7 +675,7 @@ public struct SnapshotSearchService: Sendable {
         }
     }
 
-    private func activeFiles() -> [(
+    func activeFiles() -> [(
         file: FileOccurrence,
         mode: LanguageMode
     )] {
@@ -591,7 +687,7 @@ public struct SnapshotSearchService: Sendable {
         }
     }
 
-    private static func regexRanges(
+    static func regexRanges(
         _ regex: NSRegularExpression,
         string: String,
         accepting accepts: (ByteRange) -> Bool,
@@ -640,7 +736,7 @@ public struct SnapshotSearchService: Sendable {
         return ranges
     }
 
-    private static func lineExcerpt(
+    static func lineExcerpt(
         in bytes: [UInt8],
         range: ByteRange,
         lineTable: LineTable
@@ -679,7 +775,7 @@ public struct SnapshotSearchService: Sendable {
         )
     }
 
-    private static func expired(
+    static func expired(
         _ startedAt: ContinuousClock.Instant,
         limit: Duration
     ) -> Bool {
@@ -688,6 +784,10 @@ public struct SnapshotSearchService: Sendable {
 }
 
 extension EngineSession: SnapshotContentSource {
+    public func searchIndex(for pathID: PathID) -> ContentIndex? { content(at: pathID)?.1 }
+    public func searchName(for nameID: NameID) -> String? { names.resolve(nameID) }
+    public var searchProjectExcludedPathCount: Int? { manifest.ruleExcludedPathCount }
+
     public func path(for pathID: PathID) -> String? {
         paths.resolve(pathID)
     }

@@ -21,7 +21,7 @@ func sessionCodecWritesV2LanguageArrayAndDecodesV1Singleton() throws {
     let object = try #require(
         JSONSerialization.jsonObject(with: data) as? [String: Any]
     )
-    #expect(object["schemaVersion"] as? Int == 4)
+    #expect(object["schemaVersion"] as? Int == 5)
     #expect(object["languages"] as? [Int] == [Int(LanguageID.python.rawValue)])
     #expect(object["language"] == nil)
     #expect(try SessionCodec.decode(
@@ -101,7 +101,7 @@ func sessionCodecRoundTripsCanonicalLanguageArrayWithSortedKeys() throws {
     #expect(decoded.language == .rust)
 
     let json = try #require(String(data: data, encoding: .utf8))
-    #expect(json == "{\"languages\":[0,1,2],\"panelPreset\":\"reading\",\"projectRoot\":\"\\/tmp\\/project\",\"schemaVersion\":4,\"tabs\":[]}")
+    #expect(json == "{\"languages\":[0,1,2],\"panelPreset\":\"reading\",\"projectRoot\":\"\\/tmp\\/project\",\"schemaVersion\":5,\"tabs\":[]}")
 }
 
 @Test
@@ -455,7 +455,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
     let json = try #require(String(data: data, encoding: .utf8))
     let unknown = try #require(
         json.replacingOccurrences(
-            of: "\"schemaVersion\":4",
+            of: "\"schemaVersion\":5",
             with: "\"schemaVersion\":9"
         ).data(using: .utf8)
     )
@@ -1307,4 +1307,27 @@ func sessionRestoresTrackingButNotPin() throws {
         maximumTabCount: 10,
         dependencyAllowed: { _ in false }
     ).contextTracking == nil)
+}
+
+@Test
+func sessionCodecQueryStateRoundTripsAndV4DefaultsToEmpty() throws {
+    let history = [QueryState(text: "lock await same:fn", caseSensitive: true, wholeWord: true), QueryState(text: "spawn.*", isRegex: true)]
+    let snapshot = SessionCodec.Snapshot(projectRoot: "/tmp/project", language: .rust, revision: nil,
+                                         activeTabOrdinal: nil, panelPreset: "reading", tabs: [],
+                                         queryHistory: history, lastQuery: history[1])
+    let data = try SessionCodec.encode(snapshot, maximumTabCount: 10, dependencyAllowed: { _ in false })
+    let decoded = try SessionCodec.decode(data, maximumTabCount: 10, dependencyAllowed: { _ in false })
+    #expect(decoded.queryHistory == history)
+    #expect(decoded.lastQuery == history[1])
+    var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    object["schemaVersion"] = 4
+    object.removeValue(forKey: "queryHistory")
+    object.removeValue(forKey: "lastQuery")
+    let v4 = try SessionCodec.decode(JSONSerialization.data(withJSONObject: object), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    #expect(v4.queryHistory.isEmpty)
+    #expect(v4.lastQuery == nil)
+    object["schemaVersion"] = 6
+    #expect(throws: SessionCodec.DecodeError.unsupportedSchemaVersion(6)) {
+        try SessionCodec.decode(JSONSerialization.data(withJSONObject: object), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    }
 }
