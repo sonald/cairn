@@ -61,12 +61,10 @@ private func readonlyProjectionCheckOracle(_ document: ReaderDocument, ids: Set<
     }
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyProjectionConstructionDoesNotMaterializeEvenWithoutFolds() throws {
     for source in ["", "a", "中文😀e\u{301}\r\n", String(repeating: "line\n", count: 10_000)] {
         let document = readonlyProjectionDocument(source, bodies: [])
-        ReaderWorkCounters.setEnabled(true)
-        defer { ReaderWorkCounters.setEnabled(false) }
         let before = ReaderWorkCounters.snapshot()
         let projection = try #require(ReaderProjection(document: document, renderedFoldIDs: []))
         let map = try #require(DisplayMap(document: document, renderedFoldIDs: []))
@@ -152,12 +150,10 @@ func readonlyProjectionRejectsUnknownDuplicateOverlappingAndInvalidRanges() thro
     }
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyProjectionLargeCollapsedBodyMaterializesOnlyVisibleSlices() throws {
     let source = String(repeating: "a", count: 1_048_576)
     let document = readonlyProjectionDocument(source, bodies: [ByteRange(lowerBound: 1, upperBound: UInt32(source.utf8.count - 1))])
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     let projection = try #require(ReaderProjection(document: document, renderedFoldIDs: [FoldID(rawValue: 0)]))
     #expect(ReaderWorkCounters.snapshot().materializedUTF8Bytes == before.materializedUTF8Bytes)

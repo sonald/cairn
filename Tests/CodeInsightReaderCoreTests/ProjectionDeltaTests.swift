@@ -27,7 +27,7 @@ private func readonlyDeltaApply(_ old: ReaderProjection, _ new: ReaderProjection
     return delta
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyProjectionDeltaSingleMiddleFoldReplacesOnlyItsSourceWindow() throws {
     let source = String(repeating: "a", count: 10_000)
     let hidden = ByteRange(lowerBound: 4_000, upperBound: 4_200)
@@ -40,8 +40,6 @@ func readonlyProjectionDeltaSingleMiddleFoldReplacesOnlyItsSourceWindow() throws
     #expect(patch.oldDisplayRange == NSRange(location: 4_000, length: 200))
     #expect(patch.newDisplayRange == NSRange(location: 4_000, length: 1))
     #expect(patch.sourceRange == hidden)
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot().materializedUTF8Bytes
     #expect(new.materialize(displayRange: patch.newDisplayRange) == "\u{FFFC}")
     #expect(ReaderWorkCounters.snapshot().materializedUTF8Bytes == before)

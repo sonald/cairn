@@ -194,18 +194,17 @@ private func s6NativeReader(
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyMissingPreviousViewportNeverEnumeratesFullExtentForHighCostDocument() {
     var settings = ReaderSettings()
     settings.wrapLines = false
     let document = ReaderDocument(bytes: Array(String(repeating: "// line\n", count: 200).utf8))
     let (reader, _, window) = s6NativeReader(document, settings: settings,
         policy: ReaderReflowPolicy(maximumSynchronousLineCount: 100))
-    defer { reader.stopPendingReaderWork(); window.close(); ReaderWorkCounters.setEnabled(false) }
+    defer { reader.stopPendingReaderWork(); window.close() }
     // Force a width transition and inject missing OLD viewport state. The
     // current native viewport may exist; this explicitly tests the nil branch.
     reader.view.textContainer?.containerSize = NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude)
-    ReaderWorkCounters.setEnabled(true)
     let before = ReaderWorkCounters.snapshot()
     reader.configureWrappingForTesting(previousViewportStart: nil)
     let after = ReaderWorkCounters.snapshot()

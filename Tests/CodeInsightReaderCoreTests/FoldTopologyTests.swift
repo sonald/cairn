@@ -128,7 +128,7 @@ func readonlyFoldTopologyFocusAssociationsPreserveKindAndTieBreaks() throws {
     try readonlyTopologyCompare(document)
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyFoldTopologyGeneratedIntervalsMatchOracleWithoutRebuilding() throws {
     var state: UInt64 = 0xCA17
     var regions: [FoldRegion] = []
@@ -143,8 +143,6 @@ func readonlyFoldTopologyGeneratedIntervalsMatchOracleWithoutRebuilding() throws
         state = state &* 6364136223846793005 &+ 1442695040888963407
         regions.swapAt(i, Int(state % UInt64(i + 1)))
     }
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let beforeBuild = ReaderWorkCounters.snapshot().topologyBuildCount
     let document = readonlyTopologyDocument(regions)
     let topology = try #require(document.foldTopology)

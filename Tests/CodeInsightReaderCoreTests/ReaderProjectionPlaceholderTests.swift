@@ -14,7 +14,7 @@ private func readonlyPlaceholderDocument(_ text: String, bodies: [ByteRange]) ->
                           highlightSpans: [], outlineFacets: [], foldRegions: regions)
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyProjectionPlaceholderWindowsHaveBoundedActualRecordVisits() throws {
     let count = 2_048
     let bodies = (0..<count).map { index -> ByteRange in
@@ -25,8 +25,6 @@ func readonlyProjectionPlaceholderWindowsHaveBoundedActualRecordVisits() throws 
     let foldIDs = Set(document.foldRegions.map { $0.id })
     let projection = try #require(ReaderProjection(document: document, renderedFoldIDs: foldIDs))
     let all = projection.foldPlaceholders
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     for placeholder in all {
         let selected = try #require(projection.foldPlaceholders(in: NSRange(location: placeholder.offset, length: 1)))

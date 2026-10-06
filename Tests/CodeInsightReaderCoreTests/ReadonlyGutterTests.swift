@@ -51,7 +51,7 @@ private func readonlyGutterDraw(_ reader: ReaderTextView, _ scroll: NSScrollView
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyGutterWarmNativeDrawAndHoverReadPreparedData() throws {
     let (document, fold) = readonlyGutterDocument(duplicateHeader: true)
     let (reader, scroll, window) = readonlyGutterRender(document)
@@ -60,8 +60,6 @@ func readonlyGutterWarmNativeDrawAndHoverReadPreparedData() throws {
     let row = try #require(reader.lastRulerFirstRowRectsForTesting[1])
     let hit = NSPoint(x: reader.rulerThickness - 6,
                       y: ruler.convert(NSPoint(x: 0, y: row.midY), from: reader.view).y)
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     for _ in 0..<5 {
         reader.setFoldGutterHoverForTesting(hit)
@@ -77,7 +75,7 @@ func readonlyGutterWarmNativeDrawAndHoverReadPreparedData() throws {
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyGutterMarkerRevisionsAndProjectionRefreshTheirSummaries() throws {
     let (document, fold) = readonlyGutterDocument()
     let (reader, scroll, window) = readonlyGutterRender(document)
@@ -90,8 +88,6 @@ func readonlyGutterMarkerRevisionsAndProjectionRefreshTheirSummaries() throws {
     #expect(reader.bookmarkMarkerLabelsForTesting == [1: ["Bookmark"]])
     #expect(reader.foldedDiffMarkersForTesting[1]?.rawValue == DiffCore.MarkerKind.added.rawValue)
     #expect(reader.foldExposureTextForTesting(fold.id) == " · diff")
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     reader.setDiffMarkers([3: .removed])
     #expect(ReaderWorkCounters.snapshot().decorationBuildCount - before.decorationBuildCount == 1)
@@ -146,7 +142,7 @@ func readonlyGutterSyntaxUpgradeNewDocumentAndClearInvalidatePreparedData() thro
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyGutterStableNativeScrollDoesNotBuildDocumentDecorations() throws {
     let source = (0..<200).map { "fn function\($0)() {\n    alpha();\n    beta();\n    gamma();\n}\n" }.joined()
     let document = try DocumentLoader(source: { _ in Array(source.utf8) })
@@ -156,8 +152,6 @@ func readonlyGutterStableNativeScrollDoesNotBuildDocumentDecorations() throws {
     reader.setBookmarkMarkers([2: ["Start"], 602: ["Later"]])
     reader.setDiffMarkers([3: .added, 603: .changed])
     _ = try readonlyGutterDraw(reader, scroll)
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     for y in [CGFloat(80), 160, 240, 0] {
         scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
@@ -171,7 +165,7 @@ func readonlyGutterStableNativeScrollDoesNotBuildDocumentDecorations() throws {
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyGutterCacheRollbackPreservesMarkersAndCountsItsWork() throws {
     let (document, fold) = readonlyGutterDocument()
     let (reader, scroll, window) = readonlyGutterRender(document)
@@ -181,8 +175,6 @@ func readonlyGutterCacheRollbackPreservesMarkersAndCountsItsWork() throws {
     #expect(reader.toggleFold(id: fold.id))
     let expected = reader.bookmarkMarkerLabelsForTesting
     reader.usesPreparedDecorations = false
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     _ = try readonlyGutterDraw(reader, scroll)
     #expect(reader.bookmarkMarkerLabelsForTesting == expected)

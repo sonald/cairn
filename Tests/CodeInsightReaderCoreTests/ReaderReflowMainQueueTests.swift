@@ -55,7 +55,7 @@ func readonlyReflowSupersededWidthTaskDrainsOnActualMainQueue() async {
 }
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyReflowZeroGeometryPreservesDeferredUnwrappedExtentTransition() {
     _ = NSApplication.shared
     var settings = ReaderSettings()
@@ -65,7 +65,7 @@ func readonlyReflowZeroGeometryPreservesDeferredUnwrappedExtentTransition() {
     let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 700, height: 400),
                           styleMask: [.titled], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
-    defer { reader.stopPendingReaderWork(); window.close(); ReaderWorkCounters.setEnabled(false) }
+    defer { reader.stopPendingReaderWork(); window.close() }
     let scroll = NSScrollView(frame: .zero)
     scroll.hasVerticalScroller = true
     scroll.documentView = reader.view
@@ -74,7 +74,6 @@ func readonlyReflowZeroGeometryPreservesDeferredUnwrappedExtentTransition() {
     // Keep the entire surface genuinely unmounted and zero-sized. Shrinking
     // only an attached clip view is undone immediately by NSScrollView tiling.
     reader.view.textContainer?.containerSize = NSSize(width: 100, height: CGFloat.greatestFiniteMagnitude)
-    ReaderWorkCounters.setEnabled(true)
     let before = ReaderWorkCounters.snapshot().applicationFullLayoutCount
     reader.configureWrappingForTesting(previousViewportStart: nil)
     #expect(reader.lastViewportRestoreLimitation == "zero-geometry")

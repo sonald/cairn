@@ -96,10 +96,8 @@ func readonlyIdentifierIndexRejectsInvalidUTF8AndHonorsCancellation() async thro
     }
 }
 
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyIdentifierIndexHotQueriesDoNotScanOrBuild() throws {
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let bytes = Array("value value value".utf8)
     let initial = ReaderWorkCounters.snapshot()
     let index = try IdentifierIndex(bytes: bytes, languageMode: .init(language: .rust), highlightSpans: [])

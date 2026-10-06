@@ -50,14 +50,12 @@ private func readonlyCopiedText(_ view: NSTextView) throws -> String {
     return try #require(board.string(forType: .string))
 }
 
-@MainActor @Test
+@MainActor @Test(.isolatedReaderWorkCounters)
 func readonlyProjectionNativeSmallPatchVisitsOnlyChangedParagraphs() async throws {
     let document = readonlyCommitFixture()
     let (reader, window) = readonlyCommitReader(document)
     defer { window.close() }
     await reader.waitForIdentifierPreparation()
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     let installs = reader.projectionInstallCount
     #expect(reader.toggleFold(id: .init(rawValue: 1)))

@@ -141,21 +141,22 @@ func readonlyCallOwnershipKeepsStoresProfilesAndOldSessionsIndependent() throws 
 
 @Test
 func readonlyCallOwnershipRepeatedQueriesHaveNoRegionScanOrRebuild() throws {
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
-    let beforeBuild = ReaderWorkCounters.snapshot()
-    let session = try readonlySession("fn target() {}\nfn caller() { target(); target(); }\n")
-    let context = readonlyContext(session)
-    let caller = try #require(session.definitions(of: "caller", context: context).first?.0)
-    let built = ReaderWorkCounters.snapshot()
-    #expect(built.ownershipBuildCount > beforeBuild.ownershipBuildCount)
-    for _ in 0..<20 {
-        #expect(try session.outgoingCalls(from: caller, context: context).calls.count == 2)
-        #expect(try session.callers(of: "target", context: context).count == 2)
+    // Count only this test's work; parallel tests also build sessions.
+    try ReaderWorkCounters.withIsolatedScope {
+        let beforeBuild = ReaderWorkCounters.snapshot()
+        let session = try readonlySession("fn target() {}\nfn caller() { target(); target(); }\n")
+        let context = readonlyContext(session)
+        let caller = try #require(session.definitions(of: "caller", context: context).first?.0)
+        let built = ReaderWorkCounters.snapshot()
+        #expect(built.ownershipBuildCount > beforeBuild.ownershipBuildCount)
+        for _ in 0..<20 {
+            #expect(try session.outgoingCalls(from: caller, context: context).calls.count == 2)
+            #expect(try session.callers(of: "target", context: context).count == 2)
+        }
+        let queried = ReaderWorkCounters.snapshot()
+        #expect(queried.ownershipBuildCount == built.ownershipBuildCount)
+        #expect(queried.regionQueryRecordVisits == built.regionQueryRecordVisits)
     }
-    let queried = ReaderWorkCounters.snapshot()
-    #expect(queried.ownershipBuildCount == built.ownershipBuildCount)
-    #expect(queried.regionQueryRecordVisits == built.regionQueryRecordVisits)
 }
 
 

@@ -6,7 +6,7 @@ import Foundation
 import Testing
 
 @MainActor
-@Test
+@Test(.isolatedReaderWorkCounters)
 func readonlyIdentifierPendingClicksPublishOnlyLatestIntentWithoutHotScans() async throws {
     let gate = ReadonlyBuildGate()
     let store = ReaderDerivedDataStore(builder: { try await gate.build($0) })
@@ -25,8 +25,6 @@ func readonlyIdentifierPendingClicksPublishOnlyLatestIntentWithoutHotScans() asy
     #expect(reader.identifierPreparationState == .ready)
     #expect(reader.occurrenceCount == 3)
     #expect(reader.view.selectedRange() == NSRange(location: 12, length: 4))
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     for _ in 0..<20 { #expect(reader.activate(atByteOffset: 0) == 2) }
     reader.setFindMatches([ByteRange(lowerBound: 0, upperBound: 5)], selectedIndex: 0)

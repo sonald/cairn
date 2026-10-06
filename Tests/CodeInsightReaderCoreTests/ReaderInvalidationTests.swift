@@ -54,11 +54,9 @@ private func readonlyRGBA(_ color: NSColor) -> [CGFloat] {
     return result
 }
 
-@MainActor @Test
+@MainActor @Test(.isolatedReaderWorkCounters)
 func readonlyInvalidationNativeSettingsMatrixNeverReplacesCharacters() throws {
     let document = try readonlyInvalidationDocument()
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     // Exercise independent and combined font/color/wrap/gutter changes.
     for mask in 0..<16 {
         let (reader, window) = readonlyInvalidationReader(document)
@@ -221,7 +219,7 @@ func readonlyInvalidationFoldProvidersUseLatestColorsAndTypography() throws {
     #expect(reader.projectionInstallCount == installs)
 }
 
-@MainActor @Test
+@MainActor @Test(.isolatedReaderWorkCounters)
 func readonlyInvalidationSyntaxReusesUnchangedFoldProjection() throws {
     let highlighted = try readonlyInvalidationDocument()
     let plain = ReaderDocument(bytes: highlighted.bytes, lineTable: highlighted.lineTable,
@@ -233,8 +231,6 @@ func readonlyInvalidationSyntaxReusesUnchangedFoldProjection() throws {
     #expect(reader.toggleFold(id: fold.id))
     let installs = reader.projectionInstallCount
     let projected = reader.view.string
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     reader.updateSyntax(document: highlighted)
     let after = ReaderWorkCounters.snapshot()
@@ -268,7 +264,7 @@ func readonlyInvalidationFontEnvironmentRefreshesAttributesWithoutCharacters() t
     #expect(reader.projectionInstallCount == installs)
 }
 
-@MainActor @Test
+@MainActor @Test(.isolatedReaderWorkCounters)
 func readonlyInvalidationAutomaticAppearanceRepaintsWithoutTextOrLayoutWork() throws {
     let document = try readonlyInvalidationDocument()
     let (reader, window) = readonlyInvalidationReader(document)
@@ -283,8 +279,6 @@ func readonlyInvalidationAutomaticAppearanceRepaintsWithoutTextOrLayoutWork() th
     window.appearance = NSAppearance(named: .aqua)
     let light = try pixels()
     let text = reader.view.string
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot()
     window.appearance = NSAppearance(named: .darkAqua)
     let dark = try pixels()
@@ -330,7 +324,7 @@ private func readonlyScroll(_ reader: ReaderTextView, window: NSWindow, to y: CG
     window.displayIfNeeded()
 }
 
-@MainActor @Test
+@MainActor @Test(.isolatedReaderWorkCounters)
 func readonlyScrollRepublishesOnlyNewlyVisibleFragments() throws {
     let document = try readonlyScrollDocument()
     let (reader, window) = readonlyInvalidationReader(document)
@@ -339,8 +333,6 @@ func readonlyScrollRepublishesOnlyNewlyVisibleFragments() throws {
     let manager = try #require(reader.view.textLayoutManager)
     let lineHeight = try #require(manager.textLayoutFragment(for: manager.documentRange.location))
         .layoutFragmentFrame.height
-    ReaderWorkCounters.setEnabled(true)
-    defer { ReaderWorkCounters.setEnabled(false) }
     let before = ReaderWorkCounters.snapshot().renderingAttributeUpdatedUTF16Units
     let steps = 20
     for step in 1...steps {
