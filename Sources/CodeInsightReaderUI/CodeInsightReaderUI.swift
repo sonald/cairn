@@ -3433,7 +3433,7 @@ public final class ReaderTextView {
             let clipView = scrollView.contentView
             clipView.scroll(to: NSPoint(
                 x: -clipView.contentInsets.left,
-                y: lineRect.minY
+                y: clampVerticalScrollOrigin(lineRect.minY, clipView: clipView)
             ))
             scrollView.reflectScrolledClipView(clipView)
             // Settle this explicit scroll before measuring the restoration error.
@@ -5083,6 +5083,18 @@ public final class ReaderTextView {
             let wasRestoring = isRestoringViewport
             isRestoringViewport = true
             controller.layoutViewport()
+            // After the document shrinks (e.g. switching to Structure), TextKit
+            // can relocate the viewport past its new end: only the last rows
+            // show and wheel scrolling stalls until the scroller re-tiles.
+            if let scrollView = view.enclosingScrollView {
+                let clipView = scrollView.contentView
+                let y = clampVerticalScrollOrigin(clipView.bounds.minY, clipView: clipView)
+                if y != clipView.bounds.minY {
+                    clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: y))
+                    scrollView.reflectScrolledClipView(clipView)
+                    controller.layoutViewport()
+                }
+            }
             isRestoringViewport = wasRestoring
         }
         guard let viewportRange = controller.viewportRange else { return }

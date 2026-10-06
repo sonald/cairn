@@ -473,3 +473,52 @@ func readonlyProjectionMultipleRangesKeepNativeShiftBehaviorAfterFoldRoundTrip()
         }
     }
 }
+
+// Regression: switching to Structure from deep inside a long method left the
+// clip past the shorter document's end (only the last rows, stalled wheel).
+@MainActor @Test(arguments: [true, false])
+func readonlyProjectionStructureSwitchKeepsViewportInsideShorterDocument(wrap: Bool) async throws {
+    _ = NSApplication.shared
+    func method(_ name: String, _ lines: Int) -> String {
+        "    def \(name)(self, context: List[str] | str | List[Dict[str, str]], query: Optional[str] = None) -> str:\n"
+            + "        \"\"\"Docstring.\"\"\"\n"
+            + (0..<lines).map { "        value_\($0) = self.compute(context, query, iteration=\($0))\n" }.joined()
+    }
+    let source = "class Reader:\n" + method("setup", 26) + "\n" + method("completion", 44) + "\n"
+        + method("summary", 30) + "\nif __name__ == \"__main__\":\n    pass\n"
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/structure.py"), languageMode: LanguageMode(language: .python))
+        .document
+    var settings = ReaderSettings()
+    settings.wrapLines = wrap
+    let reader = ReaderTextView(settings: settings)
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 520))
+    scroll.hasVerticalScroller = true
+    scroll.documentView = reader.view
+    reader.view.frame = scroll.contentView.bounds
+    let window = NSWindow(contentRect: scroll.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+    window.contentView = scroll
+    defer { reader.stopPendingReaderWork(); window.close() }
+    reader.configureGutter(in: scroll, lineNumbers: true)
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/structure.py"))
+    window.displayIfNeeded()
+    // Setup: user-style scrolling into the middle of `completion`'s body.
+    let clip = scroll.contentView
+    while reader.firstVisibleByteOffset().flatMap({ document.lineTable.lineColumn(at: $0)?.line }).map({ $0 < 50 }) ?? true {
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: clip.bounds.minY + 100))
+        scroll.reflectScrolledClipView(clip)
+        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        try #require(clip.bounds.maxY < reader.view.frame.height)
+    }
+
+    #expect(reader.setReadingHeightLevel(.structure))
+
+    let maxY = reader.view.frame.height - clip.bounds.height + clip.contentInsets.bottom
+    #expect(clip.bounds.minY <= maxY + 0.5, "clip=\(clip.bounds.minY) max=\(maxY)")
+    let header = (reader.view.string as NSString).range(of: "def completion").location
+    let row = try #require(ReaderViewportGeometry.rowRect(containingDisplayLocation: header, in: reader.view))
+    #expect(reader.view.visibleRect.intersects(row))
+}
