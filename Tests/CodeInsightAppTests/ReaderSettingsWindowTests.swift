@@ -39,7 +39,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     try await Task.sleep(for: .milliseconds(200))
 
     #expect(controller.currentSettings == changed)
-    #expect(controller.selfTestReaderToggleCount == 6)
+    #expect(controller.selfTestReaderToggleCount == 7)
     let originalText = preview.string
     #expect(originalText.contains("fn greet(name: &str"))
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
