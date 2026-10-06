@@ -626,46 +626,25 @@ public struct ProjectIndexer: Sendable {
     ) -> [ExtractionDraft] {
         guard let cache else { return [] }
         let payloads = cache.payloads(for: inputs.map { cacheKey(for: $0.key) })
-        let result = BlockingResult<[ExtractionDraft]>()
-        let operation: @Sendable () async -> Void = {
-            var drafts: [ExtractionDraft] = []
-            for start in stride(from: 0, to: inputs.count, by: parallelism) {
-                let end = min(start + parallelism, inputs.count)
-                drafts += await withTaskGroup(of: ExtractionDraft?.self) { group in
-                    for input in inputs[start..<end] {
-                        group.addTask {
-                            guard let payload = payloads[cacheKey(for: input.key)] else {
-                                return nil
-                            }
-                            do {
-                                return try ContentIndexDraftCodec.decode(
-                                    payload,
-                                    order: input.order,
-                                    bytes: input.bytes,
-                                    expectedKey: input.key
-                                )
-                            } catch {
-                                cache.removePayload(for: cacheKey(for: input.key))
-                                return nil
-                            }
-                        }
-                    }
-                    return await group.reduce(into: []) { drafts, draft in
-                        if let draft { drafts.append(draft) }
-                    }
-                }
+        let drafts = try? parallelMap(inputs.count, width: parallelism) {
+            index -> ExtractionDraft? in
+            let input = inputs[index]
+            guard let payload = payloads[cacheKey(for: input.key)] else {
+                return nil
             }
-            result.complete(.success(drafts.sorted { $0.order < $1.order }))
+            do {
+                return try ContentIndexDraftCodec.decode(
+                    payload,
+                    order: input.order,
+                    bytes: input.bytes,
+                    expectedKey: input.key
+                )
+            } catch {
+                cache.removePayload(for: cacheKey(for: input.key))
+                return nil
+            }
         }
-        if #available(macOS 15.4, *) {
-            Task.detached(
-                executorPreference: DispatchQueue.global(qos: .userInitiated),
-                operation: operation
-            )
-        } else {
-            Task.detached(operation: operation)
-        }
-        return (try? result.wait().get()) ?? []
+        return (drafts ?? []).compactMap { $0 }.sorted { $0.order < $1.order }
     }
 
     private func remap(
@@ -705,59 +684,29 @@ public struct ProjectIndexer: Sendable {
         }) else {
             throw invalidIdentity("Extraction input language does not match extractor")
         }
-        let result = BlockingResult<[ExtractionDraft]>()
-        let operation: @Sendable () async -> Void = {
-            do {
-                var drafts: [ExtractionDraft] = []
-                for start in stride(from: 0, to: inputs.count, by: parallelism) {
-                    let end = min(start + parallelism, inputs.count)
-                    drafts += try await withThrowingTaskGroup(
-                        of: ExtractionDraft.self
-                    ) { group in
-                        for input in inputs[start..<end] {
-                            group.addTask {
-                                let names = Interner<NameID>()
-                                let strings = Interner<StringID>()
-                                let result = try extractor.extractWithDiagnostics(
-                                    bytes: input.bytes,
-                                    key: input.key,
-                                    interner: ExtractionInterners(
-                                        names: names,
-                                        strings: strings
-                                    )
-                                )
-                                guard result.index.key == input.key else {
-                                    throw invalidIdentity(
-                                        "Extractor returned a different ContentIndexKey"
-                                    )
-                                }
-                                return ExtractionDraft(
-                                    order: input.order,
-                                    bytes: input.bytes,
-                                    index: result.index,
-                                    names: names,
-                                    strings: strings,
-                                    containsErrorNodes: result.containsErrorNodes
-                                )
-                            }
-                        }
-                        return try await group.reduce(into: []) { $0.append($1) }
-                    }
-                }
-                result.complete(.success(drafts.sorted { $0.order < $1.order }))
-            } catch {
-                result.complete(.failure(error))
-            }
-        }
-        if #available(macOS 15.4, *) {
-            Task.detached(
-                executorPreference: DispatchQueue.global(qos: .userInitiated),
-                operation: operation
+        let drafts = try parallelMap(inputs.count, width: parallelism) {
+            index -> ExtractionDraft in
+            let input = inputs[index]
+            let names = Interner<NameID>()
+            let strings = Interner<StringID>()
+            let result = try extractor.extractWithDiagnostics(
+                bytes: input.bytes,
+                key: input.key,
+                interner: ExtractionInterners(names: names, strings: strings)
             )
-        } else {
-            Task.detached(operation: operation)
+            guard result.index.key == input.key else {
+                throw invalidIdentity("Extractor returned a different ContentIndexKey")
+            }
+            return ExtractionDraft(
+                order: input.order,
+                bytes: input.bytes,
+                index: result.index,
+                names: names,
+                strings: strings,
+                containsErrorNodes: result.containsErrorNodes
+            )
         }
-        return try result.wait().get()
+        return drafts.sorted { $0.order < $1.order }
     }
 
     private func remap(
@@ -904,18 +853,64 @@ package struct ExtractionDraft: Sendable {
     }
 }
 
-private final class BlockingResult<Value>: @unchecked Sendable {
-    private let semaphore = DispatchSemaphore(value: 0)
-    private let lock = NSLock()
-    private var result: Result<Value, Error>?
+/// Runs `work` for every index on dedicated worker threads and waits for all
+/// of them. The indexer API is synchronous and is usually called from Swift
+/// concurrency tasks, so the caller may be blocking a cooperative thread. The
+/// workers therefore must not need the cooperative pool. Global concurrent
+/// queues are not enough either: with every cooperative thread blocked, work
+/// sent there was observed to get no thread at all. Each worker gets its own
+/// serial queue, which Dispatch always gives a thread.
+private func parallelMap<Value>(
+    _ count: Int,
+    width: Int,
+    _ work: @escaping @Sendable (Int) throws -> Value
+) throws -> [Value] {
+    guard count > 0 else { return [] }
+    let state = ParallelMapState<Value>(count: count)
+    let group = DispatchGroup()
+    for _ in 0..<min(max(1, width), count) {
+        let worker = DispatchQueue(
+            label: "CodeInsight.ProjectIndexer.worker",
+            qos: .userInitiated
+        )
+        worker.async(group: group) {
+            while let index = state.next() {
+                state.finish(index, Result { try work(index) })
+            }
+        }
+    }
+    group.wait()
+    return try state.values()
+}
 
-    func complete(_ result: Result<Value, Error>) {
-        lock.withLock { self.result = result }
-        semaphore.signal()
+private final class ParallelMapState<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var nextIndex = 0
+    private var failed = false
+    private var results: [Result<Value, Error>?]
+
+    init(count: Int) {
+        results = Array(repeating: nil, count: count)
     }
 
-    func wait() -> Result<Value, Error> {
-        semaphore.wait()
-        return lock.withLock { result! }
+    func next() -> Int? {
+        lock.withLock {
+            guard !failed, nextIndex < results.count else { return nil }
+            defer { nextIndex += 1 }
+            return nextIndex
+        }
+    }
+
+    func finish(_ index: Int, _ result: Result<Value, Error>) {
+        lock.withLock {
+            if case .failure = result { failed = true }
+            results[index] = result
+        }
+    }
+
+    func values() throws -> [Value] {
+        try lock.withLock {
+            try results.compactMap { try $0?.get() }
+        }
     }
 }

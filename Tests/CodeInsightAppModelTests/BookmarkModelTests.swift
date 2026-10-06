@@ -1519,7 +1519,9 @@ func appModelStrictCrossSnapshotFullFailureLeavesCachedExactReadingInstalled() a
     #expect(await testWaitUntil("strict cached install before failed full") {
         model.snapshotPhase == .cachedReady && model.currentSnapshotID == target.snapshotID
     })
-    #expect(await service.hasStartedFull("target"))
+    #expect(await testWaitUntil("strict full started") {
+        await service.hasStartedFull("target")
+    })
     try await Task.sleep(for: .milliseconds(20))
     #expect(model.snapshotPhase == .cachedReady)
     #expect(model.lastInstalledWorkspace.projectRoot == installedBefore.projectRoot)
@@ -1609,7 +1611,9 @@ func appModelStrictCrossSnapshotKeepsCachedInstallIndependentFromFullCompletion(
     #expect(cachedDocument.bytes == Array("fn captured() {}\n".utf8))
 
     model.openStrictBookmark(record, leaving: original)
-    #expect(await service.hasStartedFull("target"))
+    #expect(await testWaitUntil("strict full started") {
+        await service.hasStartedFull("target")
+    })
     await service.releaseFull("target")
     #expect(await testWaitUntil("strict full install") {
         model.snapshotPhase == .fullReady

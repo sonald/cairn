@@ -2074,7 +2074,9 @@ func contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() async throws {
     try "fn renamed() {}\nfn main() { renamed(); }\n"
         .write(to: root.appendingPathComponent("main.rs"), atomically: true, encoding: .utf8)
     model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "target", in: source))
-    try await Task.sleep(for: .milliseconds(300))
+    #expect(await testWaitUntil("drifted candidate displayed") {
+        model.displayedCandidate != nil
+    })
 
     #expect(model.displayedCandidate?.excerpt.isEmpty == true,
             "excerpt must not mix drifted disk bytes with indexed offsets")

@@ -2935,6 +2935,7 @@ func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
     #expect(await testWaitUntil("model.activeTypeHop?.pendingExact == true") {
         model.activeTypeHop?.pendingExact == true
     })
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
     gate.resumeAll(with: .completed([
         exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
     ]))
@@ -3135,6 +3136,7 @@ func lensKeepsDeclarationWhenUserToggledBeforeExactArrives() async throws {
     #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
     // The user toggles to the declaration before the Exact reply arrives.
     model.showTypeHop(.declaration)
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
     gate.resumeAll(with: .completed([
         exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
     ]))
@@ -3167,6 +3169,7 @@ func lensUpgradesSyntacticTypeTargetToExactInPlace() async throws {
     model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
     #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
     let selectedBefore = model.selectedIndex
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
     gate.resumeAll(with: .completed([
         exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
     ]))
@@ -3358,7 +3361,10 @@ func caretTriggerDelaysExactUntilDwell() async throws {
     try await Task.sleep(for: .milliseconds(80))
     #expect(log.recorded.isEmpty)
 
-    try await Task.sleep(for: .milliseconds(400))
+    #expect(await testWaitUntil("exact request sent after the dwell") {
+        !log.recorded.isEmpty
+    })
+    try await Task.sleep(for: .milliseconds(100))
     #expect(log.recorded == [byteOffset(of: "alpha();", in: source)])
 }
 
