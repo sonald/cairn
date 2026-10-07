@@ -116,8 +116,6 @@
 "main.close.tab" = "Close %@";
 "main.close.without.saving" = "Close Without Saving";
 "main.collapse.all" = "Collapse all %@";
-"main.collapse.section" = "Collapse %@";
-"main.collapsed" = "Collapsed";
 "main.comparison.version" = "Comparison version";
 "main.constant" = "Constant";
 "main.context" = "Context";
@@ -145,8 +143,6 @@
 "main.exact.ready.limited" = "Exact: ready%@ (limited)";
 "main.exact.unavailable" = "Exact: unavailable";
 "main.exact.unavailable.sandbox" = "Exact: unavailable (sandbox)";
-"main.expand.section" = "Expand %@";
-"main.expanded" = "Expanded";
 "main.features" = "Features: %@";
 "main.features.all.short" = "all";
 "main.features.default.short" = "default";
@@ -697,7 +693,6 @@
 
 "panel.query.results" = "Search results";
 
-"panel.query.close" = "Close bottom area";
 
 "panel.query.history" = "Query history";
 

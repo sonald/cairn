@@ -1880,7 +1880,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return visibleFrame.width > 0 && visibleFrame.height > 0
     }
 
-    // MARK: - Seek palette, query dock and project search
+    // MARK: - Seek palette and project search
 
     /// D1: ⌘T and ⌘P share one Seek palette; ⌘T only starts in project symbols.
     func showSymbolSearch() {

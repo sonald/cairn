@@ -7,7 +7,7 @@ import CodeInsightReaderUI
 import Observation
 import QuartzCore
 
-/// The persistent project-search surface in the main window's bottom area.
+/// The project-search panel (Search Results) in one of the window's side zones.
 @MainActor
 final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private let appModel: AppModel

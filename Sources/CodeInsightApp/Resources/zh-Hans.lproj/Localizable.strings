@@ -116,8 +116,6 @@
 "main.close.tab" = "关闭 %@";
 "main.close.without.saving" = "不保存并关闭";
 "main.collapse.all" = "折叠所有%@";
-"main.collapse.section" = "折叠%@";
-"main.collapsed" = "已折叠";
 "main.comparison.version" = "比较版本";
 "main.constant" = "常量";
 "main.context" = "上下文";
@@ -145,8 +143,6 @@
 "main.exact.ready.limited" = "精确分析：就绪%@（受限）";
 "main.exact.unavailable" = "精确分析：不可用";
 "main.exact.unavailable.sandbox" = "精确分析：不可用（沙盒限制）";
-"main.expand.section" = "展开%@";
-"main.expanded" = "已展开";
 "main.features" = "特性：%@";
 "main.features.all.short" = "全部";
 "main.features.default.short" = "默认";
@@ -697,7 +693,6 @@
 
 "panel.query.results" = "搜索结果";
 
-"panel.query.close" = "关闭底部区域";
 
 "panel.query.history" = "查询历史";
 
