@@ -925,7 +925,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
 
 @MainActor
 @Test
-func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async throws {
+func sessionRestoreRemembersPresetAndDistinctViewportAndSelectionAnchors() async throws {
     let fixture = try await makeRelationNavigationFixture()
     defer {
         fixture.controller.close()
@@ -974,6 +974,8 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
     #expect(fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL)
 
     #expect(fixture.controller.selfTestPanelPreset == .relations)
+    #expect(fixture.controller.selfTestRelationsPaneCollapsed,
+            "Restoring a session keeps the stored panel visibility; the preset is only remembered")
     #expect(fixture.controller.selfTestTabCount == 1)
     #expect(fixture.controller.selfTestActiveTabIndex == 0)
     #expect(fixture.controller.selfTestReadingByteOffset == scroll)

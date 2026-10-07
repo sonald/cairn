@@ -924,8 +924,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         lastOpenedProjectLanguages = overridingLanguages ?? snapshot.languages
         pendingRecentProjectRoot = root
         pendingRecentProjectLanguages = overridingLanguages ?? snapshot.languages
+        // The session only remembers its last preset: panel visibility stays
+        // with the global layout, so hand toggles survive restarts. Compare
+        // still reopens its split as it did when the session was saved.
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
-            applyPanelPreset(preset)
+            panelPreset = preset
+            if preset.opensReaderSplit {
+                _ = ensureRoomForSplit()
+                openSecondaryReader()
+            } else if !isReferenceActive {
+                closeSecondaryReader()
+            }
         }
         // R6.3: restore the lens tracking; the pin always starts released.
         if let tracking = ContextWindowModel.Tracking(rawValue: snapshot.contextTracking ?? "") {
