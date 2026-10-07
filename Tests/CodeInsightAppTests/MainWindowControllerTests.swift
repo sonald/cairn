@@ -1026,12 +1026,15 @@ func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws
     ))
     scroll.reflectScrolledClipView(scroll.contentView)
     try await settle()
-    let anchorY = sourceRect(target).minY - scroll.contentView.bounds.minY
-    let expandedHeight = scroll.contentView.bounds.height
+    // Context opens in a side zone: the first opening narrows the reader and
+    // its width reflow (the reader's own rule) re-places the text. After
+    // that, candidate changes must not move the source at all.
+    var anchorY: CGFloat?
+    let expandedWidth = scroll.contentView.bounds.width
     let generation = model.navigationGeneration
     try #require(scroll.contentView.bounds.contains(sourceRect(target)))
     // Drive activation, caret/selection callbacks and Context lookup through
-    // the window controller. The target stays above the shrinking edge.
+    // the window controller.
     window.makeFirstResponder(reader)
     for hasCandidate in [true, false, true, false] {
         let clicked = hasCandidate ? target : empty
@@ -1042,20 +1045,23 @@ func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws
         ))
         try await settle()
         // R4.3 (T4): a click on no symbol KEEPS the previous lens content —
-        // the pane stays open and the open-pane reader height persists; the
+        // the pane stays open and the open-pane reader width persists; the
         // pre-T4 contract cleared the pane on empty clicks.
         #expect(controller.selfTestContextPaneCollapsed == false)
         #expect(model.navigationGeneration == generation)
         if hasCandidate {
-            #expect(scroll.contentView.bounds.height < expandedHeight - 50,
-                    "Opening Context must actually exercise a Reader height change")
+            #expect(scroll.contentView.bounds.width < expandedWidth - 50,
+                    "Opening Context must actually exercise a Reader width change")
         } else {
-            #expect(scroll.contentView.bounds.height < expandedHeight - 50,
-                    "Keeping Context on an empty click must keep the reader height")
+            #expect(scroll.contentView.bounds.width < expandedWidth - 50,
+                    "Keeping Context on an empty click must keep the reader width")
         }
         let actualY = sourceRect(target).minY - scroll.contentView.bounds.minY
-        #expect(abs(actualY - anchorY) <= 2,
-                "Context candidate=\(hasCandidate), source anchor moved from \(anchorY) to \(actualY), clip=\(scroll.contentView.bounds)")
+        if let anchorY {
+            #expect(abs(actualY - anchorY) <= 2,
+                    "Context candidate=\(hasCandidate), source anchor moved from \(anchorY) to \(actualY), clip=\(scroll.contentView.bounds)")
+        }
+        anchorY = anchorY ?? actualY
         #expect(scroll.contentView.bounds.contains(sourceRect(clicked)),
                 "Changing Context must keep the clicked source character visible")
     }
@@ -1190,13 +1196,6 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
         controller.renderForSelfTest()
         return controller
     }
-    // D5: sidebar | (reader | Relations over the Lens). Vertical splits in
-    // depth-first order are the outer split, the reader/Relations split, then
-    // the compare split.
-    func verticalSplits(_ view: NSView) -> [NSSplitView] {
-        let own = (view as? NSSplitView).flatMap { $0.isVertical ? [$0] : nil } ?? []
-        return own + view.subviews.flatMap(verticalSplits)
-    }
     let first = try await makeController()
     defer { first.close() }
     let window = try #require(first.window)
@@ -1300,17 +1299,19 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     first.renderForSelfTest()
     #expect(first.selfTestContextPaneCollapsed)
     first.toggleRelations()
-    let splits = try #require(first.window?.contentView.map(verticalSplits))
-    try #require(splits.count >= 2)
-    splits[0].setPosition(250, ofDividerAt: 0)
-    splits[0].layoutSubtreeIfNeeded()
-    splits[1].setPosition(splits[1].bounds.width - 700, ofDividerAt: 0)
+    // Dragging the zone dividers records the widths the next window uses.
+    let outer = first.selfTestOuterSplit
+    outer.setPosition(250, ofDividerAt: 0)
+    outer.layoutSubtreeIfNeeded()
+    outer.setPosition(outer.bounds.width - 700 - outer.dividerThickness, ofDividerAt: 1)
+    first.selfTestRecordDividerDrag()
     first.renderForSelfTest()
     let width = first.selfTestRelationsPaneWidth
     #expect(width > 628, "A wide window must permit the inspector's side-by-side mode")
     first.toggleRelations()
     first.toggleRelations()
-    #expect(abs(first.selfTestRelationsPaneWidth - width) <= 2)
+    #expect(abs(first.selfTestRelationsPaneWidth - width) <= 1, "Reopening keeps the dragged width")
+    #expect(abs((first.selfTestZoneWidths[.left] ?? 0) - 250) <= 1)
     first.model.contextWindow.tokenClicked(file: "main.rs", offset: UInt32("pub fn ".utf8.count))
     try #require(await mainWindowWaitUntil(first.model.contextWindow.displayedCandidate != nil))
     first.model.contextWindow.setMode(.pinned)
@@ -1328,46 +1329,59 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
         #expect(abs(window.frame.height - sourceFrame.height) <= 1,
                 "\(surface) must keep the user's window height")
     }
+    let storedBeforeOverrides = defaults.data(forKey: "Cairn.panelLayout.v2")
     first.model.openReadingSet(title: "Saved path", excerpts: [])
     first.renderForSelfTest()
     await expectSourceWindowFrame("Reading Set")
+    #expect(first.selfTestShownPanels.values.flatMap { $0 }.isEmpty, "A Reading Set hides every panel")
+    first.checkpointSessionSynchronously()
     first.openFileForSelfTest(root.appendingPathComponent("README.md"))
     try #require(await mainWindowWaitUntil(first.displayedReaderFile?.lastPathComponent == "README.md"))
     first.renderForSelfTest()
     await expectSourceWindowFrame("README")
     #expect(!first.selfTestSidebarPaneCollapsed, "README keeps the file tree after a Reading Set")
     #expect(first.selfTestRelationsPaneCollapsed)
+    first.checkpointSessionSynchronously()
+    #expect(defaults.data(forKey: "Cairn.panelLayout.v2") == storedBeforeOverrides,
+            "Temporary overrides are never written back")
     first.openFileForSelfTest(root.appendingPathComponent("main.rs"))
     try #require(await mainWindowWaitUntil(first.displayedReaderFile?.lastPathComponent == "main.rs"))
     await expectSourceWindowFrame("source restored")
     #expect(!first.selfTestContextPaneCollapsed)
+    #expect(!first.selfTestRelationsPaneCollapsed)
+    #expect(abs(first.selfTestRelationsPaneWidth - width) <= 1, "The override detour keeps the width")
     window.zoom(nil)
     await settleWindow()
     first.toggleContext(nil)
-    first.openFileForSelfTest(root.appendingPathComponent("README.md"))
-    await settleWindow()
+    #expect(first.selfTestContextPaneCollapsed, "Closed Context stays closed despite its content")
     first.checkpointSessionSynchronously()
     first.close()
-    let savedLayoutData = try #require(defaults.data(forKey: "Cairn.panelLayout.reading"))
-    let savedLayout = try JSONDecoder().decode(PanelLayoutDescription.self, from: savedLayoutData)
-    #expect(!savedLayout.relationsCollapsed)
-    #expect(savedLayout.relationsFraction > 0)
+    let saved = PanelLayout.decode(try #require(defaults.data(forKey: "Cairn.panelLayout.v2")))
+    #expect(!saved.hidden.contains(.relations))
+    #expect(saved.hidden.contains(.context))
+    #expect(abs(saved.width(of: .left) - 250) <= 1)
+    #expect(abs(saved.width(of: .right) - 700) <= 1)
     let second = try await makeController()
     defer { second.close() }
     #expect(!second.selfTestRelationsPaneCollapsed)
+    #expect(abs((second.selfTestZoneWidths[.right] ?? 0) - 700) <= 1)
+    #expect(second.selfTestContextPaneCollapsed)
     second.toggleContext(nil)
-    #expect(!second.selfTestContextPaneCollapsed)
+    #expect(!second.selfTestContextPaneCollapsed, "Opening Context shows it before it has content")
     second.toggleContext(nil)
     #expect(second.selfTestContextPaneCollapsed)
+    // A narrow window squeezes the zones; it never grows and the squeeze
+    // is not saved.
     second.window?.setContentSize(NSSize(width: 900, height: 600))
     second.renderForSelfTest()
-    #expect(second.selfTestSidebarPaneCollapsed)
+    #expect(abs((second.window?.contentLayoutRect.width ?? 0) - 900) <= 1)
+    #expect(second.selfTestReaderGroupWidth >= 320)
     second.checkpointSessionSynchronously()
     second.close()
     let third = try await makeController()
     defer { third.close() }
-    third.toggleRelations()
-    #expect(!third.selfTestSidebarPaneCollapsed, "Temporary narrow-window collapse is not a saved preference")
+    #expect(abs((third.selfTestZoneWidths[.left] ?? 0) - 250) <= 1)
+    #expect(abs((third.selfTestZoneWidths[.right] ?? 0) - 700) <= 1)
 }
 
 @MainActor
@@ -1377,22 +1391,18 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     let source = "pub struct Example { pub value: u32 }\nimpl Example { fn run(&self) {} }\n"
     let file = URL(fileURLWithPath: "/Example.rs")
     let document = try DocumentLoader(source: { _ in Array(source.utf8) }).load(file: file).document
-    let defaults = UserDefaults.standard
-    let name = "SidebarPolish.\(UUID().uuidString)"
-    defer {
-        defaults.dictionaryRepresentation().keys.filter { $0.contains(name) }
-            .forEach { defaults.removeObject(forKey: $0) }
-    }
-    // A former automatic layout must not become the user's divider preference.
-    defaults.set(["0, 0, 300, 534, NO, NO", "0, 535, 300, 25, NO, NO"],
-                 forKey: "NSSplitView Subview Frames \(name)")
+    // The files and outline bodies are separate panels now; stack them in
+    // a plain window to exercise the shared data source.
     func makeSidebar() -> (SidebarViewController, NSWindow) {
         let sidebar = SidebarViewController()
-        sidebar.setSplitAutosaveName(name)
+        sidebar.loadViewIfNeeded()
+        let stack = NSStackView(views: [sidebar.filesController.view, sidebar.outlineController.view])
+        stack.orientation = .vertical
+        stack.distribution = .fillEqually
         let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 300, height: 560),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.contentViewController = sidebar
+        window.contentView = stack
         window.setContentSize(NSSize(width: 300, height: 560))
         window.orderFront(nil)
         window.contentView?.layoutSubtreeIfNeeded()
@@ -1406,7 +1416,7 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     func outlines(_ view: NSView) -> [NSOutlineView] {
         (view as? NSOutlineView).map { [$0] } ?? view.subviews.flatMap(outlines)
     }
-    let outline = try #require(outlines(sidebar.view).first { $0.accessibilityLabel() == "Outline" })
+    let outline = try #require(outlines(sidebar.outlineController.view).first { $0.accessibilityLabel() == "Outline" })
     let row = try #require((0..<outline.numberOfRows).first { index in
         (outline.item(atRow: index) as? NSNumber)?.intValue == 0
     })
@@ -1429,7 +1439,7 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     #expect(cell.accessibilityLabel() == "Struct Example")
     #expect(cell.accessibilityChildren()?.isEmpty == true)
 
-    let files = try #require(outlines(sidebar.view).first { $0.accessibilityLabel() == "Files" })
+    let files = try #require(outlines(sidebar.filesController.view).first { $0.accessibilityLabel() == "Files" })
     let root = URL(fileURLWithPath: "/sidebar-tree")
     let firstFile = root.appendingPathComponent("src/deep/one.rs")
     let nextFile = root.appendingPathComponent("src/two.rs")
@@ -1454,79 +1464,6 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     #expect(openedFiles.isEmpty)
     #expect(sidebar.synchronizeFileSelection(to: nextFile))
     #expect(files.isItemExpanded(files.item(atRow: 0)), "Changing files still reveals the new location")
-
-    for height in [640.0, 420.0, 560.0] {
-        window.setContentSize(NSSize(width: 300, height: height))
-        sidebar.display(nil)
-        sidebar.setProjectState(.empty)
-        sidebar.setSelectedFile(nil)
-        sidebar.setOutline([])
-        window.contentView?.layoutSubtreeIfNeeded()
-        sidebar.display(tree())
-        sidebar.setSelectedFile(firstFile)
-        sidebar.setOutline(document.outlineFacets.map(OutlineNode.init(facet:)), file: file)
-        #expect(sidebar.synchronizeFileSelection(to: firstFile))
-        window.contentView?.layoutSubtreeIfNeeded()
-        #expect(defaults.object(forKey: "\(name).fraction") == nil,
-                "Loading and automatic resizing must not write a user divider preference")
-    }
-    let split = try #require(sidebar.view.subviews.first { $0 is NSSplitView } as? NSSplitView)
-    split.setPosition((split.bounds.height - split.dividerThickness) * 0.63, ofDividerAt: 0)
-    let fraction = defaults.double(forKey: "\(name).fraction")
-    #expect(abs(fraction - 0.63) < 0.005)
-    func buttons(_ view: NSView) -> [NSButton] {
-        (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons)
-    }
-    func click(_ label: String, in target: SidebarViewController) throws {
-        let button = try #require(buttons(target.view).first { $0.accessibilityLabel() == label })
-        button.performClick(nil)
-        target.view.window?.contentView?.layoutSubtreeIfNeeded()
-        target.view.window?.displayIfNeeded()
-    }
-    try click("Collapse Files", in: sidebar)
-    #expect(sidebar.selfTestFilesCollapsed)
-    #expect(!sidebar.selfTestOutlineCollapsed)
-    window.setContentSize(NSSize(width: 300, height: 620))
-    sidebar.display(tree())
-    sidebar.setProjectState(.empty)
-    window.contentView?.layoutSubtreeIfNeeded()
-    #expect(sidebar.selfTestFilesCollapsed)
-    #expect(!sidebar.selfTestOutlineCollapsed)
-    try click("Collapse Outline", in: sidebar)
-    #expect(sidebar.selfTestFilesCollapsed)
-    #expect(sidebar.selfTestOutlineCollapsed)
-    #expect(abs(defaults.double(forKey: "\(name).fraction") - fraction) < 0.005)
-
-    let (restored, restoredWindow) = makeSidebar()
-    defer { restoredWindow.close() }
-    #expect(restored.selfTestFilesCollapsed)
-    #expect(restored.selfTestOutlineCollapsed)
-    try click("Expand Files", in: restored)
-    #expect(!restored.selfTestFilesCollapsed)
-    #expect(restored.selfTestOutlineCollapsed)
-    try click("Expand Outline", in: restored)
-    #expect(!restored.selfTestFilesCollapsed)
-    #expect(!restored.selfTestOutlineCollapsed)
-    let restoredGeometry = restored.selfTestGeometry
-    #expect(abs(restoredGeometry.filesPaneHeight /
-        (restoredGeometry.filesPaneHeight + restoredGeometry.outlinePaneHeight) - fraction) < 0.005)
-    try click("Expand Outline", in: sidebar)
-    #expect(sidebar.selfTestFilesCollapsed)
-    #expect(!sidebar.selfTestOutlineCollapsed)
-    try click("Expand Files", in: sidebar)
-    #expect(!sidebar.selfTestFilesCollapsed)
-    #expect(!sidebar.selfTestOutlineCollapsed)
-    let expanded = sidebar.selfTestGeometry
-    #expect(abs(expanded.filesPaneHeight / (expanded.filesPaneHeight + expanded.outlinePaneHeight) - fraction) < 0.005)
-    sidebar.setOutlineHidden(true)
-    try click("Collapse Files", in: sidebar)
-    #expect(sidebar.selfTestFilesCollapsed)
-    sidebar.setOutlineHidden(false)
-    window.contentView?.layoutSubtreeIfNeeded()
-    #expect(sidebar.selfTestFilesCollapsed)
-    #expect(!sidebar.selfTestOutlineCollapsed)
-    try click("Expand Files", in: sidebar)
-    #expect(sidebar.selfTestDividerPersistsAcrossRebuild())
 }
 
 /// K0a: reader click gestures resolve through the key binding table instead
@@ -1676,4 +1613,70 @@ func lensTypeFollowSurfacesRenderInTheNativeWindow() async throws {
     #expect(controller.selfTestContextEnclosingTitle?.contains("helper") == true)
     controller.renderForSelfTest()
     try renderEvidence("04-lens-pinned", view: content)
+}
+
+@MainActor
+@Test
+func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
+    let suite = "CairnPanelMoveTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    func makeController() async throws -> MainWindowController {
+        let model = AppModel(indexService: ProjectIndexService())
+        let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true,
+                                              layoutDefaults: defaults)
+        controller.window?.setContentSize(NSSize(width: 1600, height: 900))
+        controller.openProject(root: root)
+        try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+        controller.openFileForSelfTest(root.appendingPathComponent("main.rs"))
+        controller.renderForSelfTest()
+        return controller
+    }
+    let first = try await makeController()
+    // Default: files and outline on the left, the right zone collapsed.
+    #expect(first.selfTestShownPanels[.left] == [.files, .outline])
+    #expect(first.selfTestShownPanels[.right] == [])
+    #expect(first.selfTestZoneWidths[.right] == 0)
+    #expect(abs((first.selfTestZoneWidths[.left] ?? 0) - 240) <= 1)
+    first.toggleRelations()
+    #expect(first.selfTestShownPanels[.right] == [.relations])
+    first.movePanel(.relations, to: .left)
+    #expect(first.selfTestShownPanels[.left] == [.files, .outline, .relations])
+    #expect(first.selfTestZoneWidths[.right] == 0, "An emptied zone collapses")
+    #expect((first.selfTestZoneWidths[.left] ?? 0) >= 299, "Relations raises the zone to its 300pt minimum")
+    first.dropPanel(.relations, in: .left, beforeShownIndex: 0)
+    #expect(first.selfTestShownPanels[.left] == [.relations, .files, .outline])
+    first.shiftPanel(.files, by: 1)
+    #expect(first.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    let split = first.selfTestZoneSplit(.left)
+    split.setPosition((split.bounds.height - 2 * split.dividerThickness) * 0.5, ofDividerAt: 0)
+    first.selfTestRecordDividerDrag()
+    first.renderForSelfTest()
+    let heights = first.selfTestPanelHeights
+    first.close()
+
+    let second = try await makeController()
+    defer { second.close() }
+    #expect(second.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    for (panel, height) in heights {
+        #expect(abs((second.selfTestPanelHeights[panel] ?? 0) - height) <= 1, "\(panel) height survives")
+    }
+    let placement = second.panelLayout.zones
+    for preset in PanelPresetModel.allCases {
+        second.applyPanelPreset(preset)
+        #expect(second.panelLayout.zones == placement, "\(preset) keeps placement")
+        #expect(Set(PanelID.allCases).subtracting(second.panelLayout.hidden) == preset.visiblePanels)
+    }
+    #expect(second.selfTestShownPanels.values.flatMap { $0 }.isEmpty, "Focus hides every panel")
+    second.applyPanelPreset(.relations)
+    #expect(second.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    second.restoreDefaultPanelLayout()
+    #expect(second.panelLayout == .standard)
+    #expect(second.selfTestShownPanels[.left] == [.files, .outline])
+    #expect(PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")) == .standard)
 }

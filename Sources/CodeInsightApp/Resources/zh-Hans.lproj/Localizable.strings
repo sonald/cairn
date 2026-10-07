@@ -774,3 +774,12 @@
 "panel.query.conditions.truncated" = "可能不完整 · 截断条件：%@";
 
 "panel.query.stale.pending" = "已过期 · 等待更新结果…";
+
+"panel.options" = "面板选项";
+"panel.close" = "关闭面板";
+"panel.move.left" = "移到左侧";
+"panel.move.right" = "移到右侧";
+"panel.move.up" = "上移";
+"panel.move.down" = "下移";
+"panel.drop.here" = "放到这里";
+"panel.docs" = "文档";

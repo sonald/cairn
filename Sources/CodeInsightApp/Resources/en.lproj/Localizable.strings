@@ -774,3 +774,12 @@
 "panel.query.conditions.truncated" = "May be incomplete · truncated conditions: %@";
 
 "panel.query.stale.pending" = "Out of date · awaiting updated results…";
+
+"panel.options" = "Panel Options";
+"panel.close" = "Close Panel";
+"panel.move.left" = "Move to Left Side";
+"panel.move.right" = "Move to Right Side";
+"panel.move.up" = "Move Up";
+"panel.move.down" = "Move Down";
+"panel.drop.here" = "Drop Here";
+"panel.docs" = "Documentation";

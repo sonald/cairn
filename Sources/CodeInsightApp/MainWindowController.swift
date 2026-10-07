@@ -68,20 +68,29 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let secondaryReaderController: ReaderViewController
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
-    /// D5: sidebar | work area; the Lens spans only the reader and Relations.
+    /// Left zone | reader group | right zone. Panels live in the zones;
+    /// the reader group (primary | secondary reader) never moves.
     private let outerSplitController = NSSplitViewController()
-    private let contentSplitController = NSSplitViewController()
-    private let upperSplitController = NSSplitViewController()
     private let readerSplitController = NSSplitViewController()
-    private let sidebarItem: NSSplitViewItem
     private let readerGroupItem: NSSplitViewItem
     private let secondaryReaderItem: NSSplitViewItem
-    private let queryDockController = NSViewController()
-    private let queryDockTabs = NSStackView()
-    private let queryDockBody = NSView()
-    private var selectedBottomTab = "context"
-    private let contextItem: NSSplitViewItem
-    private let relationItem: NSSplitViewItem
+    private let zoneViews: [PanelZone: PanelZoneView]
+    private let zoneItems: [PanelZone: NSSplitViewItem]
+    private var chromes: [PanelID: PanelChromeView] = [:]
+    /// The app-wide arrangement; temporary overrides are applied on top in
+    /// `isPanelShown` and never written back.
+    private(set) var panelLayout = PanelLayout.standard
+    private static let panelLayoutKey = "Cairn.panelLayout.v2"
+    private var isDraggingPanel = false
+    private var isApplyingGeometry = false
+    private var needsPanelGeometry = true
+    /// Context opened by the user while it has nothing to show stays open
+    /// until content arrives; then the automatic rule takes over again.
+    private var contextOpenedExplicitly = false
+    /// The split reader did not fit beside the zones; cleared when it closes.
+    private var splitHidesZones = false
+    /// Panels the user showed inside a Reading Set (evidence, menu).
+    private var readingSetRevealed: Set<PanelID> = []
     private let projectLabel = NSTextField(labelWithString: "Cairn")
     private let commitButton = NSButton()
     private let symbolsButton = NSButton()
@@ -166,7 +175,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     private var pendingTabRestore: TabStripModel.Tab?
     private var pendingRefreshContentID: ContentID?
-    private var searchDockHasBeenShown = false
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
@@ -175,7 +183,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// token it shows even after the pointer moved on.
     private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
     private let layoutDefaults: UserDefaults?
-    private var contextVisibilityOverride: Bool?
     /// Per-window frame autosave: project windows derive it from the project
     /// identity so siblings never fight over `CodeInsightMainWindow`; blank
     /// windows keep the legacy name only when nothing better applies.
@@ -205,14 +212,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         self.recordsRecentProjects = recordsRecentProjects
         self.isOffscreenTestWindow = offscreen
         self.layoutDefaults = layoutDefaults ?? (offscreen ? nil : .standard)
-        contextVisibilityOverride = self.layoutDefaults?.object(forKey: "Cairn.contextVisible") as? Bool
         self.onChooseProject = onChooseProject
         self.onChooseProjectLanguage = onChooseProjectLanguage
         self.onShowSettings = onShowSettings
         self.frameAutosaveName = frameAutosaveName
-        sidebarController.setSplitAutosaveName(
-            offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
-        )
         contextController = ContextWindowViewController(model: model.contextWindow, derivedDataStore: derivedDataStore)
         relationController = RelationWindowController(
             model: model.relationTree,
@@ -253,26 +256,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 return model.languageMode(for: file)
             }
         )
-        relationController.view.frame.size.width = 360
-        relationItem = NSSplitViewItem(viewController: relationController)
-        sidebarItem = NSSplitViewItem(
-            sidebarWithViewController: sidebarController
-        )
         let primaryReaderItem = NSSplitViewItem(viewController: readerController)
         secondaryReaderItem = NSSplitViewItem(
             viewController: secondaryReaderController
         )
         readerGroupItem = NSSplitViewItem(viewController: readerSplitController)
-        queryDockController.view = NSView()
-        contextItem = NSSplitViewItem(viewController: queryDockController)
+        let zones = Dictionary(uniqueKeysWithValues: PanelZone.allCases.map { ($0, PanelZoneView(zone: $0)) })
+        zoneViews = zones
+        zoneItems = zones.mapValues { zoneView in
+            let controller = NSViewController()
+            controller.view = zoneView
+            let item = NSSplitViewItem(viewController: controller)
+            item.canCollapse = true
+            item.isCollapsed = true
+            // Zones keep their width while the reader takes window changes.
+            item.holdingPriority = .init(rawValue: 260)
+            return item
+        }
 
         outerSplitController.splitView.isVertical = true
         outerSplitController.splitView.dividerStyle = .thin
-        contentSplitController.splitView.isVertical = false
-        upperSplitController.splitView.isVertical = true
         readerSplitController.splitView.isVertical = true
-        contentSplitController.splitView.dividerStyle = .thin
-        upperSplitController.splitView.dividerStyle = .thin
         readerSplitController.splitView.dividerStyle = .thin
 
         // §3.1: compare columns keep at least 320pt each.
@@ -284,32 +288,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerSplitController.addSplitViewItem(primaryReaderItem)
         readerSplitController.addSplitViewItem(secondaryReaderItem)
 
-        sidebarItem.minimumThickness = 180
-        sidebarItem.canCollapse = true
-        // §3.1: the independent right area keeps at least 300pt. The
-        // Reader's 480pt floor is enforced by the sidebar adaptation, not a
-        // hard constraint — a required minimum alongside the other panes
-        // would grow the window instead of folding the sidebar.
-        readerGroupItem.minimumThickness = 300
+        // The reader's 320pt is the only hard minimum; zone minimums are
+        // soft (PanelZoneView) so a narrow window squeezes the zones instead
+        // of growing.
+        readerGroupItem.minimumThickness = 320
         readerGroupItem.canCollapse = false
-        relationItem.minimumThickness = 300
-        relationItem.automaticMaximumThickness = 380
-        relationItem.canCollapse = true
-        upperSplitController.addSplitViewItem(readerGroupItem)
-        upperSplitController.addSplitViewItem(relationItem)
-        relationItem.isCollapsed = true
-
-        let upperItem = NSSplitViewItem(viewController: upperSplitController)
-        upperItem.minimumThickness = 300
-        contextItem.minimumThickness = 120
-        contextItem.canCollapse = true
-        contentSplitController.addSplitViewItem(upperItem)
-        contentSplitController.addSplitViewItem(contextItem)
-        let workItem = NSSplitViewItem(viewController: contentSplitController)
-        workItem.minimumThickness = 300
-        workItem.canCollapse = false
-        outerSplitController.addSplitViewItem(sidebarItem)
-        outerSplitController.addSplitViewItem(workItem)
+        readerGroupItem.holdingPriority = .init(rawValue: 250)
+        secondaryReaderItem.holdingPriority = .init(rawValue: 250)
+        outerSplitController.addSplitViewItem(zoneItems[.left]!)
+        outerSplitController.addSplitViewItem(readerGroupItem)
+        outerSplitController.addSplitViewItem(zoneItems[.right]!)
 
         let contentView = NSView()
         let contentViewController = NSViewController()
@@ -448,7 +436,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.contentViewController = contentViewController
         window.setContentSize(frame.size)
         super.init(window: window)
-        configureQueryDock()
+        panelLayout = PanelLayout.decode(self.layoutDefaults?.data(forKey: Self.panelLayoutKey))
+        configurePanels(host: contentViewController)
         exactInfoButton.target = self
         contextButton.target = self
         window.delegate = self
@@ -517,7 +506,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.onEditExclusionRules = { [weak self] in self?.showExclusionRules() }
         readerController.onRevealPath = { [weak self] url in
             guard let self else { return }
-            sidebarItem.isCollapsed = false
+            setPanelVisible(.files, true)
             sidebarController.revealPath(url)
         }
         for reader in [readerController, secondaryReaderController] {
@@ -726,7 +715,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                   case .readingSet(_, let excerpts) = model?.tabStrip.activeTab?.content,
                   excerpts.indices.contains(index)
             else { return }
-            relationItem.isCollapsed = false
+            setPanelVisible(.relations, true)
             relationController.showFrozenInspector(excerpts[index].inspector)
         }
         readerController.onOpenReadingSetExcerpt = { [weak self, weak model] index in
@@ -801,7 +790,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             onClose: { [weak self] in self?.closeTab($0) }
         )
         render()
-        applyPanelPreset(.reading, restoring: true)
+        applyPanelLayout(forceGeometry: true)
         observe()
         observeSymbolHover()
     }
@@ -933,7 +922,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         pendingRecentProjectRoot = root
         pendingRecentProjectLanguages = overridingLanguages ?? snapshot.languages
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
-            applyPanelPreset(preset, restoring: true)
+            applyPanelPreset(preset)
         }
         // R6.3: restore the lens tracking; the pin always starts released.
         if let tracking = ContextWindowModel.Tracking(rawValue: snapshot.contextTracking ?? "") {
@@ -1129,9 +1118,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestPanelPreset: PanelPresetModel { panelPreset }
     var selfTestPanelCollapses: (Bool, Bool, Bool, Bool) {
         (
-            sidebarItem.isCollapsed,
-            contextItem.isCollapsed,
-            relationItem.isCollapsed,
+            !isPanelShown(.files),
+            !isPanelShown(.context),
+            !isPanelShown(.relations),
             secondaryReaderItem.isCollapsed
         )
     }
@@ -1341,15 +1330,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     ) {
         sidebarController.selfTestGeometry
     }
-    var selfTestSidebarDividerSurvivesPlaceholderRefresh: Bool {
-        sidebarController.selfTestDividerSurvivesPlaceholderRefresh()
-    }
-    func selfTestSetDefaultSidebarDivider() {
-        sidebarController.selfTestSetDefaultSidebarDivider()
-    }
-    var selfTestSidebarDividerPersistsAcrossRebuild: Bool {
-        sidebarController.selfTestDividerPersistsAcrossRebuild()
-    }
     var selfTestContextPlaceholderText: String? {
         contextController.selfTestPlaceholderText
     }
@@ -1384,18 +1364,32 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.selfTestCloseInspector()
     }
     var selfTestExactStatusText: String { exactLabel.stringValue }
-    var selfTestSidebarPaneCollapsed: Bool { sidebarItem.isCollapsed }
+    var selfTestSidebarPaneCollapsed: Bool { !isPanelShown(.files) }
     var selfTestReaderGroupWidth: CGFloat {
         readerGroupItem.viewController.view.frame.width
     }
     var selfTestRelationsPaneWidth: CGFloat {
-        relationItem.viewController.view.frame.width
+        chromes[.relations]?.frame.width ?? 0
     }
-    var selfTestContextPaneCollapsed: Bool { contextItem.isCollapsed }
-    var selfTestRelationsPaneCollapsed: Bool { relationItem.isCollapsed }
-    var selfTestOutlineHidden: Bool {
-        sidebarController.selfTestOutlineHidden
+    var selfTestContextPaneCollapsed: Bool { !isPanelShown(.context) }
+    var selfTestRelationsPaneCollapsed: Bool { !isPanelShown(.relations) }
+    var selfTestOutlineHidden: Bool { !isPanelShown(.outline) }
+    /// Zone widths as laid out (0 while a zone is collapsed).
+    var selfTestZoneWidths: [PanelZone: CGFloat] {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return zoneItems.mapValues { $0.isCollapsed ? 0 : $0.viewController.view.frame.width }
     }
+    /// Panels on screen per zone, top to bottom.
+    var selfTestShownPanels: [PanelZone: [PanelID]] {
+        zoneViews.mapValues { $0.panels.map(\.id) }
+    }
+    var selfTestPanelHeights: [PanelID: CGFloat] {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return chromes.filter { $0.value.superview != nil }.mapValues(\.frame.height)
+    }
+    /// The zone's own split view, for simulating a divider drag.
+    func selfTestZoneSplit(_ zone: PanelZone) -> NSSplitView { zoneViews[zone]!.split }
+    var selfTestOuterSplit: NSSplitView { outerSplitController.splitView }
     var selfTestTrailBarVisible: Bool {
         selfTestViewIsVisibleInWindow(trailView)
     }
@@ -1914,8 +1908,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    private func configureQueryDock() {
-        queryDockController.addChild(contextController)
+    /// Builds the search panel and wraps every panel's view in its chrome.
+    /// The controllers become children of the window's root controller so
+    /// they keep one parent wherever their panel is placed.
+    private func configurePanels(host: NSViewController) {
         let panel = SearchPanel(appModel: model, onOpen: { [weak self] file, range, contentID, focusReader in
             guard let self else { return }
             if self.model.selectedFile?.standardizedFileURL != file.standardizedFileURL || self.model.selectedByteOffset != range.lowerBound {
@@ -1927,95 +1923,41 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }, onReturnToReader: { [weak self] in self?.readerController.focusText() })
         panel.onResultsChanged = { [weak self] in self?.refreshProjectSearchHits() }
         searchPanel = panel
-        queryDockController.addChild(panel)
-        for (title, tag) in [(localized("main.context"), 0), (localized("panel.query.results"), 1), ("×", 2)] {
-            let button = NSButton(title: title, target: self, action: #selector(selectBottomTab(_:)))
-            button.tag = tag
-            button.isBordered = false
-            button.font = .systemFont(ofSize: 11.5)
-            let titleWidth = (title as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 11.5, weight: .semibold)]).width
-            button.widthAnchor.constraint(equalToConstant: tag == 2 ? 32 : ceil(titleWidth) + 24).isActive = true
-            button.heightAnchor.constraint(equalToConstant: 28).isActive = true
-            if tag == 2 {
-                let spacer = NSView()
-                spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-                queryDockTabs.addArrangedSubview(spacer)
-                button.setAccessibilityLabel(localized("panel.query.close"))
-            }
-            queryDockTabs.addArrangedSubview(button)
-        }
-        queryDockTabs.spacing = 0
-        queryDockTabs.heightAnchor.constraint(equalToConstant: 28).isActive = true
-        queryDockTabs.wantsLayer = true
-        let stack = NSStackView(views: [queryDockTabs, queryDockBody])
-        stack.orientation = .vertical
-        stack.spacing = 0
-        stack.alignment = .leading
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        queryDockController.view.addSubview(stack)
-        for controller in [contextController as NSViewController, panel] {
-            let child = controller.view
-            child.translatesAutoresizingMaskIntoConstraints = false
-            queryDockBody.addSubview(child)
-            NSLayoutConstraint.activate([
-                child.leadingAnchor.constraint(equalTo: queryDockBody.leadingAnchor), child.trailingAnchor.constraint(equalTo: queryDockBody.trailingAnchor),
-                child.topAnchor.constraint(equalTo: queryDockBody.topAnchor), child.bottomAnchor.constraint(equalTo: queryDockBody.bottomAnchor),
-            ])
-        }
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: queryDockController.view.leadingAnchor), stack.trailingAnchor.constraint(equalTo: queryDockController.view.trailingAnchor),
-            stack.topAnchor.constraint(equalTo: queryDockController.view.topAnchor), stack.bottomAnchor.constraint(equalTo: queryDockController.view.bottomAnchor),
-            queryDockTabs.widthAnchor.constraint(equalTo: stack.widthAnchor), queryDockBody.widthAnchor.constraint(equalTo: stack.widthAnchor),
-        ])
         model.projectSearch.onStateChanged = { [weak self] in
             guard let self else { return }
             self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
         }
-        renderBottomTab()
+        for controller in [sidebarController, relationController, contextController, panel] as [NSViewController] {
+            host.addChild(controller)
+        }
+        sidebarController.loadViewIfNeeded()
+        let contents: [(PanelID, NSView, [NSButton])] = [
+            (.files, sidebarController.filesController.view, sidebarController.filesAccessories),
+            (.outline, sidebarController.outlineController.view, sidebarController.outlineAccessories),
+            (.relations, relationController.view, []),
+            (.context, contextController.view, []),
+            (.search, panel.view, []),
+        ]
+        for (id, content, accessories) in contents {
+            let chrome = PanelChromeView(id: id, title: panelTitle(id), content: content, accessories: accessories)
+            chrome.host = self
+            chromes[id] = chrome
+        }
+        for zoneView in zoneViews.values { zoneView.host = self }
+        for split in [outerSplitController.splitView, readerSplitController.splitView] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowSplitDidResize(_:)),
+                name: NSSplitView.didResizeSubviewsNotification,
+                object: split
+            )
+        }
     }
 
-    @objc private func selectBottomTab(_ sender: NSButton) {
-        if sender.tag == 2 {
-            if selectedBottomTab == "search" { model.projectSearch.commitQuery() }
-            contextVisibilityOverride = false
-            contextItem.isCollapsed = true
-            searchPanel?.dismissHints()
-            refreshProjectSearchHits()
-            readerController.focusText()
-        } else {
-            selectedBottomTab = sender.tag == 1 ? "search" : "context"
-            renderBottomTab()
-        }
-        savePanelLayout()
-    }
-    private func renderBottomTab() {
-        let firstSearchPresentation = selectedBottomTab == "search" && !searchDockHasBeenShown
-        if selectedBottomTab == "search" { searchDockHasBeenShown = true }
-        contextItem.minimumThickness = selectedBottomTab == "search" ? 240 : 120
-        contextController.view.isHidden = selectedBottomTab == "search"
-        searchPanel?.view.isHidden = selectedBottomTab != "search"
-        let theme = ReaderTheme(settings: currentReaderSettings)
-        queryDockTabs.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
-        for case let button as NSButton in queryDockTabs.arrangedSubviews {
-            let selected = button.tag == (selectedBottomTab == "search" ? 1 : 0)
-            button.font = .systemFont(ofSize: 11.5, weight: selected ? .semibold : .regular)
-            button.contentTintColor = selected ? theme.foregroundColor : theme.chromeSecondaryColor
-            button.wantsLayer = true
-            button.layer?.backgroundColor = (selected ? theme.backgroundColor : theme.chromeHeaderColor).cgColor
-        }
-        if selectedBottomTab != "search" { searchPanel?.dismissHints() }
-        if firstSearchPresentation, !contextItem.isCollapsed {
-            window?.contentView?.layoutSubtreeIfNeeded()
-            let split = contentSplitController.splitView
-            let height = min(360, split.bounds.height * 0.45)
-            split.setPosition(split.bounds.height - height - split.dividerThickness, ofDividerAt: 0)
-        }
-        refreshProjectSearchHits()
-    }
     /// Underlines the visible search results in the main reader while the
-    /// results tab is showing; hiding results clears the underlines.
+    /// search panel is on screen; hiding it clears the underlines.
     private func refreshProjectSearchHits() {
-        let showing = selectedBottomTab == "search" && !contextItem.isCollapsed
+        let showing = isPanelShown(.search)
         let contentID = readerController.displayedContentID
         readerController.setQueryHits(
             showing ? searchPanel?.queryHits(forContent: contentID) ?? [] : [],
@@ -2024,24 +1966,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     func showProjectSearch() {
         let selection = focusedReader.hasFocusedText ? focusedReader.selectedSourceText : nil
-        selectedBottomTab = "search"
-        contextVisibilityOverride = true
-        contextItem.isCollapsed = false
-        renderBottomTab()
+        setPanelVisible(.search, true)
         searchPanel?.focusInput(selection: selection)
-        savePanelLayout()
     }
     func nextProjectSearchResult() { searchPanel?.moveResult(by: 1) }
     func previousProjectSearchResult() { searchPanel?.moveResult(by: -1) }
     func toggleProjectSearchResults() {
-        if selectedBottomTab == "search", !contextItem.isCollapsed {
-            model.projectSearch.commitQuery()
-            contextVisibilityOverride = false
-            contextItem.isCollapsed = true
-            searchPanel?.dismissHints()
-            refreshProjectSearchHits()
-        } else { showProjectSearch() }
-        savePanelLayout()
+        if isPanelShown(.search) { setPanelVisible(.search, false) } else { showProjectSearch() }
     }
 
     func selfTestSetProjectSearchQuery(_ query: String) {
@@ -2091,50 +2022,43 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         model.compare.rightRevision != nil || (!secondaryReaderItem.isCollapsed && !isReferenceActive)
     }
 
+    /// Closes only the split: panel visibility stays as it is.
     func closeComparison() {
         guard canCloseComparison else { return }
-        savePanelLayout()
         model.clearCompare()
-        applyPanelPreset(.reading, restoring: true)
+        if panelPreset == .compare { panelPreset = .reading }
+        if !isReferenceActive { closeSecondaryReader() }
+        applyPanelLayout()
+        if model.referencePane != nil { renderSecondaryReader() }
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         render()
     }
 
-    func toggleRelations() {
-        savePanelLayout()
-        if relationItem.isCollapsed {
-            openRelationsPane()
-        } else {
-            relationItem.isCollapsed = true
-            updateRelationsWidthAdaptation()
-        }
-        savePanelLayout()
-    }
+    func toggleRelations() { setPanelVisible(.relations, !isPanelShown(.relations)) }
 
+    /// Status-bar Context button: the same switch as the panel menu.
     @objc func toggleContext(_ sender: Any?) {
         guard contentSurfaceMode == .source, !readingSetLayoutActive else { return }
-        savePanelLayout()
-        contextVisibilityOverride = contextItem.isCollapsed
-        layoutDefaults?.set(contextVisibilityOverride, forKey: "Cairn.contextVisible")
-        updateContextVisibility()
-        savePanelLayout()
+        setPanelVisible(.context, !isPanelShown(.context))
     }
 
-    private func updateContextVisibility() {
-        guard contentSurfaceMode == .source, !readingSetLayoutActive else { return }
-        // Anything the lens can show counts: a candidate, a type hop still
-        // waiting for Exact (no targets yet), the enclosing scope — and the
-        // enclosing mode itself, which the user chose from the pane.
+    /// Anything the lens can show counts: a candidate, a type hop still
+    /// waiting for Exact (no targets yet), the enclosing scope — and the
+    /// enclosing mode itself, which the user chose from the pane.
+    private var contextHasContent: Bool {
         let lens = model.contextWindow
-        let hasContext = lens.candidateCount > 0
+        return lens.candidateCount > 0
             || lens.displayedCandidate != nil
             || lens.activeTypeHop != nil
             || lens.activeEnclosingScope != nil
             || lens.tracking == .enclosing
             || lens.isPinned
-        let visible = contextVisibilityOverride ?? (panelPreset != .focus && (selectedBottomTab == "search" || hasContext))
-        contextItem.isCollapsed = !visible
+    }
+
+    private func renderContextButton(theme: ReaderTheme? = nil) {
+        let visible = isPanelShown(.context)
         contextButton.setAccessibilityLabel(visible ? localized("main.hide.definition.context") : localized("main.show.definition.context"))
-        let theme = ReaderTheme(settings: currentReaderSettings)
+        let theme = theme ?? ReaderTheme(settings: currentReaderSettings)
         contextButton.contentTintColor = visible ? theme.accentColor : theme.chromeSecondaryColor
     }
 
@@ -2192,7 +2116,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func showResolutionInspector() {
-        openRelationsPane()
+        setPanelVisible(.relations, true)
         _ = relationController.showSelectedInspector()
     }
 
@@ -2204,30 +2128,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.showPopover()
     }
 
-    func applyPanelPreset(_ preset: PanelPresetModel, restoring: Bool = false) {
+    /// A preset is a display combination; Compare also opens the split.
+    func applyPanelPreset(_ preset: PanelPresetModel) {
         panelPreset = preset
-        if !restoring {
-            layoutDefaults?.removeObject(forKey: panelLayoutKey)
-            contextVisibilityOverride = nil
-            layoutDefaults?.removeObject(forKey: "Cairn.contextVisible")
+        panelLayout.apply(preset)
+        contextOpenedExplicitly = false
+        if preset.opensReaderSplit {
+            _ = ensureRoomForSplit()
+            openSecondaryReader()
+        } else if !isReferenceActive {
+            closeSecondaryReader()
         }
-        // An explicit preset choice replaces any layout captured for a
-        // round-trip through a non-source surface.
-        savedSourceSurfaceLayout = nil
-        sidebarTemporarilyCollapsedForRelations = false
-        applyPanelLayout(
-            readingSetLayoutActive ? PanelPresetModel.focus.layout : (restoredPanelLayout() ?? preset.layout)
-        )
-        contentSurfaceMode = nil
-        updateContentSurfaceIfNeeded()
-        updateContextVisibility()
+        applyPanelLayout()
+        savePanelLayout()
         if model.referencePane != nil { renderSecondaryReader() }
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
     /// Which surface the window currently presents. Derived from project
-    /// state and the selected file's kind; drives temporary panel exit per
-    /// §3.1 without writing back into the user's preset.
+    /// state and the selected file's kind; drives the temporary panel
+    /// overrides without writing back into the stored layout.
     private enum ContentSurfaceMode: Equatable {
         case noProject
         case nonSource
@@ -2235,7 +2155,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private var contentSurfaceMode: ContentSurfaceMode?
-    @ObservationIgnored private var savedSourceSurfaceLayout: PanelLayoutDescription?
 
     private func currentContentSurfaceMode() -> ContentSurfaceMode {
         switch model.projectState {
@@ -2250,122 +2169,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    @ObservationIgnored
-    private var sidebarTemporarilyCollapsedForRelations = false
-
-    /// Opens the Relations pane without ever growing the window: the
-    /// sidebar folds first when the reader would fall below its readable
-    /// floor, and the pane's restored thickness is clamped to the width
-    /// that fits beside the reader (§3.1).
-    private func openRelationsPane() {
-        let outerSplit = outerSplitController.splitView
-        let upperSplit = upperSplitController.splitView
-        outerSplit.layoutSubtreeIfNeeded()
-        let available = min(
-            outerSplit.bounds.width,
-            window?.contentLayoutRect.width ?? outerSplit.bounds.width
-        )
-        let sidebarWidth = sidebarItem.isCollapsed
-            ? 0
-            : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
-        if !sidebarItem.isCollapsed,
-           available - sidebarWidth - relationItem.minimumThickness < 480
-        {
-            sidebarItem.isCollapsed = true
-            sidebarTemporarilyCollapsedForRelations = true
-        }
-        outerSplit.layoutSubtreeIfNeeded()
-        let fittedSidebar = sidebarItem.isCollapsed
-            ? 0
-            : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
-        let target = max(
-            relationItem.minimumThickness,
-            available - fittedSidebar - 480 - upperSplit.dividerThickness
-        )
-        let frameBefore = window?.frame
-        // Restoring a collapsed pane re-applies its previous thickness in
-        // the same layout pass. Cap the pane at the width that fits beside
-        // the reader before it opens, and keep the cap while the window is
-        // narrow; the frame guard enforces the §3.1 rule that the window
-        // never grows to satisfy pane layout.
-        capRelationsPane(width: target)
-        relationItem.isCollapsed = false
-        outerSplit.layoutSubtreeIfNeeded()
-        upperSplit.layoutSubtreeIfNeeded()
-        let preferredWidth = (restoredPanelLayout()?.relationsFraction ?? 0) * available
-        upperSplit.setPosition(
-            upperSplit.bounds.width - min(target, max(300, preferredWidth > 0 ? preferredWidth : 360)),
-            ofDividerAt: 0
-        )
-        if let frameBefore,
-           window?.frame.width ?? 0 > frameBefore.width + 0.5
-        {
-            window?.setFrame(frameBefore, display: false)
-            upperSplit.layoutSubtreeIfNeeded()
-        }
-    }
-
-    /// Caps the Relations pane's maximum thickness while the window cannot
-    /// fit its natural width beside a readable Reader; a nil width releases
-    /// the cap. maximumThickness is enforced by the split view itself, so
-    /// the cap survives arbitrary layout passes.
-    private func capRelationsPane(width: CGFloat?) {
-        guard let width, width > 0 else {
-            relationItem.maximumThickness = NSSplitViewItem.unspecifiedDimension
-            return
-        }
-        relationItem.maximumThickness = max(
-            relationItem.minimumThickness,
-            width
-        )
-    }
-
-    /// §3.1 relations exploration: when the Relations pane is open and the
-    /// window cannot keep the Reader at its readable floor with the sidebar
-    /// up, the sidebar folds temporarily and returns when Relations closes.
-    /// Bound to the pane's open state, not a width band, so crossings
-    /// cannot oscillate; the user's preset is never overwritten.
-    private func updateRelationsWidthAdaptation() {
-        guard contentSurfaceMode == .source else { return }
-        if case .some(.readingSet) = model.tabStrip.activeTab?.content { return }
-        let relationsOpen = !relationItem.isCollapsed
-        let outerSplit = outerSplitController.splitView
-        let upperSplit = upperSplitController.splitView
-        if relationsOpen {
-            outerSplit.layoutSubtreeIfNeeded()
-            let available = min(
-                outerSplit.bounds.width,
-                window?.contentLayoutRect.width ?? outerSplit.bounds.width
-            )
-            let sidebarWidth = sidebarItem.isCollapsed
-                ? 0
-                : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
-            let preferredWidth = upperSplit.arrangedSubviews.last?.frame.width ?? 360
-            if !sidebarItem.isCollapsed,
-               available - sidebarWidth - preferredWidth
-                    - upperSplit.dividerThickness < 480
-            {
-                sidebarItem.isCollapsed = true
-                sidebarTemporarilyCollapsedForRelations = true
-            }
-            let sidebarWidthNow = sidebarItem.isCollapsed
-                ? 0
-                : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
-            capRelationsPane(width: available - sidebarWidthNow - 480 - upperSplit.dividerThickness)
-        } else {
-            capRelationsPane(width: nil)
-            if sidebarTemporarilyCollapsedForRelations {
-                sidebarTemporarilyCollapsedForRelations = false
-                sidebarItem.isCollapsed = false
-            }
-        }
-    }
-
     // MARK: - Window lifecycle and close
 
     func windowDidResize(_ notification: Notification) {
         window?.contentView?.layoutSubtreeIfNeeded()
-        updateRelationsWidthAdaptation()
+        if needsPanelGeometry { applyPanelLayout() }
     }
 
     func windowDidBecomeMain(_ notification: Notification) {
@@ -2503,150 +2311,261 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     // MARK: - Panel layout
 
-    /// Applies the §3.1 panel exit rules when the content surface actually
-    /// changes; splitter positions are only touched on transitions.
+    /// Re-evaluates the surface (no project / non-source / source) when it
+    /// actually changes; its temporary override is computed in
+    /// `isPanelShown`, so nothing is saved or restored here.
     private func updateContentSurfaceIfNeeded() {
         let mode = currentContentSurfaceMode()
         guard mode != contentSurfaceMode else { return }
-        let previous = contentSurfaceMode
-        if previous == .source, mode != .source, !readingSetLayoutActive {
-            savePanelLayout()
-            savedSourceSurfaceLayout = currentPanelLayout()
-        }
         contentSurfaceMode = mode
         switch mode {
-        case .noProject:
-            // Brand, Open Project, and recents carry the window; panels
-            // without an object of operation leave. Menus stay.
-            sidebarItem.isCollapsed = true
-            contextItem.isCollapsed = true
-            relationItem.isCollapsed = true
-            trailView.isHidden = true
-        case .nonSource:
-            // File tree + content preview; the symbol outline, Context,
-            // Relations, and Inspector leave without touching the pinned
-            // preview or the user's source layout.
-            sidebarItem.isCollapsed = false
-            sidebarController.setOutlineHidden(true)
-            contextItem.isCollapsed = true
-            relationItem.isCollapsed = true
-        case .source:
-            sidebarController.setOutlineHidden(false)
-            trailView.isHidden = false
-            if let saved = savedSourceSurfaceLayout {
-                savedSourceSurfaceLayout = nil
-                applyPanelLayout(saved)
-            } else {
-                applyPanelLayout(
-                    readingSetLayoutActive
-                        ? PanelPresetModel.focus.layout
-                        : (restoredPanelLayout() ?? panelPreset.layout)
-                )
+        case .noProject: trailView.isHidden = true
+        case .source: trailView.isHidden = false
+        case .nonSource: break
+        }
+        applyPanelLayout()
+    }
+
+    /// True while a temporary override hides panels; the stored layout is
+    /// not written then.
+    private var panelOverrideActive: Bool {
+        contentSurfaceMode != .source || readingSetLayoutActive || splitHidesZones
+    }
+
+    /// Effective visibility: the stored layout minus the temporary
+    /// overrides, with Context following its automatic rule.
+    func isPanelShown(_ id: PanelID) -> Bool {
+        guard chromes[id] != nil else { return false }
+        switch contentSurfaceMode {
+        case .noProject: return false
+        case .nonSource: if id != .files { return false }
+        case .source, nil: break
+        }
+        if splitHidesZones { return false }
+        if readingSetLayoutActive { return readingSetRevealed.contains(id) }
+        guard !panelLayout.hidden.contains(id) else { return false }
+        return id != .context || contextHasContent || contextOpenedExplicitly
+    }
+
+    /// The one switch behind ×, the panel menu, the status-bar button and
+    /// the commands. Inside a Reading Set it only affects that Reading Set.
+    func setPanelVisible(_ id: PanelID, _ visible: Bool) {
+        guard let chrome = chromes[id] else { return }
+        if visible {
+            splitHidesZones = false
+            if id == .context { contextOpenedExplicitly = true }
+        } else {
+            if id == .context { contextOpenedExplicitly = false }
+            if id == .search {
+                model.projectSearch.commitQuery()
+                searchPanel?.dismissHints()
             }
+            if let responder = window?.firstResponder as? NSView, responder.isDescendant(of: chrome) {
+                readerController.focusText()
+            }
+        }
+        if readingSetLayoutActive {
+            if visible { readingSetRevealed.insert(id) } else { readingSetRevealed.remove(id) }
+        } else {
+            panelLayout.setVisible(id, visible)
+        }
+        applyPanelLayout()
+        savePanelLayout()
+    }
+
+    /// Appends the panel to the other zone (title-bar menu).
+    func movePanel(_ id: PanelID, to zone: PanelZone) {
+        panelLayout.move(id, to: zone, at: panelLayout.panels(in: zone).count)
+        applyPanelLayout()
+        savePanelLayout()
+    }
+
+    private func shownPanels(in zone: PanelZone) -> [PanelID] {
+        zoneViews[zone]!.panels.map(\.id)
+    }
+
+    func canShiftPanel(_ id: PanelID, by delta: Int) -> Bool {
+        panelLayout.canShift(id, by: delta, among: shownPanels(in: panelLayout.zone(of: id).zone))
+    }
+
+    func shiftPanel(_ id: PanelID, by delta: Int) {
+        panelLayout.shift(id, by: delta, among: shownPanels(in: panelLayout.zone(of: id).zone))
+        applyPanelLayout()
+        savePanelLayout()
+    }
+
+    /// A drop before the `index`-th panel on screen (or at the end).
+    func dropPanel(_ id: PanelID, in zone: PanelZone, beforeShownIndex index: Int) {
+        let shown = shownPanels(in: zone)
+        let anchor = index < shown.count ? shown[index] : nil
+        guard anchor != id else { return }
+        let all = panelLayout.panels(in: zone)
+        panelLayout.move(id, to: zone, at: anchor.flatMap { all.firstIndex(of: $0) } ?? all.count)
+        applyPanelLayout()
+        savePanelLayout()
+    }
+
+    /// Opens empty zones as 72pt drop targets; panels are not rebuilt.
+    func panelDragBegan() {
+        isDraggingPanel = true
+        for zone in PanelZone.allCases where zoneViews[zone]!.panels.isEmpty {
+            zoneItems[zone]!.isCollapsed = false
+        }
+        applyZoneWidths()
+    }
+
+    func panelDragEnded() {
+        isDraggingPanel = false
+        applyPanelLayout()
+    }
+
+    func zoneHeightsChanged(_ zoneView: PanelZoneView) {
+        guard !panelOverrideActive, !isDraggingPanel else { return }
+        panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
+        savePanelLayout()
+    }
+
+    /// Records zone widths and the reader split ratio while the user drags
+    /// a window divider; programmatic placement is excluded.
+    @objc private func windowSplitDidResize(_ notification: Notification) {
+        guard !isApplyingGeometry, !isDraggingPanel, !panelOverrideActive,
+              isDividerDrag(in: window)
+        else { return }
+        recordWindowSplitGeometry()
+        savePanelLayout()
+    }
+
+    private func recordWindowSplitGeometry() {
+        let readerSplit = readerSplitController.splitView
+        if !secondaryReaderItem.isCollapsed, readerSplit.bounds.width > readerSplit.dividerThickness,
+           let primary = readerSplit.arrangedSubviews.first
+        {
+            let fraction = primary.frame.width / (readerSplit.bounds.width - readerSplit.dividerThickness)
+            if fraction > 0, fraction < 1 { panelLayout.readerSplitFraction = fraction }
+        }
+        for zone in PanelZone.allCases
+        where !zoneItems[zone]!.isCollapsed && !zoneViews[zone]!.panels.isEmpty {
+            panelLayout.zoneWidths[zone] = zoneViews[zone]!.frame.width
         }
     }
 
-    /// Reads the current splitter state so a round-trip through a
-    /// non-source surface restores the user's arrangement, not just the
-    /// preset defaults.
-    private func currentPanelLayout() -> PanelLayoutDescription {
-        let base = restoredPanelLayout() ?? panelPreset.layout
-        let outerSplit = outerSplitController.splitView
-        let upperSplit = upperSplitController.splitView
-        let contentSplit = contentSplitController.splitView
-        let readerSplit = readerSplitController.splitView
-        // Fractions stay relative to the whole width, as before D5.
-        let sidebarFraction: Double
-        if !sidebarItem.isCollapsed,
-           outerSplit.bounds.width > 0,
-           let sidebar = outerSplit.arrangedSubviews.first
-        {
-            sidebarFraction = sidebar.frame.width / outerSplit.bounds.width
-        } else {
-            sidebarFraction = base.sidebarFraction
+    /// Stands in for a finished divider drag (tests cannot post mouse
+    /// tracking events): records what the dividers currently show.
+    func selfTestRecordDividerDrag() {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        recordWindowSplitGeometry()
+        for zoneView in zoneViews.values where !zoneView.panels.isEmpty {
+            panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
         }
-        let relationsFraction: Double
-        if !relationItem.isCollapsed,
-           outerSplit.bounds.width > 0,
-           let relations = upperSplit.arrangedSubviews.last
-        {
-            relationsFraction = relations.frame.width / outerSplit.bounds.width
-        } else {
-            relationsFraction = base.relationsFraction
+        savePanelLayout()
+    }
+
+    /// Puts the effective panels on screen. Zones are rebuilt only when
+    /// their panel list changed, so heights do not reflow mid-drag; widths
+    /// and heights are placed only for zones that appeared or changed.
+    private func applyPanelLayout(forceGeometry: Bool = false) {
+        if contextHasContent { contextOpenedExplicitly = false }
+        let searchWasShown = chromes[.search]?.superview != nil
+        var desired: [PanelZone: [PanelChromeView]] = [:]
+        var changed: [PanelZone] = []
+        for zone in PanelZone.allCases {
+            let views = panelLayout.panels(in: zone).filter(isPanelShown).compactMap { chromes[$0] }
+            desired[zone] = views
+            if views.map(ObjectIdentifier.init) != zoneViews[zone]!.panels.map(ObjectIdentifier.init) {
+                changed.append(zone)
+            }
         }
-        let contextFraction: Double
-        if !contextItem.isCollapsed,
-           contentSplit.bounds.height > 0,
-           let context = contentSplit.arrangedSubviews.last
-        {
-            contextFraction = context.frame.height / contentSplit.bounds.height
-        } else {
-            contextFraction = base.contextFraction
+        // Detach first: a panel may be moving from one zone to the other.
+        for zone in changed { zoneViews[zone]!.setPanels([]) }
+        for zone in changed { zoneViews[zone]!.setPanels(desired[zone]!) }
+        var collapseChanged = false
+        for zone in PanelZone.allCases {
+            let collapsed = desired[zone]!.isEmpty && !isDraggingPanel
+            if zoneItems[zone]!.isCollapsed != collapsed {
+                zoneItems[zone]!.isCollapsed = collapsed
+                collapseChanged = true
+            }
         }
-        let secondaryFraction: Double
-        if !secondaryReaderItem.isCollapsed,
-           readerSplit.bounds.width > 0,
-           let secondary = readerSplit.arrangedSubviews.last
-        {
-            secondaryFraction = secondary.frame.width / readerSplit.bounds.width
-        } else {
-            secondaryFraction = base.secondaryReaderFraction
+        let geometry = forceGeometry || needsPanelGeometry
+        if geometry || collapseChanged || !changed.isEmpty { applyZoneWidths() }
+        for zone in PanelZone.allCases where geometry || changed.contains(zone) {
+            let zoneView = zoneViews[zone]!
+            zoneView.applyHeights(panelLayout.heightFractions(for: zoneView.panels.map(\.id)))
         }
-        return PanelLayoutDescription(
-            sidebarCollapsed: sidebarItem.isCollapsed && !sidebarTemporarilyCollapsedForRelations,
-            readerCollapsed: readerGroupItem.isCollapsed,
-            contextCollapsed: contextItem.isCollapsed,
-            relationsCollapsed: relationItem.isCollapsed,
-            readerSplit: !secondaryReaderItem.isCollapsed && !isReferenceActive,
-            sidebarFraction: sidebarFraction,
-            contextFraction: contextFraction,
-            relationsFraction: relationsFraction,
-            secondaryReaderFraction: secondaryFraction,
-            bottomTab: selectedBottomTab
+        renderContextButton()
+        let searchShown = chromes[.search]?.superview != nil
+        if searchShown != searchWasShown {
+            if !searchShown { searchPanel?.dismissHints() }
+            refreshProjectSearchHits()
+        }
+    }
+
+    /// Places the zone dividers from the stored widths (72pt for an empty
+    /// zone during a drag). The right divider subtracts its own thickness;
+    /// a window that grew anyway is put back.
+    private func applyZoneWidths() {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let split = outerSplitController.splitView
+        guard split.bounds.width > 0 else {
+            needsPanelGeometry = true
+            return
+        }
+        needsPanelGeometry = false
+        let frameBefore = window?.frame
+        isApplyingGeometry = true
+        defer { isApplyingGeometry = false }
+        func width(_ zone: PanelZone) -> CGFloat {
+            let panels = zoneViews[zone]!.panels
+            guard !panels.isEmpty else { return 72 }
+            return max(panelLayout.width(of: zone), panels.map(\.minimumWidth).max() ?? 0)
+        }
+        if !zoneItems[.left]!.isCollapsed {
+            split.setPosition(width(.left), ofDividerAt: 0)
+        }
+        if !zoneItems[.right]!.isCollapsed {
+            split.setPosition(split.bounds.width - width(.right) - split.dividerThickness, ofDividerAt: 1)
+        }
+        split.layoutSubtreeIfNeeded()
+        if let frameBefore, let window, window.frame.width > frameBefore.width + 0.5 {
+            window.setFrame(frameBefore, display: false)
+            split.layoutSubtreeIfNeeded()
+        }
+    }
+
+    private func openSecondaryReader() {
+        guard secondaryReaderItem.isCollapsed else { return }
+        secondaryReaderItem.isCollapsed = false
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let split = readerSplitController.splitView
+        guard split.bounds.width > 0 else { return }
+        isApplyingGeometry = true
+        defer { isApplyingGeometry = false }
+        split.setPosition(
+            (split.bounds.width - split.dividerThickness) * panelLayout.readerSplitFraction,
+            ofDividerAt: 0
         )
     }
 
-    private func applyPanelLayout(_ layout: PanelLayoutDescription) {
-        selectedBottomTab = layout.bottomTab == "search" ? "search" : "context"
-        if selectedBottomTab == "search" { contextVisibilityOverride = !layout.contextCollapsed }
-        renderBottomTab()
-        sidebarItem.isCollapsed = layout.sidebarCollapsed
-        readerGroupItem.isCollapsed = layout.readerCollapsed
-        contextItem.isCollapsed = layout.contextCollapsed
-        relationItem.isCollapsed = layout.relationsCollapsed
-        secondaryReaderItem.isCollapsed = !layout.readerSplit && !isReferenceActive
-
-        // Keep auxiliary widths steady while the Reader takes available space.
-        // The narrow-window adaptation above preserves its readable floor.
-        sidebarItem.holdingPriority = .init(rawValue: 253)
-        readerGroupItem.holdingPriority = .init(rawValue: 250)
-        relationItem.holdingPriority = .init(rawValue: 252)
-        contextItem.holdingPriority = .init(rawValue: 250)
-        secondaryReaderItem.holdingPriority = .init(rawValue: 250)
-        applyPanelSizes(layout)
-        DispatchQueue.main.async { [weak self] in
-            self?.applyPanelSizes(layout)
-            self?.updateContextVisibility()
+    private func closeSecondaryReader() {
+        secondaryReaderItem.isCollapsed = true
+        if splitHidesZones {
+            splitHidesZones = false
+            applyPanelLayout()
         }
     }
 
-    private var panelLayoutKey: String { "Cairn.panelLayout.\(panelPreset.rawValue)" }
-
-    private func restoredPanelLayout() -> PanelLayoutDescription? {
-        guard let data = layoutDefaults?.data(forKey: panelLayoutKey),
-              let layout = try? JSONDecoder().decode(PanelLayoutDescription.self, from: data),
-              [layout.sidebarFraction, layout.contextFraction, layout.relationsFraction,
-               layout.secondaryReaderFraction].allSatisfy({ $0.isFinite && (0...1).contains($0) })
-        else { return nil }
-        return layout
+    /// "View → Restore Default Layout": placement, sizes and visibility.
+    func restoreDefaultPanelLayout() {
+        panelLayout = .standard
+        contextOpenedExplicitly = false
+        readingSetRevealed = []
+        applyPanelLayout(forceGeometry: true)
+        savePanelLayout()
     }
 
     private func savePanelLayout() {
-        guard contentSurfaceMode == .source, !readingSetLayoutActive,
-              let layoutDefaults,
-              let data = try? JSONEncoder().encode(currentPanelLayout())
-        else { return }
-        layoutDefaults.set(data, forKey: panelLayoutKey)
+        guard !panelOverrideActive, let layoutDefaults else { return }
+        layoutDefaults.set(panelLayout.encoded(), forKey: Self.panelLayoutKey)
     }
 
     // MARK: - Reader commands
@@ -2677,7 +2596,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.apply(settings: settings)
         palettePanel?.apply(settings: settings)
         searchPanel?.apply(settings: settings)
-        renderBottomTab()
+        for chrome in chromes.values { chrome.apply(theme: theme) }
+        for zoneView in zoneViews.values { zoneView.apply(theme: theme) }
         bookmarkPanel?.apply(settings: settings)
         commitPickerPopover?.apply(settings: settings)
         compareCommitPickerPopover?.apply(settings: settings)
@@ -2776,52 +2696,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var selfTestUpperPaneWidths: (sidebar: CGFloat, reader: CGFloat) {
-        window?.contentView?.layoutSubtreeIfNeeded()
-        let sidebar = outerSplitController.splitView.arrangedSubviews.first
-        let reader = upperSplitController.splitView.arrangedSubviews.first
-        guard let sidebar, let reader else { return (0, 0) }
-        return (sidebar.frame.width, reader.frame.width)
+        (selfTestZoneWidths[.left] ?? 0, readerGroupItem.viewController.view.frame.width)
     }
 
     var selfTestContentView: NSView? { window?.contentView }
-
-    private func applyPanelSizes(_ layout: PanelLayoutDescription) {
-        window?.contentView?.layoutSubtreeIfNeeded()
-        let outerSplit = outerSplitController.splitView
-        let upperSplit = upperSplitController.splitView
-        // The deferred application must not re-open panes the surface
-        // adaptation folded after the preset was applied.
-        if !layout.sidebarCollapsed, !sidebarItem.isCollapsed,
-           outerSplit.bounds.width > 0 {
-            outerSplit.setPosition(
-                outerSplit.bounds.width * layout.sidebarFraction,
-                ofDividerAt: 0
-            )
-            outerSplit.layoutSubtreeIfNeeded()
-        }
-        if !layout.relationsCollapsed, !relationItem.isCollapsed, upperSplit.bounds.width > 0 {
-            upperSplit.setPosition(
-                upperSplit.bounds.width - outerSplit.bounds.width * layout.relationsFraction
-                    - upperSplit.dividerThickness,
-                ofDividerAt: 0
-            )
-        }
-        let contentSplit = contentSplitController.splitView
-        if !layout.contextCollapsed, !contextItem.isCollapsed,
-           contentSplit.bounds.height > 0 {
-            contentSplit.setPosition(
-                contentSplit.bounds.height * (1 - layout.contextFraction) - contentSplit.dividerThickness,
-                ofDividerAt: 0
-            )
-        }
-        let readerSplit = readerSplitController.splitView
-        if layout.readerSplit, readerSplit.bounds.width > 0 {
-            readerSplit.setPosition(
-                readerSplit.bounds.width * (1 - layout.secondaryReaderFraction) - readerSplit.dividerThickness,
-                ofDividerAt: 0
-            )
-        }
-    }
 
     private func openInSecondaryReader(_ file: URL) {
         navigate(to: file)
@@ -3082,8 +2960,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func render() {
         guard !isClosing else { return }
         updateContentSurfaceIfNeeded()
-        updateRelationsWidthAdaptation()
-        updateContextVisibility()
         if displayedGeneration != model.generation
             || displayedSnapshotID != model.currentSnapshotID
         {
@@ -3107,20 +2983,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             false
         }
         if nextReadingSetLayout != readingSetLayoutActive {
-            if nextReadingSetLayout {
-                savePanelLayout()
-                savedSourceSurfaceLayout = currentPanelLayout()
-                readingSetLayoutActive = true
-                applyPanelLayout(PanelPresetModel.focus.layout)
-            } else {
-                readingSetLayoutActive = false
-                if contentSurfaceMode == .source {
-                    applyPanelLayout(savedSourceSurfaceLayout ?? restoredPanelLayout() ?? panelPreset.layout)
-                    savedSourceSurfaceLayout = nil
-                    updateContextVisibility()
-                }
-            }
+            // A Reading Set hides every panel on top of the stored layout.
+            savePanelLayout()
+            readingSetLayoutActive = nextReadingSetLayout
+            readingSetRevealed = []
         }
+        applyPanelLayout()
         let readingSetAvailability: [(open: Bool, expand: Bool)]? = if case .readingSet(
             _, let excerpts
         ) = readerContent {
@@ -3596,8 +3464,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         identifierStatusLabel.textColor = theme.chromeSecondaryColor
         truncatedLabel.textColor = theme.warningColor
         truncatedLabel.backgroundColor = theme.amberSoftColor
-        contextButton.contentTintColor = contextItem.isCollapsed
-            ? theme.chromeSecondaryColor : theme.accentColor
+        renderContextButton(theme: theme)
         renderExactStatus()
     }
 
@@ -4409,8 +4276,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             return
         }
         if model.compare.rightRevision != nil || panelPreset == .compare || panelPreset == .focus {
+            // The reference takes the split; panel visibility stays.
             if model.compare.rightRevision != nil || panelPreset == .compare { model.clearCompare() }
-            applyPanelPreset(.reading, restoring: true)
+            panelPreset = .reading
+            closeSecondaryReader()
         }
         let target = ReferencePaneState(file: file, byteOffset: byteOffset ?? 0)
         if let current = model.referencePane, current != target {
@@ -4438,7 +4307,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         noteFocus(.primary)
         secondaryReaderController.setReferenceMode(false)
         secondaryReaderController.display(nil)
-        if panelPreset != .compare { secondaryReaderItem.isCollapsed = true }
+        if panelPreset != .compare { closeSecondaryReader() }
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         render()
     }
@@ -4491,7 +4360,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func renderReference(_ pane: ReferencePaneState) {
-        if secondaryReaderItem.isCollapsed { secondaryReaderItem.isCollapsed = false }
+        openSecondaryReader()
         let needsReveal = secondaryReaderController.displayedFile?.standardizedFileURL
             != pane.file.standardizedFileURL
         secondaryReaderController.setReferenceMode(
@@ -4508,16 +4377,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    /// Q5.8: both readers need their minimum width; the sidebar yields first.
+    /// Q5.8: both readers need their minimum width. When they do not fit
+    /// beside the zones, both zones hide until the split closes (a
+    /// temporary override, never saved).
     private func ensureRoomForSplit() -> Bool {
         if isReferenceActive || !secondaryReaderItem.isCollapsed { return true }
         let needed = Self.minimumPaneWidth * 2 + readerSplitController.splitView.dividerThickness
+        window?.contentView?.layoutSubtreeIfNeeded()
         if readerSplitController.view.bounds.width >= needed { return true }
-        if !sidebarItem.isCollapsed {
-            sidebarItem.isCollapsed = true
-            window?.contentView?.layoutSubtreeIfNeeded()
-        }
-        return readerSplitController.view.bounds.width >= needed
+        splitHidesZones = true
+        applyPanelLayout()
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return outerSplitController.splitView.bounds.width >= needed
     }
 
     /// Q5.3: the side the user last clicked, typed or moved the caret in.
@@ -4610,7 +4481,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               let file = paneFile(for: reader),
               let path = projectPath(for: file)
         else { return }
-        openRelationsPane()
+        setPanelVisible(.relations, true)
         if direction == .references,
            case let .ready(session, _) = model.projectState,
            let document = reader === readerController ? model.tabStrip.activeDocument : reader.caretDocument,
@@ -4691,7 +4562,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         direction: RelationTreeModel.Direction,
         document: ReaderDocument? = nil
     ) {
-        openRelationsPane()
+        setPanelVisible(.relations, true)
         relationController.setRoot(
             target: target,
             direction: direction,

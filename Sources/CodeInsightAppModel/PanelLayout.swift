@@ -69,13 +69,14 @@ public struct PanelLayout: Equatable, Sendable {
         zones[zone] = list
     }
 
-    /// Moves `panel` past `delta` visible neighbours in its zone; hidden
-    /// panels in between keep their places.
-    public mutating func shift(_ panel: PanelID, by delta: Int) {
-        guard canShift(panel, by: delta) else { return }
+    /// Moves `panel` past `delta` neighbours among the panels on screen in
+    /// its zone (by default the ones not hidden); panels off screen keep
+    /// their places.
+    public mutating func shift(_ panel: PanelID, by delta: Int, among shown: [PanelID]? = nil) {
+        guard canShift(panel, by: delta, among: shown) else { return }
         let zone = self.zone(of: panel).zone
-        let visible = visible(in: zone)
-        let neighbour = visible[visible.firstIndex(of: panel)! + delta]
+        let shown = shown ?? visible(in: zone)
+        let neighbour = shown[shown.firstIndex(of: panel)! + delta]
         var list = panels(in: zone)
         list.removeAll { $0 == panel }
         let anchor = list.firstIndex(of: neighbour)!
@@ -83,10 +84,13 @@ public struct PanelLayout: Equatable, Sendable {
         zones[zone] = list
     }
 
-    public func canShift(_ panel: PanelID, by delta: Int) -> Bool {
-        let visible = visible(in: zone(of: panel).zone)
-        guard delta != 0, let index = visible.firstIndex(of: panel) else { return false }
-        return visible.indices.contains(index + delta)
+    public func canShift(_ panel: PanelID, by delta: Int, among shown: [PanelID]? = nil) -> Bool {
+        let zone = self.zone(of: panel).zone
+        let shown = shown ?? visible(in: zone)
+        guard delta != 0, let index = shown.firstIndex(of: panel),
+              shown.indices.contains(index + delta)
+        else { return false }
+        return panels(in: zone).contains(shown[index + delta])
     }
 
     public mutating func setVisible(_ panel: PanelID, _ visible: Bool) {

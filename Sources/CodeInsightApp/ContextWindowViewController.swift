@@ -318,24 +318,24 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             ),
         ])
 
-        let header = NSStackView(views: [
-            modeControl,
-            pinButton,
-            previousButton,
-            countLabel,
-            nextButton,
-            symbolLabel,
-            typeHopLabel,
-            enclosingKindLabel,
-            enclosingNameLabel,
-            pathLabel,
-            stones,
-            candidateBadge,
-        ])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 8
+        // Two rows so a side-zone panel keeps the symbol and its type hop
+        // readable: the controls above, what is shown below.
+        let rows = [
+            [modeControl, pinButton, previousButton, countLabel, nextButton],
+            [symbolLabel, typeHopLabel, enclosingKindLabel, enclosingNameLabel, pathLabel, stones, candidateBadge],
+        ].map { views in
+            let row = NSStackView(views: views)
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 8
+            return row
+        }
+        let header = NSStackView(views: rows)
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 4
         header.translatesAutoresizingMaskIntoConstraints = false
+        for row in rows { row.widthAnchor.constraint(lessThanOrEqualTo: header.widthAnchor).isActive = true }
         headerSurface.wantsLayer = true
         headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
         headerSurface.translatesAutoresizingMaskIntoConstraints = false
@@ -392,7 +392,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             headerSurface.topAnchor.constraint(equalTo: container.topAnchor),
             headerSurface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             headerSurface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            headerSurface.heightAnchor.constraint(equalToConstant: 34),
+            headerSurface.heightAnchor.constraint(equalToConstant: 58),
             header.leadingAnchor.constraint(equalTo: headerSurface.leadingAnchor, constant: 8),
             header.trailingAnchor.constraint(equalTo: headerSurface.trailingAnchor, constant: -8),
             header.centerYAnchor.constraint(equalTo: headerSurface.centerYAnchor),

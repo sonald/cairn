@@ -594,7 +594,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         controller.window?.contentView?.layoutSubtreeIfNeeded()
         controller.window?.displayIfNeeded()
         let contentFrame = controller.window?.contentView?.bounds ?? .zero
-        controller.selfTestSetDefaultSidebarDivider()
         let splitFrame = controller.selfTestContentSplitFrameInContentView
         let trailFrame = controller.selfTestTrailBarFrameInContentView
         // The trail bar retires on the no-project surface (§3.1); only a
@@ -605,8 +604,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let sidebar = controller.selfTestSidebarGeometry
         let sidebarAvailableHeight =
             sidebar.filesPaneHeight + sidebar.outlinePaneHeight
-        let expectedFilesPaneHeight = sidebarAvailableHeight * 0.65
-        let expectedOutlinePaneHeight = sidebarAvailableHeight * 0.35
         let tolerance: CGFloat = 1
         var checks = [
             "contentSplitWidthFillsContentView":
@@ -619,24 +616,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                                 - trailOccupancyHeight
                         )
                 ) <= tolerance,
-            "sidebarFilesPaneIs65Percent":
-                sidebarAvailableHeight > 0
-                && abs(sidebar.filesPaneHeight - expectedFilesPaneHeight)
-                    <= sidebarAvailableHeight * 0.05,
-            "sidebarOutlinePaneIs35Percent":
-                sidebarAvailableHeight > 0
-                && abs(sidebar.outlinePaneHeight - expectedOutlinePaneHeight)
-                    <= sidebarAvailableHeight * 0.05,
+            // Without a project the panels are off screen (zero height).
             "sidebarFilesPaneNotCollapsedByPlaceholder":
-                sidebar.filesPaneHeight > sidebar.filePlaceholderHeight * 3,
+                sidebarAvailableHeight == 0
+                || sidebar.filesPaneHeight > sidebar.filePlaceholderHeight * 3,
             "sidebarFilesPlaceholderCentered":
                 sidebar.filePlaceholderCenterOffset <= tolerance,
             "sidebarOutlinePlaceholderCentered":
                 sidebar.outlinePlaceholderCenterOffset <= tolerance,
-            "sidebarManualDividerSurvivesPlaceholderRefresh":
-                controller.selfTestSidebarDividerSurvivesPlaceholderRefresh,
-            "sidebarDividerPersistsAcrossRebuild":
-                controller.selfTestSidebarDividerPersistsAcrossRebuild,
         ]
         if statusBarOccupancyHeight > 0 {
             checks["statusBarPinnedToContentBottom"] =
@@ -652,10 +639,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 "contentHeight": Double(contentFrame.height),
                 "contentWidth": Double(contentFrame.width),
                 "sidebarAvailablePaneHeight": Double(sidebarAvailableHeight),
-                "sidebarExpectedFilesPaneHeight":
-                    Double(expectedFilesPaneHeight),
-                "sidebarExpectedOutlinePaneHeight":
-                    Double(expectedOutlinePaneHeight),
                 "sidebarFilePlaceholderHeight":
                     Double(sidebar.filePlaceholderHeight),
                 "sidebarFilesPaneHeight": Double(sidebar.filesPaneHeight),

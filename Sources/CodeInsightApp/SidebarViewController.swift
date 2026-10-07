@@ -5,8 +5,11 @@ import CodeInsightReaderCore
 import CodeInsightReaderUI
 
 @MainActor
+/// Owns the file tree and symbol outline: data, selection sync and project
+/// placeholders. Their views are two independent panels (`filesController`,
+/// `outlineController`); this controller's own view is never shown.
 final class SidebarViewController: NSViewController,
-    NSOutlineViewDataSource, NSOutlineViewDelegate, NSSplitViewDelegate
+    NSOutlineViewDataSource, NSOutlineViewDelegate
 {
     var onOpenFile: ((URL) -> Void)?
     var onOpenFileInSecondary: ((URL) -> Void)?
@@ -21,8 +24,11 @@ final class SidebarViewController: NSViewController,
     var onChooseProject: (() -> Void)?
     private let fileOutlineView = NSOutlineView()
     private let symbolOutlineView = NSOutlineView()
-    private let splitView = NSSplitView()
-    private let backgroundView = NSView()
+    let filesController = NSViewController()
+    let outlineController = NSViewController()
+    /// Title-bar buttons of each panel (exclusion count, collapse all).
+    private(set) var filesAccessories: [NSButton] = []
+    private(set) var outlineAccessories: [NSButton] = []
     private let fileScrollView = NSScrollView()
     private let symbolScrollView = NSScrollView()
     private let filePlaceholder = NSStackView()
@@ -36,41 +42,10 @@ final class SidebarViewController: NSViewController,
     private var outlineFile: URL?
     private var collapsedOutlineKeys: [URL: Set<UInt32>] = [:]
     private var isSynchronizingOutlineSelection = false
-    private var setInitialDivider = false
     private var isSynchronizingFileSelection = false
     private var synchronizedFile: URL?
     private var hasSelectedFile = false
-    private var outlineSurfaceHidden = false
-    private var filesCollapsed = false
-    private var outlineCollapsed = false
-    private var isAdjustingSections = false
-    private var expandedDividerFraction: CGFloat = 0.55
-    private var compactSplitHeight: NSLayoutConstraint?
-    private var splitBottomConstraint: NSLayoutConstraint?
-    private var splitAutosaveName = "CodeInsightSidebarSplit"
     private var theme = ReaderTheme(settings: ReaderSettings())
-    private var paneSurfaces: [(pane: NSView, header: NSView, label: NSTextField, divider: NSView, body: NSView, toggle: NSButton)] = []
-
-    func setSplitAutosaveName(_ name: String) {
-        splitAutosaveName = name
-        filesCollapsed = UserDefaults.standard.bool(forKey: "\(name).filesCollapsed")
-        outlineCollapsed = UserDefaults.standard.bool(forKey: "\(name).outlineCollapsed")
-        expandedDividerFraction = 0.55
-        setInitialDivider = false
-    }
-
-    /// Hides the symbol outline half of the sidebar for non-source
-    /// surfaces; the file tree stays (§3.1).
-    func setOutlineHidden(_ hidden: Bool) {
-        loadViewIfNeeded()
-        guard outlineSurfaceHidden != hidden else { return }
-        outlineSurfaceHidden = hidden
-        splitView.arrangedSubviews.last?.isHidden = hidden
-        isAdjustingSections = true
-        splitView.adjustSubviews()
-        isAdjustingSections = false
-        restoreSidebarDividerIfNeeded()
-    }
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
@@ -81,25 +56,15 @@ final class SidebarViewController: NSViewController,
             isSynchronizingFileSelection = false
             isSynchronizingOutlineSelection = false
         }
-        backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
         fileOutlineView.backgroundColor = theme.chromeColor
         symbolOutlineView.backgroundColor = theme.chromeColor
-        for surface in paneSurfaces {
-            surface.pane.layer?.backgroundColor = theme.chromeColor.cgColor
-            surface.header.layer?.backgroundColor = theme.chromeColor.cgColor
-            surface.label.textColor = theme.chromeSecondaryColor
-            surface.divider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
-            surface.toggle.contentTintColor = theme.chromeSecondaryColor
+        for body in [filesController.view, outlineController.view] {
+            body.layer?.backgroundColor = theme.chromeColor.cgColor
         }
         fileOutlineView.reloadData()
         symbolOutlineView.reloadData()
-        view.needsDisplay = true
     }
 
-    var selfTestOutlineHidden: Bool {
-        loadViewIfNeeded()
-        return outlineSurfaceHidden
-    }
     var selfTestFilesPlaceholderText: String? {
         loadViewIfNeeded()
         return filePlaceholderLabel.stringValue
@@ -142,8 +107,7 @@ final class SidebarViewController: NSViewController,
         loadViewIfNeeded()
         return symbolScrollView.selfTestIsVisibleInWindow
     }
-    var selfTestFilesCollapsed: Bool { filesCollapsed }
-    var selfTestOutlineCollapsed: Bool { outlineCollapsed }
+    /// Panel heights (title bar included) and placeholder centering.
     var selfTestGeometry: (
         filesPaneHeight: CGFloat,
         outlinePaneHeight: CGFloat,
@@ -152,13 +116,11 @@ final class SidebarViewController: NSViewController,
         outlinePlaceholderCenterOffset: CGFloat
     ) {
         loadViewIfNeeded()
-        view.layoutSubtreeIfNeeded()
-        guard splitView.arrangedSubviews.count == 2 else {
-            return (0, 0, 0, .infinity, .infinity)
-        }
+        filesController.view.superview?.layoutSubtreeIfNeeded()
+        outlineController.view.superview?.layoutSubtreeIfNeeded()
         return (
-            splitView.arrangedSubviews[0].frame.height,
-            splitView.arrangedSubviews[1].frame.height,
+            filesController.view.superview?.frame.height ?? 0,
+            outlineController.view.superview?.frame.height ?? 0,
             filePlaceholder.frame.height,
             abs(filePlaceholder.frame.midY - fileScrollView.frame.midY),
             abs(outlinePlaceholder.frame.midY - symbolScrollView.frame.midY)
@@ -173,76 +135,11 @@ final class SidebarViewController: NSViewController,
         )
     }
 
-    func selfTestSetDefaultSidebarDivider() {
-        loadViewIfNeeded()
-        view.layoutSubtreeIfNeeded()
-        guard splitView.arrangedSubviews.count == 2,
-              splitView.bounds.height > 0
-        else { return }
-        splitView.setPosition(splitView.bounds.height * 0.65, ofDividerAt: 0)
-        view.layoutSubtreeIfNeeded()
-    }
-
-    func selfTestDividerSurvivesPlaceholderRefresh() -> Bool {
-        loadViewIfNeeded()
-        guard splitView.arrangedSubviews.count == 2 else { return false }
-        let originalPosition = splitView.arrangedSubviews[0].frame.height
-        splitView.setPosition(splitView.bounds.height * 0.55, ofDividerAt: 0)
-        updateFilePlaceholder(isIndexing: false)
-        updateOutlinePlaceholder()
-        splitView.layoutSubtreeIfNeeded()
-        let panes = splitView.arrangedSubviews
-        let availableHeight = panes[0].frame.height + panes[1].frame.height
-        let survived = availableHeight > 0
-            && abs(panes[0].frame.height / availableHeight - 0.55) <= 0.02
-        splitView.setPosition(originalPosition, ofDividerAt: 0)
-        return survived
-    }
-
-    func selfTestDividerPersistsAcrossRebuild() -> Bool {
-        let name = "\(splitAutosaveName).Persistence.\(UUID().uuidString)"
-        let defaults = UserDefaults.standard
-        func removeProbeDefaults() {
-            defaults.dictionaryRepresentation().keys
-                .filter { $0.contains(name) }
-                .forEach { defaults.removeObject(forKey: $0) }
-        }
-        removeProbeDefaults()
-        defer { removeProbeDefaults() }
-
-        func makeController() -> (SidebarViewController, NSWindow) {
-            let controller = SidebarViewController()
-            controller.setSplitAutosaveName(name)
-            controller.loadViewIfNeeded()
-            let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 300, height: 500),
-                                  styleMask: [.borderless], backing: .buffered, defer: false)
-            window.contentViewController = controller
-            window.setContentSize(NSSize(width: 300, height: 500))
-            window.orderFront(nil)
-            window.contentView?.layoutSubtreeIfNeeded()
-            window.displayIfNeeded()
-            return (controller, window)
-        }
-        let (writer, writerWindow) = makeController()
-        writer.splitView.setPosition(310, ofDividerAt: 0)
-        writerWindow.displayIfNeeded()
-        let (reader, readerWindow) = makeController()
-        defer { writerWindow.orderOut(nil); readerWindow.orderOut(nil) }
-
-        let restored = reader.splitView.arrangedSubviews.first?.frame.height ?? 0
-        let didStore = defaults.dictionaryRepresentation().keys.contains {
-            $0.contains(name)
-        }
-        return didStore && abs(restored - 310) <= 1
-    }
-
     override func loadView() {
         configure(fileOutlineView, column: "File")
         configure(symbolOutlineView, column: "Symbol")
         fileOutlineView.target = self
         fileOutlineView.doubleAction = #selector(openFileInNewTab(_:))
-        filesCollapsed = UserDefaults.standard.bool(forKey: "\(splitAutosaveName).filesCollapsed")
-        outlineCollapsed = UserDefaults.standard.bool(forKey: "\(splitAutosaveName).outlineCollapsed")
         symbolOutlineView.indentationPerLevel = 13
         symbolOutlineView.target = self
         symbolOutlineView.action = #selector(openOutlineRow(_:))
@@ -279,102 +176,23 @@ final class SidebarViewController: NSViewController,
         fileOutlineView.menu = fileMenu
 
         configurePlaceholders()
-        splitView.isVertical = false
-        splitView.dividerStyle = .thin
-        // Native autosave also records loading layouts; only persist the
-        // explicit divider fraction and section buttons below.
-        splitView.delegate = self
-        splitView.addArrangedSubview(pane(
+        (filesController.view, filesAccessories) = pane(
             title: localized("main.files"),
             outlineView: fileOutlineView,
             scrollView: fileScrollView,
             placeholder: filePlaceholder
-        ))
-        splitView.addArrangedSubview(pane(
+        )
+        (outlineController.view, outlineAccessories) = pane(
             title: localized("main.outline"),
             outlineView: symbolOutlineView,
             scrollView: symbolScrollView,
             placeholder: outlinePlaceholder
-        ))
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-
-        backgroundView.wantsLayer = true
-        backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
-        backgroundView.addSubview(splitView)
-        let bottom = splitView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor)
-        splitBottomConstraint = bottom
-        compactSplitHeight = splitView.heightAnchor.constraint(equalToConstant: 51)
-        NSLayoutConstraint.activate([
-            splitView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
-            splitView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
-            bottom,
-        ])
-        view = backgroundView
+        )
+        addChild(filesController)
+        addChild(outlineController)
+        view = NSView()
         updateFilePlaceholder(isIndexing: false)
         updateOutlinePlaceholder()
-        restoreSidebarDividerIfNeeded()
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        restoreSidebarDividerIfNeeded()
-    }
-
-    func splitViewDidResizeSubviews(_ notification: Notification) {
-        restoreSidebarDividerIfNeeded()
-    }
-
-    func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
-        let wasAdjusting = isAdjustingSections
-        isAdjustingSections = true
-        splitView.adjustSubviews()
-        isAdjustingSections = wasAdjusting
-        restoreSidebarDividerIfNeeded()
-    }
-
-    private func restoreSidebarDividerIfNeeded() {
-        guard !isAdjustingSections, paneSurfaces.count == 2 else { return }
-        isAdjustingSections = true
-        defer { isAdjustingSections = false }
-        if !setInitialDivider, !outlineSurfaceHidden,
-           splitView.bounds.height >= 120,
-           splitView.arrangedSubviews.allSatisfy({ $0.frame.height > 0 }) {
-            setInitialDivider = true
-            let defaults = UserDefaults.standard
-            if let fraction = defaults.object(forKey: "\(splitAutosaveName).fraction") as? Double,
-               fraction.isFinite, (0.05...0.95).contains(fraction) {
-                expandedDividerFraction = fraction
-            }
-        }
-        let compact = filesCollapsed && (outlineCollapsed || outlineSurfaceHidden)
-        compactSplitHeight?.constant = outlineSurfaceHidden ? 25 : 50 + splitView.dividerThickness
-        if compact {
-            splitBottomConstraint?.isActive = false
-            compactSplitHeight?.isActive = true
-        } else {
-            compactSplitHeight?.isActive = false
-            splitBottomConstraint?.isActive = true
-        }
-        for (index, surface) in paneSurfaces.enumerated() {
-            let collapsed = index == 0 ? filesCollapsed : outlineCollapsed
-            surface.body.isHidden = collapsed
-            surface.toggle.image = NSImage(systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
-                                           accessibilityDescription: nil)
-            let action = localizedFormat(collapsed ? "main.expand.section" : "main.collapse.section", surface.label.stringValue)
-            surface.toggle.toolTip = action
-            surface.toggle.setAccessibilityLabel(action)
-            surface.toggle.setAccessibilityValue(collapsed ? localized("main.collapsed") : localized("main.expanded"))
-        }
-        guard !outlineSurfaceHidden, setInitialDivider else { return }
-        let available = splitView.bounds.height - splitView.dividerThickness
-        let requestedPosition = filesCollapsed ? 25
-            : outlineCollapsed ? available - 25
-            : available * expandedDividerFraction
-        let position = self.splitView(splitView, constrainSplitPosition: requestedPosition, ofSubviewAt: 0)
-        if abs(paneSurfaces[0].pane.frame.height - position) > 0.5 {
-            splitView.setPosition(position, ofDividerAt: 0)
-        }
     }
 
     func display(_ tree: FileTreeModel?) {
@@ -510,7 +328,6 @@ final class SidebarViewController: NSViewController,
 
     func revealPath(_ url: URL) {
         loadViewIfNeeded()
-        if filesCollapsed { toggleSidebarSection(paneSurfaces[0].toggle) }
         if url.standardizedFileURL == tree?.root.standardizedFileURL {
             fileOutlineView.deselectAll(nil)
             fileOutlineView.scroll(.zero)
@@ -520,7 +337,7 @@ final class SidebarViewController: NSViewController,
                 fileOutlineView.expandItem(node)
             }
         }
-        view.window?.makeFirstResponder(fileOutlineView)
+        fileOutlineView.window?.makeFirstResponder(fileOutlineView)
     }
 
     var selectedFile: URL? {
@@ -749,31 +566,6 @@ final class SidebarViewController: NSViewController,
         return node.url
     }
 
-    func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
-        outlineSurfaceHidden
-    }
-
-    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
-        false
-    }
-
-    func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat,
-                   ofSubviewAt dividerIndex: Int) -> CGFloat {
-        let available = splitView.bounds.height - splitView.dividerThickness
-        if filesCollapsed { return 25 }
-        if outlineCollapsed { return max(25, available - 25) }
-        let minimum = min(100, available / 2)
-        let position = min(max(minimum, proposedPosition), available - minimum)
-        // Record intentional divider moves, not automatic frame changes during
-        // window resizing or a temporary non-source surface.
-        if setInitialDivider, !isAdjustingSections, !outlineSurfaceHidden, available >= 120 {
-            let fraction = min(0.95, max(0.05, position / available))
-            expandedDividerFraction = fraction
-            UserDefaults.standard.set(fraction, forKey: "\(splitAutosaveName).fraction")
-        }
-        return position
-    }
-
     private func configure(_ outlineView: NSOutlineView, column title: String) {
         let column = NSTableColumn(identifier: .init(title))
         column.resizingMask = .autoresizingMask
@@ -790,25 +582,14 @@ final class SidebarViewController: NSViewController,
         outlineView.setAccessibilityLabel(outlineView === fileOutlineView ? localized("main.files") : localized("main.outline"))
     }
 
+    /// The panel body (scroll view plus placeholder) and the buttons its
+    /// title bar carries.
     private func pane(
         title: String,
         outlineView: NSOutlineView,
         scrollView: NSScrollView,
         placeholder: NSView
-    ) -> NSView {
-        let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = theme.chromeSecondaryColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        let header = NSView()
-        header.wantsLayer = true
-        header.layer?.backgroundColor = theme.chromeColor.cgColor
-        header.translatesAutoresizingMaskIntoConstraints = false
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
-        divider.translatesAutoresizingMaskIntoConstraints = false
-
+    ) -> (NSView, [NSButton]) {
         scrollView.documentView = outlineView
         outlineView.rowSizeStyle = .custom
         outlineView.rowHeight = 22
@@ -821,92 +602,41 @@ final class SidebarViewController: NSViewController,
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         placeholder.translatesAutoresizingMaskIntoConstraints = false
 
-        let pane = NSView()
-        pane.wantsLayer = true
-        pane.layer?.backgroundColor = theme.chromeColor.cgColor
-        pane.addSubview(header)
-        header.addSubview(label)
-        let toggle = NSButton(title: "", target: self, action: #selector(toggleSidebarSection(_:)))
-        toggle.tag = outlineView === fileOutlineView ? 0 : 1
-        toggle.isBordered = false
-        toggle.controlSize = .small
-        toggle.contentTintColor = theme.chromeSecondaryColor
-        toggle.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(toggle)
         let collapse = NSButton(title: "", target: self, action: #selector(collapseSidebarTree(_:)))
         collapse.image = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: nil)
         collapse.tag = outlineView === fileOutlineView ? 0 : 1
         collapse.isBordered = false
         collapse.controlSize = .small
-        collapse.contentTintColor = theme.chromeSecondaryColor
         collapse.toolTip = localizedFormat("main.collapse.all", title.lowercased())
         collapse.setAccessibilityLabel(localizedFormat("main.collapse.all", title.lowercased()))
-        collapse.translatesAutoresizingMaskIntoConstraints = false
-        header.addSubview(collapse)
+        var accessories = [collapse]
         if outlineView === fileOutlineView {
             exclusionButton.isBordered = false
             exclusionButton.controlSize = .small
             exclusionButton.font = .systemFont(ofSize: 10.5)
             exclusionButton.image = NSImage(systemSymbolName: "eye.slash", accessibilityDescription: nil)
             exclusionButton.imagePosition = .imageLeading
-            exclusionButton.contentTintColor = theme.chromeSecondaryColor
             exclusionButton.target = self
             exclusionButton.action = #selector(showExcludedPaths(_:))
             exclusionButton.isHidden = true
-            exclusionButton.translatesAutoresizingMaskIntoConstraints = false
-            header.addSubview(exclusionButton)
-            NSLayoutConstraint.activate([
-                exclusionButton.trailingAnchor.constraint(equalTo: collapse.leadingAnchor, constant: -4),
-                exclusionButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-                exclusionButton.leadingAnchor.constraint(greaterThanOrEqualTo: label.trailingAnchor, constant: 6),
-            ])
+            accessories.insert(exclusionButton, at: 0)
         }
-        pane.addSubview(divider)
         let body = NSView()
-        body.translatesAutoresizingMaskIntoConstraints = false
-        pane.addSubview(body)
+        body.wantsLayer = true
+        body.layer?.backgroundColor = theme.chromeColor.cgColor
         body.addSubview(scrollView)
         body.addSubview(placeholder)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: pane.topAnchor),
-            header.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
-            header.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 24),
-            toggle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 4),
-            toggle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            toggle.widthAnchor.constraint(equalToConstant: 18),
-            toggle.heightAnchor.constraint(equalToConstant: 22),
-            label.leadingAnchor.constraint(equalTo: toggle.trailingAnchor, constant: 3),
-            label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            collapse.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
-            collapse.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            collapse.widthAnchor.constraint(equalToConstant: 22),
-            collapse.heightAnchor.constraint(equalToConstant: 22),
-            divider.topAnchor.constraint(equalTo: header.bottomAnchor),
-            divider.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            divider.heightAnchor.constraint(equalToConstant: 1),
-            body.topAnchor.constraint(equalTo: divider.bottomAnchor),
-            body.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
-            body.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            body.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
             scrollView.topAnchor.constraint(equalTo: body.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: body.bottomAnchor),
             placeholder.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             placeholder.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-            placeholder.leadingAnchor.constraint(
-                greaterThanOrEqualTo: pane.leadingAnchor,
-                constant: 8
-            ),
-            placeholder.trailingAnchor.constraint(
-                lessThanOrEqualTo: pane.trailingAnchor,
-                constant: -8
-            ),
+            placeholder.leadingAnchor.constraint(greaterThanOrEqualTo: body.leadingAnchor, constant: 8),
+            placeholder.trailingAnchor.constraint(lessThanOrEqualTo: body.trailingAnchor, constant: -8),
         ])
-        paneSurfaces.append((pane, header, label, divider, body, toggle))
-        return pane
+        return (body, accessories)
     }
 
     private func configurePlaceholders() {
@@ -964,30 +694,10 @@ final class SidebarViewController: NSViewController,
         onChooseProject?()
     }
 
-    @objc private func toggleSidebarSection(_ sender: NSButton) {
-        let defaults = UserDefaults.standard
-        let available = splitView.bounds.height - splitView.dividerThickness
-        if !filesCollapsed, !outlineCollapsed, !outlineSurfaceHidden, available >= 120 {
-            expandedDividerFraction = paneSurfaces[0].pane.frame.height / available
-            defaults.set(expandedDividerFraction,
-                         forKey: "\(splitAutosaveName).fraction")
-        }
-        if sender.tag == 0 {
-            filesCollapsed.toggle()
-            defaults.set(filesCollapsed, forKey: "\(splitAutosaveName).filesCollapsed")
-        } else {
-            outlineCollapsed.toggle()
-            defaults.set(outlineCollapsed, forKey: "\(splitAutosaveName).outlineCollapsed")
-        }
-        restoreSidebarDividerIfNeeded()
-        view.needsLayout = true
-        view.window?.makeFirstResponder(sender)
-    }
-
     @objc private func collapseSidebarTree(_ sender: NSButton) {
         let outline = sender.tag == 0 ? fileOutlineView : symbolOutlineView
         outline.collapseItem(nil, collapseChildren: true)
-        view.window?.makeFirstResponder(outline)
+        outline.window?.makeFirstResponder(outline)
     }
 
     private func outlineCell(for node: OutlineNode) -> NSView {
