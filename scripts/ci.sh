@@ -167,6 +167,7 @@ isolated=(
     'CodeInsightAppTests\.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
     'CodeInsightAppTests\.productPolishRestoresUserPanelWidthsAcrossWindowRebuild'
     'CodeInsightAppTests\.productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches'
+    'CodeInsightAppTests\.panelChangesAfterAClickDoNotRecordGeometry'
     'CodeInsightReaderUITests\.nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick'
     'CodeInsightReaderUITests\.nativeBlankClicksKeepTheReadingPositionAndFoldState'
     'readonlyFontProcessReplacementChangesRealFontWithoutChangingReaderSource'

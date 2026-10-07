@@ -1682,7 +1682,8 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
 }
 
 /// Layout passes after an ordinary click (a stale mouse-up as the current
-/// event) must not be recorded as a divider drag.
+/// event) must not be recorded as a divider drag. The dequeued event changes
+/// process-wide AppKit state, so ci.sh runs this test in its own process.
 @MainActor
 @Test
 func panelChangesAfterAClickDoNotRecordGeometry() async throws {
