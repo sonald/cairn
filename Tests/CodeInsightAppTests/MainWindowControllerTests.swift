@@ -1304,7 +1304,7 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     outer.setPosition(250, ofDividerAt: 0)
     outer.layoutSubtreeIfNeeded()
     outer.setPosition(outer.bounds.width - 700 - outer.dividerThickness, ofDividerAt: 1)
-    first.selfTestRecordDividerDrag()
+    first.dividerDragEnded()
     first.renderForSelfTest()
     let width = first.selfTestRelationsPaneWidth
     #expect(width > 628, "A wide window must permit the inspector's side-by-side mode")
@@ -1655,7 +1655,7 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     #expect(first.selfTestShownPanels[.left] == [.relations, .outline, .files])
     let split = first.selfTestZoneSplit(.left)
     split.setPosition((split.bounds.height - 2 * split.dividerThickness) * 0.5, ofDividerAt: 0)
-    first.selfTestRecordDividerDrag()
+    first.dividerDragEnded()
     first.renderForSelfTest()
     let heights = first.selfTestPanelHeights
     first.close()
@@ -1679,4 +1679,44 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     #expect(second.panelLayout == .standard)
     #expect(second.selfTestShownPanels[.left] == [.files, .outline])
     #expect(PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")) == .standard)
+}
+
+/// Layout passes after an ordinary click (a stale mouse-up as the current
+/// event) must not be recorded as a divider drag.
+@MainActor
+@Test
+func panelChangesAfterAClickDoNotRecordGeometry() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
+    let suite = "CairnPanelClickTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true,
+                                          layoutDefaults: defaults)
+    defer { controller.close() }
+    controller.window?.setContentSize(NSSize(width: 1600, height: 900))
+    controller.openProject(root: root)
+    try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.openFileForSelfTest(root.appendingPathComponent("main.rs"))
+    controller.renderForSelfTest()
+    let window = try #require(controller.window)
+    let click = try #require(NSEvent.mouseEvent(
+        with: .leftMouseUp, location: NSPoint(x: 600, y: 400), modifierFlags: [], timestamp: 0,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
+    ))
+    NSApp.postEvent(click, atStart: true)
+    let current = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: true)
+    try #require(current != nil && NSApp.currentEvent?.type == .leftMouseUp)
+    let before = controller.panelLayout
+    controller.toggleRelations()
+    controller.movePanel(.relations, to: .left)
+    controller.renderForSelfTest()
+    controller.movePanel(.relations, to: .right)
+    controller.renderForSelfTest()
+    #expect(controller.panelLayout.heights == before.heights)
+    #expect(controller.panelLayout.zoneWidths == before.zoneWidths)
 }

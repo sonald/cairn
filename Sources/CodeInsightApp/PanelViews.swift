@@ -189,12 +189,11 @@ final class PanelChromeView: NSView, NSDraggingSource {
 final class PanelZoneView: NSView, NSSplitViewDelegate {
     let zone: PanelZone
     weak var host: MainWindowController?
-    let split = NSSplitView()
+    let split = DividerTrackingSplitView()
     private let indicator = NSView()
     private let dropLabel = NSTextField(labelWithString: localized("panel.drop.here"))
     private var dropIndex = 0
     private var minimumWidthConstraint: NSLayoutConstraint?
-    private var isApplyingHeights = false
     private(set) var panels: [PanelChromeView] = []
 
     init(zone: PanelZone) {
@@ -204,6 +203,7 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
         split.isVertical = false
         split.dividerStyle = .thin
         split.delegate = self
+        split.onDividerDragEnded = { [weak self] in self?.host?.dividerDragEnded() }
         split.translatesAutoresizingMaskIntoConstraints = false
         addSubview(split)
         indicator.wantsLayer = true
@@ -273,8 +273,6 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
                 heights = zip(heights, slack).map { $0 - deficit * $1 / total }
             }
         }
-        isApplyingHeights = true
-        defer { isApplyingHeights = false }
         var position: CGFloat = 0
         for index in 0..<(panels.count - 1) {
             position += heights[index]
@@ -298,11 +296,6 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
     }
 
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
-
-    func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard !isApplyingHeights, isDividerDrag(in: window) else { return }
-        host?.zoneHeightsChanged(self)
-    }
 
     // MARK: Drop target
 
@@ -338,16 +331,20 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
     }
 }
 
-/// True while the user drags a split divider in `window`. Split views also
-/// report resizes (with a divider index) on every layout pass, so only the
-/// mouse tracking itself identifies a user's drag; window live resizes and
-/// panel drags are excluded.
+/// A split view that reports when the user finishes dragging a divider.
+/// NSSplitView tracks a divider drag synchronously inside `mouseDown`, and
+/// only divider clicks reach it (its panes take their own), so returning from
+/// `super` ends the drag. Layout passes, window resizes and `setPosition`
+/// never come through here; their resize notifications look the same as a
+/// drag's, which is why they cannot identify one.
 @MainActor
-func isDividerDrag(in window: NSWindow?) -> Bool {
-    guard let window, !window.inLiveResize, let event = NSApp.currentEvent,
-          event.window === window
-    else { return false }
-    return event.type == .leftMouseDragged || event.type == .leftMouseUp
+final class DividerTrackingSplitView: NSSplitView {
+    var onDividerDragEnded: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        onDividerDragEnded?()
+    }
 }
 
 /// The panel's name in its title bar and in View → Panels.

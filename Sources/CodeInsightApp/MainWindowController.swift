@@ -82,7 +82,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private(set) var panelLayout = PanelLayout.standard
     private static let panelLayoutKey = "Cairn.panelLayout.v2"
     private var isDraggingPanel = false
-    private var isApplyingGeometry = false
     private var needsPanelGeometry = true
     /// Context opened by the user while it has nothing to show stays open
     /// until content arrives; then the automatic rule takes over again.
@@ -274,6 +273,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             return item
         }
 
+        // Set before the controllers load their views: these report the end
+        // of a divider drag so the layout records only what the user dragged.
+        outerSplitController.splitView = DividerTrackingSplitView()
+        readerSplitController.splitView = DividerTrackingSplitView()
         outerSplitController.splitView.isVertical = true
         outerSplitController.splitView.dividerStyle = .thin
         readerSplitController.splitView.isVertical = true
@@ -1945,12 +1948,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         for zoneView in zoneViews.values { zoneView.host = self }
         for split in [outerSplitController.splitView, readerSplitController.splitView] {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowSplitDidResize(_:)),
-                name: NSSplitView.didResizeSubviewsNotification,
-                object: split
-            )
+            (split as? DividerTrackingSplitView)?.onDividerDragEnded = { [weak self] in
+                self?.dividerDragEnded()
+            }
         }
     }
 
@@ -2419,23 +2419,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelLayout()
     }
 
-    func zoneHeightsChanged(_ zoneView: PanelZoneView) {
+    /// Records zone widths, panel heights and the reader split ratio when
+    /// the user finishes dragging any divider (also the tests' stand-in for
+    /// that drag).
+    func dividerDragEnded() {
         guard !panelOverrideActive, !isDraggingPanel else { return }
-        panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
-        savePanelLayout()
-    }
-
-    /// Records zone widths and the reader split ratio while the user drags
-    /// a window divider; programmatic placement is excluded.
-    @objc private func windowSplitDidResize(_ notification: Notification) {
-        guard !isApplyingGeometry, !isDraggingPanel, !panelOverrideActive,
-              isDividerDrag(in: window)
-        else { return }
-        recordWindowSplitGeometry()
-        savePanelLayout()
-    }
-
-    private func recordWindowSplitGeometry() {
+        window?.contentView?.layoutSubtreeIfNeeded()
         let readerSplit = readerSplitController.splitView
         if !secondaryReaderItem.isCollapsed, readerSplit.bounds.width > readerSplit.dividerThickness,
            let primary = readerSplit.arrangedSubviews.first
@@ -2443,18 +2432,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             let fraction = primary.frame.width / (readerSplit.bounds.width - readerSplit.dividerThickness)
             if fraction > 0, fraction < 1 { panelLayout.readerSplitFraction = fraction }
         }
-        for zone in PanelZone.allCases
-        where !zoneItems[zone]!.isCollapsed && !zoneViews[zone]!.panels.isEmpty {
-            panelLayout.zoneWidths[zone] = zoneViews[zone]!.frame.width
-        }
-    }
-
-    /// Stands in for a finished divider drag (tests cannot post mouse
-    /// tracking events): records what the dividers currently show.
-    func selfTestRecordDividerDrag() {
-        window?.contentView?.layoutSubtreeIfNeeded()
-        recordWindowSplitGeometry()
-        for zoneView in zoneViews.values where !zoneView.panels.isEmpty {
+        for zone in PanelZone.allCases {
+            let zoneView = zoneViews[zone]!
+            guard !zoneItems[zone]!.isCollapsed, !zoneView.panels.isEmpty else { continue }
+            panelLayout.zoneWidths[zone] = zoneView.frame.width
             panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
         }
         savePanelLayout()
@@ -2512,8 +2493,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         needsPanelGeometry = false
         let frameBefore = window?.frame
-        isApplyingGeometry = true
-        defer { isApplyingGeometry = false }
         func width(_ zone: PanelZone) -> CGFloat {
             let panels = zoneViews[zone]!.panels
             guard !panels.isEmpty else { return 72 }
@@ -2538,8 +2517,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window?.contentView?.layoutSubtreeIfNeeded()
         let split = readerSplitController.splitView
         guard split.bounds.width > 0 else { return }
-        isApplyingGeometry = true
-        defer { isApplyingGeometry = false }
         split.setPosition(
             (split.bounds.width - split.dividerThickness) * panelLayout.readerSplitFraction,
             ofDividerAt: 0
