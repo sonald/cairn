@@ -89,12 +89,12 @@ func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: canonicalOptions,
+        language: .typeScript(initializationOptions: canonicalOptions),
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-typescript")
@@ -420,12 +420,12 @@ func typeScriptSessionUsesTSReactLanguageIDForDidOpen() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .typeScript(initializationOptions: [:]),
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-typescript")
@@ -462,12 +462,12 @@ func typeScriptSessionRejectsMissingDefinitionCapability() throws {
     )
 
     do {
-        _ = try TypeScriptLanguageServerSession.start(
+        _ = try LSPLanguageSession.start(
             client: client,
             restartClient: { throw ExactError.unavailable("fake restart unavailable") },
             projectURL: root,
             snapshot: snapshot,
-            initializationOptions: [:],
+            language: .typeScript(initializationOptions: [:]),
             requestTimeout: 5,
             closeGrace: 5,
             attribution: exactTestAttribution(provider: "fake-typescript")
@@ -502,12 +502,12 @@ func typeScriptSessionRejectsMissingReferencesCapability() throws {
     )
 
     do {
-        _ = try TypeScriptLanguageServerSession.start(
+        _ = try LSPLanguageSession.start(
             client: client,
             restartClient: { throw ExactError.unavailable("fake restart unavailable") },
             projectURL: root,
             snapshot: snapshot,
-            initializationOptions: [:],
+            language: .typeScript(initializationOptions: [:]),
             requestTimeout: 5,
             closeGrace: 5,
             attribution: exactTestAttribution(provider: "fake-typescript")
@@ -550,12 +550,12 @@ func typeScriptSessionRejectsDisallowedTypeScriptPathsBeforeAnyRequest() throws 
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .typeScript(initializationOptions: [:]),
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-typescript")
@@ -600,7 +600,7 @@ func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         writeHandle: firstClientToServer.fileHandleForWriting
     )
     let restartCounter = NSLockedCounter()
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: firstClient,
         restartClient: {
             restartCounter.increment()
@@ -620,7 +620,7 @@ func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .typeScript(initializationOptions: [:]),
         requestTimeout: 0.2,
         closeGrace: 0.05,
         attribution: exactTestAttribution(provider: "fake-typescript")
@@ -671,12 +671,12 @@ func typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .typeScript(initializationOptions: [:]),
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-typescript")
@@ -837,11 +837,12 @@ func pyrightSessionNegotiatesOnlySupportedCapabilitiesAndKeepsOfflineLimitation(
         configFingerprint: "config",
         environmentFingerprint: ""
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: ExactAttribution(
@@ -894,11 +895,12 @@ func pyrightDefinitionCompletesWithoutServerStatusNotification() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 2,
         closeGrace: 2,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -993,11 +995,12 @@ func pyrightReferencesAndCallHierarchyUseSharedParsers() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: ExactAttribution(
@@ -1089,11 +1092,12 @@ func pyrightIncomingAndOutgoingCallsShareParsers() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -1144,11 +1148,12 @@ func pyrightBatchCancelAllowsNewRequest() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -1453,7 +1458,7 @@ func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         writeHandle: firstClientToServer.fileHandleForWriting
     )
     let restartCounter = NSLockedCounter()
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: firstClient,
         restartClient: {
             restartCounter.increment()
@@ -1474,6 +1479,7 @@ func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 0.2,
         closeGrace: 0.05,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -2383,7 +2389,7 @@ func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
     )
     firstServer.start()
     let restartCounter = NSLockedCounter()
-    let session = try RustAnalyzerSession.start(
+    let session = try LSPLanguageSession.start(
         client: LSPClient(
             readHandle: firstServerToClient.fileHandleForReading,
             writeHandle: firstClientToServer.fileHandleForWriting
@@ -2398,10 +2404,12 @@ func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .rustAnalyzer(
+            initializationOptions: [:],
+            diagnosticObserver: nil
+        ),
         requestTimeout: 1,
         closeGrace: 0.05,
-        diagnosticObserver: nil,
         attribution: exactTestAttribution(provider: "fake-rust-analyzer")
     )
     defer {
@@ -2443,7 +2451,7 @@ func rustAnalyzerRestartFactoryFailureBecomesUnavailable() throws {
         done: { done.signal() }
     )
     server.start()
-    let session = try RustAnalyzerSession.start(
+    let session = try LSPLanguageSession.start(
         client: LSPClient(
             readHandle: serverToClient.fileHandleForReading,
             writeHandle: clientToServer.fileHandleForWriting
@@ -2453,10 +2461,12 @@ func rustAnalyzerRestartFactoryFailureBecomesUnavailable() throws {
         },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .rustAnalyzer(
+            initializationOptions: [:],
+            diagnosticObserver: nil
+        ),
         requestTimeout: 1,
         closeGrace: 0.05,
-        diagnosticObserver: nil,
         attribution: exactTestAttribution(provider: "fake-rust-analyzer")
     )
     defer {
@@ -2679,11 +2689,12 @@ func pyrightRequestsMarkdownHoverWhenNegotiated() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -2727,11 +2738,12 @@ func pyrightSkipsHoverWithoutProviderAndReportsEmptyHover() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -2772,7 +2784,7 @@ private func withFakePyrightSession<T>(
     snapshot: any Snapshot,
     hoverProvider: Any?,
     requestResponder: @escaping (String, Int) -> PipeFakeRequestResponse,
-    body: (PyrightSession) throws -> T
+    body: (LSPLanguageSession) throws -> T
 ) throws -> T {
     let clientToServer = Pipe()
     let serverToClient = Pipe()
@@ -2790,11 +2802,12 @@ private func withFakePyrightSession<T>(
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 5,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -2834,13 +2847,15 @@ func typeScriptLanguageServerRequestsMarkdownHoverWhenNegotiated() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
-            tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+        language: .typeScript(
+            initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
+                tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+            )
         ),
         requestTimeout: 5,
         closeGrace: 5,
@@ -2884,13 +2899,15 @@ func typeScriptLanguageServerSkipsHoverWithoutProvider() throws {
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try TypeScriptLanguageServerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
-            tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+        language: .typeScript(
+            initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
+                tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+            )
         ),
         requestTimeout: 5,
         closeGrace: 5,
@@ -3273,6 +3290,89 @@ func rustAnalyzerContentModifiedRetryDoesNotBlockOperationLock() throws {
 }
 
 @Test
+func rustAnalyzerNotReadyEmptyRetryDoesNotSpendContentModifiedBudget() throws {
+    let root = exactFixtureURL()
+    let snapshot = try DirectorySnapshot(
+        root: root,
+        files: ["src/lib.rs", "src/main.rs"]
+    )
+    let location: [String: Any] = [
+        "uri": root.appendingPathComponent("src/lib.rs").absoluteString,
+        "range": lspRange(line: 0, character: 7),
+    ]
+    let requests = NSLockedCounter()
+    var statusServer: PipeFakeLSPServer?
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            guard method == "textDocument/implementation" else {
+                return .useDefault
+            }
+            requests.increment()
+            switch requests.value {
+            case 1:
+                // Empty answer while the server stops being quiescent.
+                let server = statusServer
+                try? server?.sendServerStatus(quiescent: false)
+                Thread.detachNewThread {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    try? server?.sendServerStatus(quiescent: true)
+                }
+                return .result(NSNull())
+            case 4:
+                return .result([location])
+            default:
+                return .error(code: -32801, message: "content modified")
+            }
+        },
+        done: { done.signal() }
+    )
+    statusServer = server
+    server.start()
+    let session = try LSPLanguageSession.start(
+        client: LSPClient(
+            readHandle: serverToClient.fileHandleForReading,
+            writeHandle: clientToServer.fileHandleForWriting
+        ),
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        language: .rustAnalyzer(
+            initializationOptions: [:],
+            diagnosticObserver: nil
+        ),
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-rust-analyzer")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    // Not-ready empty (free), content modified twice (budget 2), then found.
+    let found = try #require(try session.implementations(
+        file: "src/lib.rs",
+        byteOffset: 7
+    ))
+    #expect(found.count == 1)
+    #expect(requests.value == 4)
+
+    // The third consecutive content-modified reply is not retried.
+    do {
+        _ = try session.implementations(file: "src/lib.rs", byteOffset: 7)
+        Issue.record("expected the third content-modified reply to surface")
+    } catch LSPError.requestFailed(let code, _) {
+        #expect(code == -32801)
+    }
+    #expect(requests.value == 7)
+}
+
+@Test
 func exactRequestBatchCapsProviderBoundaryConcurrency() {
     let expectedLimit = 4
     #expect(ExactRequestBatch.maximumConcurrentRequests == expectedLimit)
@@ -3393,11 +3493,12 @@ func pyrightExitReadinessIncludesBoundedDiagnosticTail() throws {
         executableURL: URL(fileURLWithPath: "/bin/sh"),
         arguments: ["-c", "printf '%s' '\(frame)'; sleep 0.2; printf '%s' '\(output)' >&2; exit 1"]
     )
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("unexpected restart") },
         projectURL: root,
         snapshot: DirectorySnapshot(root: root, files: []),
+        language: .pyright,
         requestTimeout: 2,
         closeGrace: 0.05,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -4113,11 +4214,12 @@ func pyrightSessionCloseForceKillsAndReapsUnresponsiveProcess() throws {
         arguments: []
     )
     let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
-    let session = try PyrightSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: { throw ExactError.unavailable("fake restart unavailable") },
         projectURL: root,
         snapshot: snapshot,
+        language: .pyright,
         requestTimeout: 5,
         closeGrace: 0.05,
         attribution: exactTestAttribution(provider: "fake-pyright")
@@ -5308,17 +5410,19 @@ private func withFakeRustAnalyzerSession<T>(
         readHandle: serverToClient.fileHandleForReading,
         writeHandle: clientToServer.fileHandleForWriting
     )
-    let session = try RustAnalyzerSession.start(
+    let session = try LSPLanguageSession.start(
         client: client,
         restartClient: {
             throw ExactError.unavailable("fake restart unavailable")
         },
         projectURL: root,
         snapshot: snapshot,
-        initializationOptions: [:],
+        language: .rustAnalyzer(
+            initializationOptions: [:],
+            diagnosticObserver: nil
+        ),
         requestTimeout: 5,
         closeGrace: 5,
-        diagnosticObserver: nil,
         attribution: ExactAttribution(
             provider: "fake-rust-analyzer",
             toolVersion: "fake",
