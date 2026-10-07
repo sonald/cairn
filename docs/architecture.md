@@ -66,6 +66,8 @@
 
 [SessionCodec](../Sources/CodeInsightAppModel/SessionCodec.swift) 负责保存的数据格式，[SessionCheckpointStore](../Sources/CodeInsightAppModel/SessionCheckpointStore.swift) 负责路径、原子写入、旧文件迁移、损坏隔离与覆盖保护。项目键使用稳定 SHA-256，不用跨进程不稳定的 Swift `Hasher`。新格式或暂不可读的会话应保留；损坏隔离与 I/O 失败不能都当“空会话”处理。
 
+面板布局：[PanelLayout](../Sources/CodeInsightAppModel/PanelLayout.swift) 是应用全局一份的纯值（UserDefaults `Cairn.panelLayout.v2`）：左右两区中面板的顺序、`hidden`、区域宽度、按面板的相对高度和分屏比例。每个面板恰好出现一次；解码丢弃未知面板、把缺失面板补回默认区末尾、逐字段回退坏数值，整体不是布局时用默认值。预设只改 `hidden`。[PanelViews](../Sources/CodeInsightApp/PanelViews.swift) 提供面板外壳（标题栏、`⋯` 菜单、拖动源）和区域视图（竖向 `NSSplitView`、放置目标）；`MainWindowController` 的外层 split 是左区 | 阅读组 | 右区，各面板控制器统一挂在窗口根控制器下。有效可见 = 布局可见 − 临时覆盖（无项目、非源码、阅读集、分屏放不下），上下文再按自动规则；覆盖由当前状态计算，不保存、恢复整份布局，覆盖期间不写回。只重建面板列表变化的区域，拖动开始只展开空区作落区。宽度和高度只在用户拖动分隔条时记录：`NSSplitView` 在普通布局时也会带 divider index 发出调整通知，所以按鼠标拖动事件判断。区域最小宽度是软约束（优先级 495，低于窗口保持尺寸），阅读区 320pt 是唯一硬最小值，窗口不因排版变大；右侧分隔条位置要减去自身厚度。
+
 [KeyBindings](../Sources/CodeInsightAppModel/KeyBindings.swift) 是快捷键定义与用户覆盖的唯一来源。AppKit 接线消费有效绑定，设置页修改同一份模型，命令面板从菜单读取当前绑定；不要在工具栏另写一份默认键。
 
 本地化资源归各 target 的 bundle。AppModel 的 `model.*` 文案由模型 bundle 读取；App 调用相应的 `modelText`/`modelTextFormat`，不能用自己的 `localized` 查另一个 bundle。身份、状态与样式取结构化字段，不从已翻译标签反推。资源数量和测试数量不作为架构合同。

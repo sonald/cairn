@@ -48,7 +48,7 @@ bash scripts/make-app.sh
 
 源码索引当前识别 `.rs`、`.py`、`.ts`、`.tsx`，JS/JSX、声明文件及其他变体扩展名不等于完整源码分析模式。非源码预览不提供关系、折叠、书签、比较和搜索控件。Exact 结果依赖 provider 能力与本地环境，“已验证”不代表掌握全部运行时行为。
 
-`⇧⌘F` 打开停靠搜索：`lock await same:fn`、`lock OR mutex`、`-path:tests/`、`in:code` 可组合文本、路径和语法区域。查询历史随项目恢复，`⌥⌘G` / `⇧⌥⌘G` 逐条浏览结果。详见[查询行为与当前验收限制](docs/product.md#搜索选项)。
+`⇧⌘F` 打开项目搜索面板：`lock await same:fn`、`lock OR mutex`、`-path:tests/`、`in:code` 可组合文本、路径和语法区域。查询历史随项目恢复，`⌥⌘G` / `⇧⌥⌘G` 逐条浏览结果。详见[查询行为与当前验收限制](docs/product.md#搜索选项)。
 
 ## CLI
 

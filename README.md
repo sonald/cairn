@@ -48,7 +48,7 @@ These are default shortcuts; Settings → Keybindings shows effective bindings. 
 
 Source indexing currently classifies `.rs`, `.py`, `.ts`, and `.tsx`; JavaScript/JSX and declaration-only or alternate extensions are not full source-analysis modes. Non-source previews do not offer relations, folding, bookmarks, comparison, or search controls. Exact results depend on provider capabilities and the local environment; “Verified” is not a claim of complete runtime knowledge.
 
-Use `⇧⌘F` for docked project search: `lock await same:fn`, `lock OR mutex`, `-path:tests/`, and `in:code` combine text, paths, and syntax regions. Query history restores with the project; `⌥⌘G` / `⇧⌥⌘G` browse results. See [query behavior and current validation limits](docs/product.md#搜索选项).
+Use `⇧⌘F` for the project search panel: `lock await same:fn`, `lock OR mutex`, `-path:tests/`, and `in:code` combine text, paths, and syntax regions. Query history restores with the project; `⌥⌘G` / `⇧⌥⌘G` browse results. See [query behavior and current validation limits](docs/product.md#搜索选项).
 
 ## CLI
 
