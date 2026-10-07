@@ -176,6 +176,10 @@ extension CommandID {
     public static let viewPresetCompare = CommandID(rawValue: "view.preset.compare")
     public static let viewPresetFocus = CommandID(rawValue: "view.preset.focus")
     public static let viewCloseComparison = CommandID(rawValue: "view.closeComparison")
+    public static let viewPanelFiles = CommandID(rawValue: "view.panel.files")
+    public static let viewPanelOutline = CommandID(rawValue: "view.panel.outline")
+    public static let viewPanelContext = CommandID(rawValue: "view.panel.context")
+    public static let viewRestoreDefaultLayout = CommandID(rawValue: "view.restoreDefaultLayout")
     public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
     public static let viewCloseSplit = CommandID(rawValue: "view.closeSplit")
     public static let viewToggleFold = CommandID(rawValue: "view.toggleFold")
@@ -384,6 +388,10 @@ public extension KeyBindingScheme {
             def(.viewCloseComparison, .view, "app.menu.close.comparison", [
                 keyboard([.control, .command], .character("w")),
             ]),
+            def(.viewPanelFiles, .view, "app.menu.show.hide.files", []),
+            def(.viewPanelOutline, .view, "app.menu.show.hide.outline", []),
+            def(.viewPanelContext, .view, "app.menu.show.hide.context", []),
+            def(.viewRestoreDefaultLayout, .view, "app.menu.restore.default.layout", []),
             def(.viewOpenToSide, .view, "app.menu.open.to.side", [
                 keyboard([.command], .character("\\")),
             ]),

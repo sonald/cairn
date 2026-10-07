@@ -1557,6 +1557,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.toggleRelations()
     }
 
+    /// View → Panels for the panels without a command of their own.
+    @objc private func togglePanel(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let id = PanelID(rawValue: raw),
+              let target = projectCommandTarget()
+        else { return }
+        if id == .context {
+            target.toggleContext(sender)
+        } else {
+            target.setPanelVisible(id, !target.isPanelShown(id))
+        }
+    }
+
+    @objc private func restoreDefaultLayout(_ sender: Any?) {
+        projectCommandTarget()?.restoreDefaultPanelLayout()
+    }
+
     @objc private func applyPanelPreset(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
               let preset = PanelPresetModel(rawValue: rawValue)
@@ -1713,8 +1730,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             menuItem.toolTip = help
             menuItem.setAccessibilityHelp(help)
             return target?.canToggleBookmark == true
+        case #selector(toggleRelations(_:)):
+            menuItem.state = target?.isPanelShown(.relations) == true ? .on : .off
+            return target != nil
+        case #selector(toggleProjectSearchResults(_:)):
+            menuItem.state = target?.isPanelShown(.search) == true ? .on : .off
+            return target != nil
+        case #selector(togglePanel(_:)):
+            let id = (menuItem.representedObject as? String).flatMap(PanelID.init(rawValue:))
+            menuItem.state = id.map { target?.isPanelShown($0) == true } == true ? .on : .off
+            return target != nil
         case #selector(showBookmarks(_:)), #selector(applyPanelPreset(_:)),
-            #selector(toggleRelations(_:)), #selector(previousContextCandidate(_:)),
+            #selector(restoreDefaultLayout(_:)), #selector(previousContextCandidate(_:)),
             #selector(nextContextCandidate(_:)):
             return target != nil
         case #selector(closeBookmarks(_:)):
@@ -1765,7 +1792,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         case #selector(quickOpen(_:)), #selector(openCommandPalette(_:)),
             #selector(goToLine(_:)), #selector(findInProject(_:)),
             #selector(nextProjectSearchResult(_:)), #selector(previousProjectSearchResult(_:)),
-            #selector(toggleProjectSearchResults(_:)),
             #selector(openSymbol(_:)):
             return target != nil
         default:
@@ -1899,6 +1925,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             representedObject: PanelPresetModel.focus.rawValue
         ),
         .viewCloseComparison: CommandAction(#selector(AppDelegate.closeComparison(_:))),
+        .viewPanelFiles: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.files.rawValue
+        ),
+        .viewPanelOutline: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.outline.rawValue
+        ),
+        .viewPanelContext: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.context.rawValue
+        ),
+        .viewRestoreDefaultLayout: CommandAction(#selector(AppDelegate.restoreDefaultLayout(_:))),
         .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
         .viewReadingHeightFull: CommandAction(#selector(AppDelegate.useFullReadingHeight(_:))),
         .viewReadingHeightStructure: CommandAction(
@@ -2107,7 +2143,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .findInProject, to: findMenu)
         appendMenuItem(for: .nextProjectSearchResult, to: findMenu)
         appendMenuItem(for: .previousProjectSearchResult, to: findMenu)
-        appendMenuItem(for: .toggleProjectSearchResults, to: findMenu)
         findMenu.addItem(.separator())
         appendMenuItem(for: .findToggleHighlight, to: findMenu)
         appendMenuItem(for: .findClearHighlights, to: findMenu)
@@ -2158,6 +2193,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
+        // Every panel, checked while it is on screen; Relations and Search
+        // Results keep their existing commands and shortcuts.
+        let panelsItem = NSMenuItem(title: localized("app.menu.panels"), action: nil, keyEquivalent: "")
+        let panelsMenu = NSMenu(title: localized("app.menu.panels"))
+        let panelCommands: [(PanelID, CommandID)] = [
+            (.files, .viewPanelFiles),
+            (.outline, .viewPanelOutline),
+            (.relations, .relationsToggle),
+            (.context, .viewPanelContext),
+            (.search, .toggleProjectSearchResults),
+        ]
+        for (panel, id) in panelCommands {
+            let before = panelsMenu.items.count
+            appendMenuItem(for: id, to: panelsMenu)
+            panelsMenu.items[before].title = panelTitle(panel)
+        }
+        panelsItem.submenu = panelsMenu
+        viewMenu.addItem(panelsItem)
+        appendMenuItem(for: .viewRestoreDefaultLayout, to: viewMenu)
+        viewMenu.addItem(.separator())
         appendMenuItem(for: .viewCloseComparison, to: viewMenu)
         appendMenuItem(for: .viewOpenToSide, to: viewMenu)
         appendMenuItem(for: .viewCloseSplit, to: viewMenu)
@@ -2193,8 +2248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
         let relationsItem = NSMenuItem()
         let relationsMenu = NSMenu(title: localized("app.menu.relations"))
-        appendMenuItem(for: .relationsToggle, to: relationsMenu)
-        relationsMenu.addItem(.separator())
         appendMenuItem(for: .relationsShowCallers, to: relationsMenu)
         appendMenuItem(for: .relationsShowCalls, to: relationsMenu)
         appendMenuItem(for: .relationsShowImplementations, to: relationsMenu)

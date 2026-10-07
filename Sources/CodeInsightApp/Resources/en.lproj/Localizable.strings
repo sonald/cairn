@@ -60,6 +60,11 @@
 "app.menu.show.callers" = "Show Callers";
 "app.menu.show.calls" = "Show Calls";
 "app.menu.show.hide.relations" = "Show/Hide Relations";
+"app.menu.panels" = "Panels";
+"app.menu.show.hide.files" = "Show/Hide Files";
+"app.menu.show.hide.outline" = "Show/Hide Outline";
+"app.menu.show.hide.context" = "Show/Hide Context";
+"app.menu.restore.default.layout" = "Restore Default Layout";
 "app.menu.show.implementations" = "Show Implementations";
 "app.menu.show.reading.trail" = "Show Reading Trail";
 "app.menu.show.resolution.inspector" = "Show Resolution Inspector";

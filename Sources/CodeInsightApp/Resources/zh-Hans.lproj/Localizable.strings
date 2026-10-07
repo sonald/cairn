@@ -60,6 +60,11 @@
 "app.menu.show.callers" = "显示调用方";
 "app.menu.show.calls" = "显示调用目标";
 "app.menu.show.hide.relations" = "显示或隐藏关系";
+"app.menu.panels" = "面板";
+"app.menu.show.hide.files" = "显示或隐藏文件";
+"app.menu.show.hide.outline" = "显示或隐藏大纲";
+"app.menu.show.hide.context" = "显示或隐藏上下文";
+"app.menu.restore.default.layout" = "恢复默认布局";
 "app.menu.show.implementations" = "显示实现";
 "app.menu.show.reading.trail" = "显示阅读轨迹";
 "app.menu.show.resolution.inspector" = "显示解析检查器";
