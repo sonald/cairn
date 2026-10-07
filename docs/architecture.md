@@ -82,6 +82,6 @@
 
 模型通过快照、profile、generation 拒绝旧请求；语法错误保留旧结果，快照变化时旧结果禁用导航。`same:fn` 使用完整函数声明范围；Python/TypeScript 的词法 body scope 不变，查询从 executable region 关联的声明取得函数头，TypeScript 无 facet 的嵌套函数区域也保留完整范围。结果名称仅带最近所属类型，不带整条模块链。`AppModel.projectSearch` 拥有查询与历史，会话 schema 5 保存最后查询及最近20条文本/开关状态；布局的可选 `bottomTab` 向后兼容。提示的学习状态在应用级保存，关闭提示只影响展示，不影响搜索语义。
 
-查询重建保存 `(path, contentID, byteRange)`，跨批次寻找原命中；匹配不到时保留空选择，不把列表自动移到首项。搜索导航要求已知内容身份。刷新前分别保存阅读区的选中位置与滚动锚点，不能把 `firstVisibleByteOffset` 当成选中位置重放；同内容刷新使用已有 tab restore 路径，新内容仍走锚点回退。刷新失败或后续其他导航会清理待恢复状态。
+查询重建保存 `(path, contentID, byteRange)`，跨批次寻找原命中；匹配不到时保留空选择，不把列表自动移到首项。搜索导航要求已知内容身份。刷新前分别保存阅读区的选中位置与滚动锚点，不能把 `firstVisibleByteOffset` 当成选中位置重放。新快照中同一文件、同一语言且 contentID 不变时，阅读区不重显示，只更新快照标识，视口、光标与已排版几何原样保留；回放落地后的 tab restore 若视口已在锚点行，不再按行重新对齐。回放开始只作废过期的导航任务（`AppModel` 私有 token），`navigationGeneration` 在回放落地时才递增，阅读区不会先按旧选择重新导航。新内容仍走锚点回退。刷新失败或后续其他导航会清理待恢复状态。
 
 性能结论（详见[搜索性能证据](evidence/search-performance-2026-10.md)，含环境、二进制 SHA 与局限）：tokio 与 Codex 两个 Rust 语料上，基础词、短语、正则与组合查询的引擎首批均低于 100ms，Codex 罕见词首批从 154ms 降到约 10ms；这是引擎/CLI 计时，UI 另有 150ms 输入防抖，不等于键入到显示的时间。区域索引使冷索引进程耗时增加约 5%、缓存体积增加约 1%。当前缓存 codec 格式为 4，Rust/Python/TypeScript extractorVersion 为 10/4/4。

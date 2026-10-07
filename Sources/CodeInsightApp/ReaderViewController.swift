@@ -2944,6 +2944,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 || snapshotID != displayedSnapshotID
                 || languageMode != displayedLanguageMode
         else { return }
+        // A new snapshot with the same bytes (index refresh, a version that
+        // did not touch this file) keeps the reader as it is: redisplaying
+        // resets the caret and the laid-out geometry, so the viewport could
+        // only come back line-aligned over estimated positions.
+        if let file, file == displayedFile, languageMode == displayedLanguageMode,
+           let contentID = displayedDocument?.contentID,
+           let bytes = try? source.map({ try $0(file) })
+               ?? Array(Data(contentsOf: file, options: .mappedIfSafe)),
+           ContentID.sha256(of: bytes) == contentID
+        {
+            displayedSnapshotID = snapshotID
+            return
+        }
         displayedReadingSetKey = nil
         readingSetView.isHidden = true
         setCodeViewHidden(false)
@@ -3006,7 +3019,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             readingHeightControl.isEnabled = true
             onDocumentChange?(file, loaded.document)
             label.isHidden = true
-            layoutTextViewFrame()
+            // NSTextView already tracks its clip. Forcing the frame to the clip
+            // left a same-content redisplay one screen tall whenever TextKit saw
+            // no content-size change, so the next restore clamped to the top.
+            view.layoutSubtreeIfNeeded()
             textView.display(document: loaded.document, fileURL: file)
             renderScopeHeader(at: textView.byteOffset(
                 forCharacterIndex: textView.view.selectedRange().location
@@ -3115,8 +3131,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                   loadGeneration == generation,
                   displayedLanguageMode == languageMode
             else { return }
+            // Already at that line (an index refresh that kept the document):
+            // keep the exact offset instead of re-aligning the line to the top.
+            let line = { (offset: UInt32?) in
+                offset.flatMap { self.displayedDocument?.lineTable.lineColumn(at: $0)?.line }
+            }
+            let keepsViewport = scrollByteOffset != nil
+                && line(scrollByteOffset) == line(textView.firstVisibleByteOffset())
             textView.restore(
-                scrollByteOffset: scrollByteOffset,
+                scrollByteOffset: keepsViewport ? nil : scrollByteOffset,
                 selectionByteOffset: selectionByteOffset
             )
         }
@@ -3164,16 +3187,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             column: coordinate.column,
             symbolAnchor: document.symbolAnchor(at: byteOffset)
         )
-    }
-
-    private func layoutTextViewFrame() {
-        view.layoutSubtreeIfNeeded()
-        if let scrollView {
-            textView.view.frame = NSRect(
-                origin: .zero,
-                size: scrollView.contentView.bounds.size
-            )
-        }
     }
 
     private func scheduleReadingPositionChange() {

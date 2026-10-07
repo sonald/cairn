@@ -1292,6 +1292,35 @@ func revealResetsHorizontalScrollAfterNavigation() async throws {
     withExtendedLifetime(window) {}
 }
 
+// Regression: TextKit counts a fragment that only touches the viewport's top
+// edge, so a line restored exactly to the top read as its predecessor and
+// restore(scrollByteOffset:) oscillated, landing one line short.
+@MainActor
+@Test
+func restoreLandsEachLineExactlyAtTheViewportTop() throws {
+    _ = NSApplication.shared
+    let source = "fn work() {\n" + String(repeating: "    // filler\n", count: 100) + "}\n"
+    let file = URL(fileURLWithPath: "/restore.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) }).load(file: file).document
+    let reader = ReaderTextView(settings: ReaderSettings())
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 400))
+    scroll.documentView = reader.view
+    reader.view.frame = scroll.contentView.bounds
+    let window = NSWindow(contentRect: scroll.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.contentView = scroll
+    reader.display(document: document, fileURL: file)
+    reader.configureGutter(in: scroll, lineNumbers: true)
+    window.layoutIfNeeded()
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    let missed = (2...60).filter { line in
+        let offset = document.lineTable.lineStarts[line - 1]
+        reader.restore(scrollByteOffset: offset, selectionByteOffset: nil)
+        return reader.firstVisibleByteOffset() != offset
+    }
+    #expect(missed.isEmpty, "Lines not restored to the top: \(missed)")
+    withExtendedLifetime(window) {}
+}
+
 @MainActor
 @Test
 func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {

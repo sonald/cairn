@@ -494,7 +494,14 @@ public final class AppModel {
     public private(set) var fileTree: FileTreeModel?
     public private(set) var selectedFile: URL?
     public private(set) var selectedByteOffset: UInt32?
-    public private(set) var navigationGeneration: UInt64 = 0
+    /// Bumps when a navigation lands; the reader follows it.
+    public private(set) var navigationGeneration: UInt64 = 0 {
+        didSet { navigationToken &+= 1 }
+    }
+    /// Staleness token for in-flight navigation work. A replay claims it
+    /// when it starts, but only bumps `navigationGeneration` once it lands,
+    /// so the reader never re-follows the old selection in between.
+    @ObservationIgnored private var navigationToken: UInt64 = 0
     public private(set) var activeNavigationRequest: NavigationRequest?
     public private(set) var replayNotice: String?
     /// Set when the latest session checkpoint write failed; the status bar
@@ -2085,7 +2092,7 @@ public final class AppModel {
         guard let root = projectRoot else { return }
         let expectedLanguages = projectLanguages
         let workspaceGeneration = generation
-        let navigationGenerationAtRequest = navigationGeneration
+        let navigationTokenAtRequest = navigationToken
         let source = documentSource
         semanticValidationTask?.cancel()
         semanticValidationTask = Task { [weak self] in
@@ -2109,7 +2116,7 @@ public final class AppModel {
                       root: root,
                       languages: expectedLanguages
                   ),
-                  self.navigationGeneration == navigationGenerationAtRequest
+                  self.navigationToken == navigationTokenAtRequest
             else { return }
             if verified {
                 self.commitNavigation(request, leaving: current)
@@ -2989,7 +2996,7 @@ public final class AppModel {
     // Pending commands use a private history copy so rapid Back/Forward
     // still accumulate while the visible cursor waits for successful loading.
     @ObservationIgnored private var pendingHistoryNavigation: (
-        generation: UInt64, navigationGeneration: UInt64,
+        generation: UInt64, navigationToken: UInt64,
         history: NavigationHistory
     )?
 
@@ -3007,7 +3014,7 @@ public final class AppModel {
         let history: NavigationHistory
         if let pending = pendingHistoryNavigation,
            pending.generation == generation,
-           pending.navigationGeneration == navigationGeneration {
+           pending.navigationToken == navigationToken {
             history = pending.history
         } else {
             history = NavigationHistory()
@@ -3022,7 +3029,7 @@ public final class AppModel {
         }
         guard let record else { return }
         let state = history.exportState()
-        pendingHistoryNavigation = (generation, navigationGeneration, history)
+        pendingHistoryNavigation = (generation, navigationToken, history)
         replay(record) { [weak self] in
             guard let self else { return }
             navigationHistory.restore(records: state.records, cursor: state.cursor,
@@ -3030,7 +3037,7 @@ public final class AppModel {
             pendingHistoryNavigation = nil
         }
         if pendingHistoryNavigation != nil {
-            pendingHistoryNavigation = (generation, navigationGeneration, history)
+            pendingHistoryNavigation = (generation, navigationToken, history)
         }
     }
 
@@ -3377,7 +3384,7 @@ public final class AppModel {
                 LanguageMode.classify(path: $0, languages: languages) != nil
             }.count
         )
-        navigationGeneration &+= 1
+        if pendingReplay == nil { navigationGeneration &+= 1 }
         staleIndexNotice = nil
         projectFailureReason = nil
         if let pending = pendingReplay {
@@ -3787,8 +3794,8 @@ public final class AppModel {
         let replayGeneration = generation
         let languages = projectLanguages
         let mode = languageMode(for: file)
-        navigationGeneration &+= 1
-        let replayNavigationGeneration = navigationGeneration
+        navigationToken &+= 1
+        let replayNavigationToken = navigationToken
         replayTask?.cancel()
         replayTask = Task { [weak self, indexService] in
             do {
@@ -3831,7 +3838,7 @@ public final class AppModel {
                 guard let self,
                       canPublishWorkspaceResult(generation: replayGeneration,
                                                 root: root, languages: languages),
-                      navigationGeneration == replayNavigationGeneration
+                      navigationToken == replayNavigationToken
                 else { return }
                 guard validatedWorkspaceSessions(completed, languages: languages,
                                                  snapshotID: snapshot.snapshotID) != nil
@@ -3870,7 +3877,7 @@ public final class AppModel {
                 guard let self, !Task.isCancelled,
                       canPublishWorkspaceResult(generation: replayGeneration,
                                                 root: root, languages: languages),
-                      navigationGeneration == replayNavigationGeneration
+                      navigationToken == replayNavigationToken
                 else { return }
                 pendingHistoryNavigation = nil
                 replayNotice = localized("model.app.destinationVersionUnavailable")
@@ -3895,8 +3902,8 @@ public final class AppModel {
         let languageMode = languageMode(for: file)
         let source = dependency ? nil : documentSource
         let replayGeneration = generation
-        navigationGeneration &+= 1
-        let replayNavigationGeneration = navigationGeneration
+        navigationToken &+= 1
+        let replayNavigationToken = navigationToken
         let replaySnapshotID = currentSnapshotID
         replayTask?.cancel()
         replayTask = Task { [weak self] in
@@ -3916,7 +3923,7 @@ public final class AppModel {
             } catch {
                 guard let self, !Task.isCancelled,
                       generation == replayGeneration,
-                      navigationGeneration == replayNavigationGeneration
+                      navigationToken == replayNavigationToken
                 else { return }
                 pendingHistoryNavigation = nil
                 replayNotice = localized("model.app.destinationUnavailable")
@@ -3928,7 +3935,7 @@ public final class AppModel {
                       root: root,
                       languages: projectLanguages
                   ),
-                  navigationGeneration == replayNavigationGeneration,
+                  navigationToken == replayNavigationToken,
                   currentSnapshotID == replaySnapshotID,
                   self.languageMode(for: file) == languageMode
             else { return }

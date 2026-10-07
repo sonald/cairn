@@ -1161,6 +1161,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestReadingByteOffset: UInt32? {
         readerController.currentReadingPosition()?.byteOffset
     }
+    func selfTestScrollReader(toByteOffset offset: UInt32) {
+        readerController.restoreReadingPosition(scrollByteOffset: offset, selectionByteOffset: nil)
+    }
     var selfTestReaderCaretByteOffset: UInt32? {
         readerController.selfTestReaderCaretByteOffset
     }

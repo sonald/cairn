@@ -3359,12 +3359,21 @@ public final class ReaderTextView {
               let content = layoutManager.textContentManager
         else { return nil }
         // Reading the current viewport must not trigger TextKit layout/extent changes.
-        guard let viewport = layoutManager.textViewportLayoutController.viewportRange else {
+        let controller = layoutManager.textViewportLayoutController
+        guard let viewport = controller.viewportRange else {
             return nil
+        }
+        // TextKit includes a fragment that only touches the viewport's top
+        // edge. Skip it, or a line restored exactly to the top reads as its
+        // predecessor and restore(scrollByteOffset:) never converges.
+        var firstLocation = viewport.location
+        layoutManager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
+            firstLocation = fragment.rangeInElement.location
+            return fragment.layoutFragmentFrame.maxY <= controller.viewportBounds.minY + 0.5
         }
         let location = content.offset(
             from: content.documentRange.location,
-            to: viewport.location
+            to: firstLocation
         )
         guard location != NSNotFound else { return nil }
         let lineStart = (backingTextStorage.mutableString).lineRange(

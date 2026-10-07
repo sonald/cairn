@@ -2333,10 +2333,16 @@ func projectSearchRefreshKeepsReaderSelectionSeparateFromViewport() async throws
     let prefix = "fn work() {\n" + String(repeating: "    // connection filler\n", count: 19)
     let source = prefix + "    needle();\n" + String(repeating: "    // tail filler\n", count: 80) + "}\n"
     try source.write(to: conn, atomically: true, encoding: .utf8)
+    // Same rendered size as conn.rs (monospaced line edited), different bytes.
+    let twin = root.appendingPathComponent("twin.rs")
+    try source.replacingOccurrences(of: "needle();", with: "noodle();").write(to: twin, atomically: true, encoding: .utf8)
     let selectedOffset = UInt32(prefix.utf8.count + 4)
     let model = AppModel(indexService: ProjectIndexService())
     let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
     defer { controller.close(); try? FileManager.default.removeItem(at: root) }
+    // Pinned size: the default follows the screen, and the geometry decides
+    // whether a same-content redisplay keeps its full document height.
+    controller.window?.setContentSize(NSSize(width: 1440, height: 900))
     try await model.openProject(root: root, language: .rust)
     try #require(await relationTestWaitUntil("query fixture ready") { model.snapshotPhase == .fullReady })
     controller.showProjectSearch()
@@ -2349,18 +2355,50 @@ func projectSearchRefreshKeepsReaderSelectionSeparateFromViewport() async throws
             && controller.displayedReaderFile?.standardizedFileURL == conn.standardizedFileURL
     })
     await pumpRunLoop()
-    let viewportOffset = try #require(controller.selfTestReadingByteOffset)
-    #expect(viewportOffset != selectedOffset, "Fixture must distinguish viewport from selected match")
-    let generation = model.navigationGeneration
-    controller.refreshIndex()
-    try #require(await relationTestWaitUntil("refresh and query complete") {
-        !model.isRefreshingIndex && model.navigationGeneration > generation && !model.projectSearch.isSearching
+    // Scroll the match off-screen: re-following the selection would move the viewport.
+    let tailLine = UInt32(prefix.utf8.count + "    needle();\n".utf8.count + 30 * "    // tail filler\n".utf8.count)
+    controller.selfTestScrollReader(toByteOffset: tailLine)
+    try #require(await relationTestWaitUntil("viewport below the selected match") {
+        controller.selfTestReadingByteOffset == tailLine
     })
+    // Mid-line, as a wheel leaves it: an unchanged file must not move at all.
+    func descendants(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(descendants) }
+    let content = try #require(controller.window?.contentView)
+    let reader = try #require(descendants(content)
+        .compactMap { $0 as? NSTextView }.first { !$0.isFieldEditor && $0.string == source })
+    let clip = try #require(reader.enclosingScrollView?.contentView)
+    clip.scroll(to: NSPoint(x: clip.bounds.minX, y: clip.bounds.minY + 7))
+    reader.enclosingScrollView?.reflectScrolledClipView(clip)
     await pumpRunLoop()
+    let viewportY = clip.bounds.minY
+    let viewportOffset = try #require(controller.selfTestReadingByteOffset)
+    #expect(viewportOffset > selectedOffset, "Fixture must keep the selected match above the viewport")
+    func refresh(_ label: String) async throws {
+        let generation = model.navigationGeneration
+        controller.refreshIndex()
+        try #require(await relationTestWaitUntil(label) {
+            !model.isRefreshingIndex && model.navigationGeneration > generation && !model.projectSearch.isSearching
+        })
+        await pumpRunLoop()
+    }
+    try await refresh("refresh and query complete")
     #expect(model.selectedFile?.standardizedFileURL == conn.standardizedFileURL)
     #expect(model.selectedByteOffset == selectedOffset)
     #expect(controller.selfTestReaderCaretByteOffset == selectedOffset)
     #expect(controller.selfTestReadingByteOffset == viewportOffset)
+    #expect(abs(clip.bounds.minY - viewportY) <= 0.5, "clip \(clip.bounds.minY) was \(viewportY)")
     #expect(model.projectSearch.openSelection()?.path == "conn.rs")
     #expect(model.projectSearch.openSelection()?.byteOffset == selectedOffset)
+
+    // A tab switch between two same-sized documents redisplays and restores;
+    // the restored document must still scroll past one screen.
+    controller.openFileInNewTabForSelfTest(twin)
+    try #require(await relationTestWaitUntil("twin tab shown") {
+        controller.displayedReaderFile?.standardizedFileURL == twin.standardizedFileURL
+    })
+    controller.selectPreviousTab()
+    try #require(await relationTestWaitUntil("conn.rs restored below one screen") {
+        controller.displayedReaderFile?.standardizedFileURL == conn.standardizedFileURL
+            && controller.selfTestReadingByteOffset == viewportOffset
+    })
 }
