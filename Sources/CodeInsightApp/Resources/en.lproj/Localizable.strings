@@ -229,6 +229,7 @@
 "main.results.truncated" = "Results truncated";
 "main.retry.save" = "Retry Save";
 "main.reveal.in.finder" = "Reveal in Finder";
+"main.open.in.dash" = "Open in Dash";
 "main.safe" = "Safe";
 "main.scope.description" = "Current scope: %@, %@ line %lld";
 "main.search.failed" = "Search failed";

@@ -229,6 +229,7 @@
 "main.results.truncated" = "结果已截断";
 "main.retry.save" = "重试保存";
 "main.reveal.in.finder" = "在访达中显示";
+"main.open.in.dash" = "在 Dash 中查看";
 "main.safe" = "安全模式";
 "main.scope.description" = "当前作用域：%@，%@ 第 %lld 行";
 "main.search.failed" = "搜索失败";

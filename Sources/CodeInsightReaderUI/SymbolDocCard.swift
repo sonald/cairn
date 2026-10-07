@@ -82,6 +82,7 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
     private let footer = NSTextField(wrappingLabelWithString: "")
     private var theme: ReaderTheme?
     private var notes: [String] = []
+    private var externalLink: (title: String, url: URL)?
     private weak var parent: NSWindow?
 
     override public init() {
@@ -159,12 +160,15 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         notes: [String],
         anchor: NSRect,
         in parent: NSWindow,
-        theme: ReaderTheme
+        theme: ReaderTheme,
+        externalLink: (title: String, url: URL)? = nil
     ) {
         let unchangedContent = shownDoc == doc && self.notes == notes && self.theme == theme
+            && externalLink?.url == self.externalLink?.url
         shownDoc = doc
         self.notes = notes
         self.theme = theme
+        self.externalLink = externalLink
         panel.appearance = parent.effectiveAppearance
         if !unchangedContent { applyContent() }
         let size = layoutSize()
@@ -220,12 +224,16 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
             root?.layer?.borderColor = theme.chromeDividerColor.withAlphaComponent(0.8).cgColor
             footerDivider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
         }
-        textView.textStorage?.setAttributedString(Self.content(for: doc, theme: theme))
+        textView.textStorage?.setAttributedString(Self.content(for: doc, theme: theme, externalLink: externalLink))
         textView.selectedTextAttributes = [.backgroundColor: theme.chromeSelectionColor]
         applyFooter(notes)
     }
 
-    static func content(for doc: SymbolDoc, theme: ReaderTheme) -> NSAttributedString {
+    static func content(
+        for doc: SymbolDoc,
+        theme: ReaderTheme,
+        externalLink: (title: String, url: URL)? = nil
+    ) -> NSAttributedString {
         let output = NSMutableAttributedString()
         let pad = paddingBlock(top: 9, bottom: 0)
         if let location = doc.location {
@@ -271,6 +279,18 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
             )
             let emphasis = ReaderFontResolver.shared.resolve(theme: theme, size: 12.5, weight: .semibold).font
             CodeTextPreviewStyler.apply(spans, to: output, offset: start, theme: theme, emphasisFont: emphasis)
+        }
+        // Above the body, so a long doc never scrolls it away and the footer's
+        // link preview never covers it.
+        if let externalLink {
+            let style = NSMutableParagraphStyle()
+            style.textBlocks = [paddingBlock(top: 8, bottom: 0)]
+            output.append(NSAttributedString(string: "↗ " + externalLink.title + "\n", attributes: [
+                .font: NSFont.systemFont(ofSize: 11),
+                .foregroundColor: theme.accentColor,
+                .link: externalLink.url,
+                .paragraphStyle: style,
+            ]))
         }
         let body: NSAttributedString?
         if !doc.markdown.isEmpty {

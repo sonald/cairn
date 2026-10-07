@@ -561,6 +561,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
             reader.onHoverDismiss = { [weak self] in self?.model.symbolHover.dismiss() }
             reader.onHoverEscape = { [weak self] in self?.escapeSymbolDocumentation() ?? false }
+            reader.onOpenInDash = { [weak self] identifier, offset, document in
+                guard let self else { return }
+                DashIntegration.open(query: dashQuery(identifier: identifier, in: document, byteOffset: offset))
+            }
         }
         symbolDocCard.onPointerEntered = { [weak self] in
             self?.model.symbolHover.pointerEnteredCard()
@@ -4035,8 +4039,31 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             notes: doc.notes.map(symbolDocNoteText),
             anchor: anchor,
             in: window,
-            theme: ReaderTheme(settings: currentReaderSettings)
+            theme: ReaderTheme(settings: currentReaderSettings),
+            externalLink: dashLink(for: token, doc: doc)
         )
+    }
+
+    /// The card's "Open in Dash" link; nil without Dash or an identifier.
+    private func dashLink(for token: SymbolHoverModel.Token, doc: SymbolDoc) -> (title: String, url: URL)? {
+        guard DashIntegration.isInstalled, let document = token.document,
+              let identifier = String(bytes: document.bytes[Int(token.lowerBound)..<Int(token.upperBound)], encoding: .utf8),
+              let url = DashIntegration.url(query: DashIntegration.query(
+                  identifier: identifier, doc: doc, language: document.languageMode.language))
+        else { return nil }
+        return (localized("main.open.in.dash"), url)
+    }
+
+    /// Context-menu query: the hover card's exact result is reused when it is
+    /// showing the clicked identifier, otherwise the identifier alone is sent.
+    private func dashQuery(identifier: String, in document: ReaderDocument, byteOffset: UInt32) -> String {
+        var doc: SymbolDoc?
+        if case let .showing(token, shown) = model.symbolHover.phase,
+           token.contentID == document.contentID,
+           token.lowerBound <= byteOffset, byteOffset < token.upperBound {
+            doc = shown
+        }
+        return DashIntegration.query(identifier: identifier, doc: doc, language: document.languageMode.language)
     }
 
     /// Languages with a hover docs layer (hover docs plans Q16, P1);
@@ -4106,7 +4133,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             renderStatusBar()
             return
         }
-        guard url.scheme == "http" || url.scheme == "https" else { return }
+        guard url.scheme == "http" || url.scheme == "https" || url.scheme == "dash-plugin" else { return }
         model.symbolHover.dismiss()
         NSWorkspace.shared.open(url)
     }

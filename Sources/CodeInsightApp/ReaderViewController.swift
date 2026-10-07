@@ -313,6 +313,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onSelectionChange: ((UInt32) -> Void)?
     var onOpenScope: ((UInt32) -> Void)?
     var onRevealPath: ((URL) -> Void)?
+    /// Context menu "Open in Dash": the identifier under the click, its byte offset and document.
+    var onOpenInDash: ((String, UInt32, ReaderDocument) -> Void)?
     var projectRoot: URL?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onOpenPreviewLink: ((URL) -> Void)?
@@ -782,6 +784,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             action: #selector(revealInFinder(_:)),
             keyEquivalent: ""
         ))
+        relationMenu.addItem(.separator())
+        relationMenu.addItem(NSMenuItem(
+            title: localized("main.open.in.dash"),
+            action: #selector(openInDash(_:)),
+            keyEquivalent: ""
+        ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
         textView.onContextMenu = { [weak self] characterIndex in
@@ -797,7 +805,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 }
             }
             for item in textView.view.menu?.items ?? [] where !item.isSeparatorItem {
-                item.isEnabled = if item.action == #selector(toggleHighlightFromMenu(_:)) || item.submenu != nil {
+                if item.action == #selector(openInDash(_:)) {
+                    item.isHidden = !DashIntegration.isInstalled
+                }
+                item.isEnabled = if item.action == #selector(toggleHighlightFromMenu(_:)) || item.submenu != nil
+                    || item.action == #selector(openInDash(_:)) {
                     highlightName != nil
                 } else if item.action == #selector(revealInFinder(_:)) {
                     location.map {
@@ -3222,6 +3234,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     @objc private func copyPathLine(_ sender: Any?) {
         guard let location = contextMenuLocation() else { return }
         onCopyPathLine?(location.file, location.line)
+    }
+
+    @objc private func openInDash(_ sender: Any?) {
+        guard let offset = contextMenuOffset, let document = displayedDocument,
+              let identifier = textView.identifier(atByteOffset: offset)
+        else { return }
+        onOpenInDash?(identifier, offset, document)
     }
 
     @objc private func revealInFinder(_ sender: Any?) {
