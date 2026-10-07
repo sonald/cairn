@@ -91,7 +91,7 @@ CODEINSIGHT_INDEX_CACHE_ROOT="$query_cache" /usr/bin/time -l \
 # 原命令再执行一次，reusedContents 应覆盖全部 uniqueContents，extractedContents 为 0。
 ```
 
-JSON 的 `elapsedMilliseconds` 是内部索引时间；进程 wall time 另包含持久化写入完成和进程开销。`/usr/bin/time -l` 的 maximum resident set size 在 macOS 上以字节计。退出后统计缓存目录所有文件的字节数，包含仍存在的 WAL。当前测量及限制见[搜索性能基线](architecture.md#项目搜索性能基线)。
+JSON 的 `elapsedMilliseconds` 是内部索引时间；进程 wall time 另包含持久化写入完成和进程开销。`/usr/bin/time -l` 的 maximum resident set size 在 macOS 上以字节计。退出后统计缓存目录所有文件的字节数，包含仍存在的 WAL。当前测量及限制见[搜索性能证据](evidence/search-performance-2026-10.md)。
 
 Reader 真实工作量样本可选择相关 suite（`identifiers`、`gutter`、`projection`、`reflow`、`lifetime`）：
 

@@ -4,6 +4,7 @@
 
 | 证据 | 保留原因、来源与边界 |
 | --- | --- |
+| [search-performance-2026-10.md](search-performance-2026-10.md) | 2026-10-05—06 项目搜索 P0/P0.5、区域索引与组合查询、反馈修复和刷新一致性的测量与验证记录（tokio、Codex 两个 Rust 语料，M3 Pro）。含二进制 SHA 与局限；原始输出已随工作树清理，按[开发说明](../development.md#性能复现)可重新测量。 |
 | [readonly-performance.json](readonly-performance.json)、[原始记录](readonly-performance-raw.tar.gz) | 最终 r5（候选 `a99f10b2ec09c27c2610f3a651a638c070075470`，基线 `4fdabe38eb364f9e9d7aa6507aa445fb636ad485`）。178 个配对/356 个登记进程，Rust/长行各 29 对，其他四种输入各 30 对；完整原始包另保留未纳入统计的样本和供电记录。保留 12 项相关冷 p95 警戒、高成本精确重排 NOT_RUN 和基线 Python 锚点失败，不声称完整发布验收。用户已要求停止扩大采样。 |
 | [font-registration.json](font-registration.json) | 字体同名重新注册/跨进程通知的来源身份、实际字体及字形宽度证据；支持 `fixtures/readonly/fonts` 的可复现说明。 |
 | [font-shaping.json](font-shaping.json) | 2026-09-22—23 本机 Fira Code/JetBrains Mono 的 Core Text 成形探针。连字开关不能只以 glyph 数量减少判断；字体版本和环境仅代表当时输入。 |
