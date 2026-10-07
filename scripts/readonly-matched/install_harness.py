@@ -52,7 +52,9 @@ else:
     assert args.expected_sha and head == args.expected_sha, 'Require exact expected source SHA'
     assert not git('status', '--porcelain', '--untracked-files=all'), 'Install only in an entirely clean isolated worktree'
     assert not args.receipt.exists(), 'Receipt exists; preserve it and use a new path'
-    paths = ['Sources/CodeInsightApp/ReadonlyWorkloadSelfTest.swift', 'Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift']
+    # Self-tests moved into SelfTest/; keep older baselines installable.
+    workload = next(p for p in ['Sources/CodeInsightApp/SelfTest/ReadonlyWorkloadSelfTest.swift', 'Sources/CodeInsightApp/ReadonlyWorkloadSelfTest.swift'] if (root / p).exists())
+    paths = [workload, 'Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift']
     originals = {path: (root / path).read_bytes() for path in paths}
     app = originals[paths[0]].decode()
     if 'import CoreText\n' not in app: app = app.replace('import AppKit\n', 'import AppKit\nimport CoreText\n', 1)

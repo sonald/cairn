@@ -62,6 +62,22 @@ else
     fi
 fi
 
+# Self-test entry points live in Sources/CodeInsightApp/SelfTest/, not beside AppDelegate.
+if self_test_hits=$(rg -n 'func run[A-Za-z]*SelfTest' \
+    Sources/CodeInsightApp/CodeInsightApp.swift 2>&1); then
+    echo "$self_test_hits"
+    echo "FAIL: CodeInsightApp.swift 不得定义 run*SelfTest，自测放在 SelfTest/" >&2
+    exit 1
+else
+    self_test_rc=$?
+    if [[ $self_test_rc -eq 1 ]]; then
+        echo "PASS: CodeInsightApp.swift 不含 run*SelfTest"
+    else
+        echo "FAIL: rg 基础设施错误 rc=$self_test_rc" >&2
+        exit 1
+    fi
+fi
+
 # K0a: key equivalents come from the key binding table (KeyBindings.swift).
 # Outside the AppKit adapter, no literal key equivalent or direct
 # keyEquivalentModifierMask write may appear; chords are applied through the
