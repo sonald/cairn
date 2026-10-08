@@ -22,7 +22,8 @@ final class PanelChromeView: NSView, NSDraggingSource {
     private var pendingDrag: NSEvent?
     static let headerHeight: CGFloat = 26
 
-    /// Minimum height inside a zone, enforced at the zone's dividers.
+    /// Minimum height: along the dividers of a side zone, and the least a
+    /// bottom zone keeps for it (soft).
     var minimumHeight: CGFloat {
         switch id {
         case .context: 120
@@ -31,8 +32,12 @@ final class PanelChromeView: NSView, NSDraggingSource {
         }
     }
 
-    /// The zone keeps at least the widest minimum of its panels (soft).
+    /// Minimum width: the least a side zone keeps for it (soft), and along
+    /// the dividers of the bottom zone.
     var minimumWidth: CGFloat { [.relations, .search, .docs].contains(id) ? 300 : 180 }
+
+    /// Minimum size along `zone`'s stacking axis.
+    func minimumLength(in zone: PanelZone) -> CGFloat { zone == .bottom ? minimumWidth : minimumHeight }
 
     init(id: PanelID, title: String, content: NSView, accessories: [NSButton] = []) {
         self.id = id
@@ -114,11 +119,15 @@ final class PanelChromeView: NSView, NSDraggingSource {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let zone = host.panelLayout.zone(of: id).zone
+        let bottom = zone == .bottom
         for (title, action, enabled) in [
             (localized("panel.move.left"), #selector(panelMoveLeft(_:)), zone != .left),
             (localized("panel.move.right"), #selector(panelMoveRight(_:)), zone != .right),
-            (localized("panel.move.up"), #selector(panelMoveUp(_:)), host.canShiftPanel(id, by: -1)),
-            (localized("panel.move.down"), #selector(panelMoveDown(_:)), host.canShiftPanel(id, by: 1)),
+            (localized("panel.move.bottom"), #selector(panelMoveBottom(_:)), !bottom),
+            (localized(bottom ? "panel.move.leftward" : "panel.move.up"), #selector(panelMoveUp(_:)),
+             host.canShiftPanel(id, by: -1)),
+            (localized(bottom ? "panel.move.rightward" : "panel.move.down"), #selector(panelMoveDown(_:)),
+             host.canShiftPanel(id, by: 1)),
         ] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
@@ -134,6 +143,7 @@ final class PanelChromeView: NSView, NSDraggingSource {
 
     @objc private func panelMoveLeft(_ sender: Any?) { host?.movePanel(id, to: .left) }
     @objc private func panelMoveRight(_ sender: Any?) { host?.movePanel(id, to: .right) }
+    @objc private func panelMoveBottom(_ sender: Any?) { host?.movePanel(id, to: .bottom) }
     @objc private func panelMoveUp(_ sender: Any?) { host?.shiftPanel(id, by: -1) }
     @objc private func panelMoveDown(_ sender: Any?) { host?.shiftPanel(id, by: 1) }
     @objc private func closePanel(_ sender: Any?) { host?.setPanelVisible(id, false) }
@@ -182,9 +192,10 @@ final class PanelChromeView: NSView, NSDraggingSource {
     }
 }
 
-/// One side zone: panels stacked in a vertical split view, and the drop
-/// target for panel drags. Drop positions are computed in the split view's
-/// own (flipped) coordinates: the upper half of a panel drops before it.
+/// One zone: panels stacked in a split view (top to bottom in a side zone,
+/// left to right in the bottom zone), and the drop target for panel drags.
+/// Drop positions are computed in the split view's own (flipped)
+/// coordinates: the upper (or left) half of a panel drops before it.
 @MainActor
 final class PanelZoneView: NSView, NSSplitViewDelegate {
     let zone: PanelZone
@@ -193,14 +204,16 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
     private let indicator = NSView()
     private let dropLabel = NSTextField(labelWithString: localized("panel.drop.here"))
     private var dropIndex = 0
-    private var minimumWidthConstraint: NSLayoutConstraint?
+    private var minimumSizeConstraint: NSLayoutConstraint?
     private(set) var panels: [PanelChromeView] = []
+    /// Panels sit side by side in the bottom zone.
+    private var sideBySide: Bool { zone == .bottom }
 
     init(zone: PanelZone) {
         self.zone = zone
         super.init(frame: .zero)
         wantsLayer = true
-        split.isVertical = false
+        split.isVertical = zone == .bottom
         split.dividerStyle = .thin
         split.delegate = self
         split.onDividerDragEnded = { [weak self] in self?.host?.dividerDragEnded() }
@@ -214,10 +227,10 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
         dropLabel.isHidden = true
         dropLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(dropLabel)
-        // Soft: a narrow window squeezes the zone rather than growing.
-        let minimum = widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        // Soft: a small window squeezes the zone rather than growing.
+        let minimum = (sideBySide ? heightAnchor : widthAnchor).constraint(greaterThanOrEqualToConstant: 0)
         minimum.priority = .init(rawValue: 495)
-        minimumWidthConstraint = minimum
+        minimumSizeConstraint = minimum
         NSLayoutConstraint.activate([
             split.topAnchor.constraint(equalTo: topAnchor),
             split.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -249,21 +262,24 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
         next.forEach(split.addArrangedSubview)
         for index in next.indices { split.setHoldingPriority(.init(rawValue: 250), forSubviewAt: index) }
         dropLabel.isHidden = !next.isEmpty
-        minimumWidthConstraint?.constant = next.map(\.minimumWidth).max() ?? 0
+        minimumSizeConstraint?.constant = next.map { sideBySide ? $0.minimumHeight : $0.minimumWidth }.max() ?? 0
         split.adjustSubviews()
     }
 
-    var measuredHeights: [Double] { panels.map { Double($0.frame.height) } }
+    /// Panel sizes along the stacking axis.
+    var measuredHeights: [Double] { panels.map { Double(sideBySide ? $0.frame.width : $0.frame.height) } }
 
-    /// Sets panel heights from shares summing to 1, raising panels below
-    /// their minimum when the zone is tall enough for all minimums.
+    /// Sets panel sizes along the stacking axis from shares summing to 1,
+    /// raising panels below their minimum when the zone has room for all
+    /// minimums.
     func applyHeights(_ fractions: [Double]) {
         guard panels.count > 1, fractions.count == panels.count else { return }
         layoutSubtreeIfNeeded()
-        let available = split.bounds.height - split.dividerThickness * CGFloat(panels.count - 1)
+        let length = sideBySide ? split.bounds.width : split.bounds.height
+        let available = length - split.dividerThickness * CGFloat(panels.count - 1)
         guard available > 0 else { return }
         var heights = fractions.map { CGFloat($0) * available }
-        let minimums = panels.map(\.minimumHeight)
+        let minimums = panels.map { $0.minimumLength(in: zone) }
         if minimums.reduce(0, +) <= available {
             let deficit = zip(heights, minimums).map { max(0, $1 - $0) }.reduce(0, +)
             heights = zip(heights, minimums).map { max($0, $1) }
@@ -286,13 +302,15 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         guard panels.indices.contains(dividerIndex) else { return proposedMinimumPosition }
         let panel = panels[dividerIndex]
-        return max(proposedMinimumPosition, panel.frame.minY + panel.minimumHeight)
+        let start = sideBySide ? panel.frame.minX : panel.frame.minY
+        return max(proposedMinimumPosition, start + panel.minimumLength(in: zone))
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         guard panels.indices.contains(dividerIndex + 1) else { return proposedMaximumPosition }
         let panel = panels[dividerIndex + 1]
-        return min(proposedMaximumPosition, panel.frame.maxY - panel.minimumHeight - splitView.dividerThickness)
+        let end = sideBySide ? panel.frame.maxX : panel.frame.maxY
+        return min(proposedMaximumPosition, end - panel.minimumLength(in: zone) - splitView.dividerThickness)
     }
 
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool { false }
@@ -309,9 +327,17 @@ final class PanelZoneView: NSView, NSSplitViewDelegate {
         guard dragIsOurs(sender) else { return [] }
         let point = split.convert(sender.draggingLocation, from: nil)
         let views = split.arrangedSubviews
-        dropIndex = views.firstIndex { point.y < $0.frame.midY } ?? views.count
-        let y = dropIndex < views.count ? views[dropIndex].frame.minY : (views.last?.frame.maxY ?? split.bounds.midY)
-        indicator.frame = split.convert(NSRect(x: 4, y: y - 1, width: max(split.bounds.width - 8, 0), height: 2), to: self)
+        let line: NSRect
+        if sideBySide {
+            dropIndex = views.firstIndex { point.x < $0.frame.midX } ?? views.count
+            let x = dropIndex < views.count ? views[dropIndex].frame.minX : (views.last?.frame.maxX ?? split.bounds.midX)
+            line = NSRect(x: x - 1, y: 4, width: 2, height: max(split.bounds.height - 8, 0))
+        } else {
+            dropIndex = views.firstIndex { point.y < $0.frame.midY } ?? views.count
+            let y = dropIndex < views.count ? views[dropIndex].frame.minY : (views.last?.frame.maxY ?? split.bounds.midY)
+            line = NSRect(x: 4, y: y - 1, width: max(split.bounds.width - 8, 0), height: 2)
+        }
+        indicator.frame = split.convert(line, to: self)
         indicator.isHidden = false
         return .move
     }

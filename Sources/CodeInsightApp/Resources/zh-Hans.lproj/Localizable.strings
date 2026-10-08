@@ -781,6 +781,9 @@
 "panel.move.right" = "移到右侧";
 "panel.move.up" = "上移";
 "panel.move.down" = "下移";
+"panel.move.bottom" = "移到底部";
+"panel.move.leftward" = "左移";
+"panel.move.rightward" = "右移";
 "panel.drop.here" = "放到这里";
 "panel.docs" = "文档";
 "docs.empty" = "在阅读区选中一个符号，用右键菜单、悬浮卡片或 ⌃⇧D 在这里查看文档";

@@ -1653,8 +1653,28 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     #expect(first.selfTestShownPanels[.left] == [.relations, .files, .outline])
     first.shiftPanel(.files, by: 1)
     #expect(first.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    // The bottom zone sits under the reader and lines its panels up left to right.
+    first.movePanel(.relations, to: .bottom)
+    #expect(first.selfTestShownPanels[.bottom] == [.relations])
+    #expect(first.selfTestShownPanels[.left] == [.outline, .files])
+    #expect(abs((first.selfTestZoneWidths[.bottom] ?? 0) - 260) <= 1, "The bottom zone opens at its default height")
+    first.dropPanel(.outline, in: .bottom, beforeShownIndex: 0)
+    #expect(first.selfTestShownPanels[.bottom] == [.outline, .relations])
+    #expect(first.canShiftPanel(.outline, by: 1) && !first.canShiftPanel(.outline, by: -1))
+    let bottomSplit = first.selfTestZoneSplit(.bottom)
+    #expect(bottomSplit.isVertical)
+    bottomSplit.setPosition(400, ofDividerAt: 0)
+    let center = first.selfTestCenterSplit
+    center.setPosition(center.bounds.height - 300 - center.dividerThickness, ofDividerAt: 0)
+    first.dividerDragEnded()
+    first.renderForSelfTest()
+    #expect(abs((first.selfTestZoneWidths[.bottom] ?? 0) - 300) <= 1, "The dragged bottom height is kept")
+    #expect(abs((first.selfTestPanelWidths[.outline] ?? 0) - 400) <= 1, "The dragged panel width is kept")
+    first.movePanel(.outline, to: .left)
+    first.dropPanel(.outline, in: .left, beforeShownIndex: 0)
+    #expect(first.selfTestShownPanels[.left] == [.outline, .files])
     let split = first.selfTestZoneSplit(.left)
-    split.setPosition((split.bounds.height - 2 * split.dividerThickness) * 0.5, ofDividerAt: 0)
+    split.setPosition((split.bounds.height - split.dividerThickness) * 0.5, ofDividerAt: 0)
     first.dividerDragEnded()
     first.renderForSelfTest()
     let heights = first.selfTestPanelHeights
@@ -1662,7 +1682,9 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
 
     let second = try await makeController()
     defer { second.close() }
-    #expect(second.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    #expect(second.selfTestShownPanels[.left] == [.outline, .files])
+    #expect(second.selfTestShownPanels[.bottom] == [.relations])
+    #expect(abs((second.selfTestZoneWidths[.bottom] ?? 0) - 300) <= 1, "The bottom height survives a rebuild")
     for (panel, height) in heights {
         #expect(abs((second.selfTestPanelHeights[panel] ?? 0) - height) <= 1, "\(panel) height survives")
     }
@@ -1674,8 +1696,10 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     }
     #expect(second.selfTestShownPanels.values.flatMap { $0 }.isEmpty, "Focus hides every panel")
     second.applyPanelPreset(.relations)
-    #expect(second.selfTestShownPanels[.left] == [.relations, .outline, .files])
+    #expect(second.selfTestShownPanels[.left] == [.outline, .files])
+    #expect(second.selfTestShownPanels[.bottom] == [.relations])
     second.restoreDefaultPanelLayout()
+    #expect(second.selfTestZoneWidths[.bottom] == 0, "Restoring the default layout empties the bottom zone")
     #expect(second.panelLayout == .standard)
     #expect(second.selfTestShownPanels[.left] == [.files, .outline])
     #expect(PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")) == .standard)

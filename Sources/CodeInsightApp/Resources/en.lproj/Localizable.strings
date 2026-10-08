@@ -781,6 +781,9 @@
 "panel.move.right" = "Move to Right Side";
 "panel.move.up" = "Move Up";
 "panel.move.down" = "Move Down";
+"panel.move.bottom" = "Move to Bottom";
+"panel.move.leftward" = "Move Left";
+"panel.move.rightward" = "Move Right";
 "panel.drop.here" = "Drop Here";
 "panel.docs" = "Documentation";
 "docs.empty" = "Select a symbol in the reader, then use the context menu, the hover card or ⌃⇧D to see its documentation here";

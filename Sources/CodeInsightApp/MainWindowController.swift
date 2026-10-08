@@ -68,9 +68,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let secondaryReaderController: ReaderViewController
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
-    /// Left zone | reader group | right zone. Panels live in the zones;
-    /// the reader group (primary | secondary reader) never moves.
+    /// Left zone | (reader group / bottom zone) | right zone. Panels live
+    /// in the zones; the reader group (primary | secondary reader) never
+    /// moves.
     private let outerSplitController = NSSplitViewController()
+    private let centerSplitController = NSSplitViewController()
     private let readerSplitController = NSSplitViewController()
     private let readerGroupItem: NSSplitViewItem
     private let secondaryReaderItem: NSSplitViewItem
@@ -271,7 +273,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             let item = NSSplitViewItem(viewController: controller)
             item.canCollapse = true
             item.isCollapsed = true
-            // Zones keep their width while the reader takes window changes.
+            // Zones keep their size while the reader takes window changes.
             item.holdingPriority = .init(rawValue: 260)
             return item
         }
@@ -279,9 +281,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // Set before the controllers load their views: these report the end
         // of a divider drag so the layout records only what the user dragged.
         outerSplitController.splitView = DividerTrackingSplitView()
+        centerSplitController.splitView = DividerTrackingSplitView()
         readerSplitController.splitView = DividerTrackingSplitView()
         outerSplitController.splitView.isVertical = true
         outerSplitController.splitView.dividerStyle = .thin
+        centerSplitController.splitView.isVertical = false
+        centerSplitController.splitView.dividerStyle = .thin
         readerSplitController.splitView.isVertical = true
         readerSplitController.splitView.dividerStyle = .thin
 
@@ -294,15 +299,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerSplitController.addSplitViewItem(primaryReaderItem)
         readerSplitController.addSplitViewItem(secondaryReaderItem)
 
-        // The reader's 320pt is the only hard minimum; zone minimums are
-        // soft (PanelZoneView) so a narrow window squeezes the zones instead
-        // of growing.
-        readerGroupItem.minimumThickness = 320
+        // The reader's 320pt width and 200pt height are the only hard
+        // minimums; zone minimums are soft (PanelZoneView) so a small window
+        // squeezes the zones instead of growing.
+        readerGroupItem.minimumThickness = 200
         readerGroupItem.canCollapse = false
         readerGroupItem.holdingPriority = .init(rawValue: 250)
         secondaryReaderItem.holdingPriority = .init(rawValue: 250)
+        centerSplitController.addSplitViewItem(readerGroupItem)
+        centerSplitController.addSplitViewItem(zoneItems[.bottom]!)
+        let centerItem = NSSplitViewItem(viewController: centerSplitController)
+        centerItem.minimumThickness = 320
+        centerItem.canCollapse = false
+        centerItem.holdingPriority = .init(rawValue: 250)
         outerSplitController.addSplitViewItem(zoneItems[.left]!)
-        outerSplitController.addSplitViewItem(readerGroupItem)
+        outerSplitController.addSplitViewItem(centerItem)
         outerSplitController.addSplitViewItem(zoneItems[.right]!)
 
         let contentView = NSView()
@@ -1392,12 +1403,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestContextPaneCollapsed: Bool { !isPanelShown(.context) }
     var selfTestRelationsPaneCollapsed: Bool { !isPanelShown(.relations) }
     var selfTestOutlineHidden: Bool { !isPanelShown(.outline) }
-    /// Zone widths as laid out (0 while a zone is collapsed).
+    /// Zone sizes as laid out (0 while a zone is collapsed): the side
+    /// zones' widths and the bottom zone's height.
     var selfTestZoneWidths: [PanelZone: CGFloat] {
         window?.contentView?.layoutSubtreeIfNeeded()
-        return zoneItems.mapValues { $0.isCollapsed ? 0 : $0.viewController.view.frame.width }
+        return Dictionary(uniqueKeysWithValues: zoneItems.map { zone, item in
+            let frame = item.viewController.view.frame
+            return (zone, item.isCollapsed ? 0 : zone == .bottom ? frame.height : frame.width)
+        })
     }
-    /// Panels on screen per zone, top to bottom.
+    /// Panels on screen per zone, in stacking order.
     var selfTestShownPanels: [PanelZone: [PanelID]] {
         zoneViews.mapValues { $0.panels.map(\.id) }
     }
@@ -1405,9 +1420,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window?.contentView?.layoutSubtreeIfNeeded()
         return chromes.filter { $0.value.superview != nil }.mapValues(\.frame.height)
     }
+    var selfTestPanelWidths: [PanelID: CGFloat] {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        return chromes.filter { $0.value.superview != nil }.mapValues(\.frame.width)
+    }
     /// The zone's own split view, for simulating a divider drag.
     func selfTestZoneSplit(_ zone: PanelZone) -> NSSplitView { zoneViews[zone]!.split }
     var selfTestOuterSplit: NSSplitView { outerSplitController.splitView }
+    /// Reader group over the bottom zone, for simulating its divider drag.
+    var selfTestCenterSplit: NSSplitView { centerSplitController.splitView }
     var selfTestTrailBarVisible: Bool {
         selfTestViewIsVisibleInWindow(trailView)
     }
@@ -1964,7 +1985,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             chromes[id] = chrome
         }
         for zoneView in zoneViews.values { zoneView.host = self }
-        for split in [outerSplitController.splitView, readerSplitController.splitView] {
+        for split in [outerSplitController.splitView, centerSplitController.splitView, readerSplitController.splitView] {
             (split as? DividerTrackingSplitView)?.onDividerDragEnded = { [weak self] in
                 self?.dividerDragEnded()
             }
@@ -2358,7 +2379,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .nonSource: if id != .files { return false }
         case .source, nil: break
         }
-        if splitHidesZones { return false }
+        // The split needs width; the bottom zone shares the reader's.
+        if splitHidesZones, panelLayout.zone(of: id).zone != .bottom { return false }
         if readingSetLayoutActive { return readingSetRevealed.contains(id) }
         guard !panelLayout.hidden.contains(id) else { return false }
         return id != .context || contextHasContent || contextOpenedExplicitly
@@ -2390,7 +2412,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         savePanelLayout()
     }
 
-    /// Appends the panel to the other zone (title-bar menu).
+    /// Appends the panel to another zone (title-bar menu).
     func movePanel(_ id: PanelID, to zone: PanelZone) {
         panelLayout.move(id, to: zone, at: panelLayout.panels(in: zone).count)
         applyPanelLayout()
@@ -2436,8 +2458,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelLayout()
     }
 
-    /// Records zone widths, panel heights and the reader split ratio when
-    /// the user finishes dragging any divider (also the tests' stand-in for
+    /// Records zone sizes, panel sizes and the reader split ratio when the
+    /// user finishes dragging any divider (also the tests' stand-in for
     /// that drag).
     func dividerDragEnded() {
         guard !panelOverrideActive, !isDraggingPanel else { return }
@@ -2452,7 +2474,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         for zone in PanelZone.allCases {
             let zoneView = zoneViews[zone]!
             guard !zoneItems[zone]!.isCollapsed, !zoneView.panels.isEmpty else { continue }
-            panelLayout.zoneWidths[zone] = zoneView.frame.width
+            panelLayout.zoneWidths[zone] = zone == .bottom ? zoneView.frame.height : zoneView.frame.width
             panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
         }
         savePanelLayout()
@@ -2498,31 +2520,38 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    /// Places the zone dividers from the stored widths (72pt for an empty
-    /// zone during a drag). The right divider subtracts its own thickness;
-    /// a window that grew anyway is put back.
+    /// Places the zone dividers from the stored sizes (72pt for an empty
+    /// zone during a drag). The right and bottom dividers subtract their
+    /// own thickness; a window that grew anyway is put back.
     private func applyZoneWidths() {
         window?.contentView?.layoutSubtreeIfNeeded()
         let split = outerSplitController.splitView
-        guard split.bounds.width > 0 else {
+        let center = centerSplitController.splitView
+        guard split.bounds.width > 0, center.bounds.height > 0 else {
             needsPanelGeometry = true
             return
         }
         needsPanelGeometry = false
         let frameBefore = window?.frame
-        func width(_ zone: PanelZone) -> CGFloat {
+        func size(_ zone: PanelZone) -> CGFloat {
             let panels = zoneViews[zone]!.panels
             guard !panels.isEmpty else { return 72 }
-            return max(panelLayout.width(of: zone), panels.map(\.minimumWidth).max() ?? 0)
+            let minimum = panels.map { zone == .bottom ? $0.minimumHeight : $0.minimumWidth }.max() ?? 0
+            return max(panelLayout.width(of: zone), minimum)
         }
         if !zoneItems[.left]!.isCollapsed {
-            split.setPosition(width(.left), ofDividerAt: 0)
+            split.setPosition(size(.left), ofDividerAt: 0)
         }
         if !zoneItems[.right]!.isCollapsed {
-            split.setPosition(split.bounds.width - width(.right) - split.dividerThickness, ofDividerAt: 1)
+            split.setPosition(split.bounds.width - size(.right) - split.dividerThickness, ofDividerAt: 1)
+        }
+        if !zoneItems[.bottom]!.isCollapsed {
+            center.setPosition(center.bounds.height - size(.bottom) - center.dividerThickness, ofDividerAt: 0)
         }
         split.layoutSubtreeIfNeeded()
-        if let frameBefore, let window, window.frame.width > frameBefore.width + 0.5 {
+        if let frameBefore, let window,
+           window.frame.width > frameBefore.width + 0.5 || window.frame.height > frameBefore.height + 0.5
+        {
             window.setFrame(frameBefore, display: false)
             split.layoutSubtreeIfNeeded()
         }
@@ -4428,7 +4457,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     /// Q5.8: both readers need their minimum width. When they do not fit
-    /// beside the zones, both zones hide until the split closes (a
+    /// beside the zones, both side zones hide until the split closes (a
     /// temporary override, never saved).
     private func ensureRoomForSplit() -> Bool {
         if isReferenceActive || !secondaryReaderItem.isCollapsed { return true }

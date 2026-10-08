@@ -1,7 +1,6 @@
 import Foundation
 
-/// A panel that sits in one of the window's side zones. `docs` is reserved:
-/// it has a place in the layout but no content or entry point yet.
+/// A panel that sits in one of the window's zones.
 public enum PanelID: String, CaseIterable, Sendable {
     case files
     case outline
@@ -11,31 +10,35 @@ public enum PanelID: String, CaseIterable, Sendable {
     case docs
 }
 
+/// The side zones stack their panels top to bottom; the bottom zone, under
+/// the reader between the sides, places them left to right.
 public enum PanelZone: String, CaseIterable, Sendable {
     case left
     case right
+    case bottom
 }
 
 /// The one app-wide panel arrangement: which zone holds each panel and in
-/// what order, which panels the user hid, zone widths, relative panel
-/// heights and the reader split ratio. Temporary overrides (no project,
+/// what order, which panels the user hid, zone sizes, relative panel
+/// sizes and the reader split ratio. Temporary overrides (no project,
 /// non-source preview, Reading Set, a split that does not fit) never live
 /// here; they are subtracted from `hidden` by the window.
 public struct PanelLayout: Equatable, Sendable {
-    /// Every panel appears exactly once across both zones.
+    /// Every panel appears exactly once across the zones.
     public private(set) var zones: [PanelZone: [PanelID]]
     public var hidden: Set<PanelID>
-    /// Zone widths in points.
+    /// The side zones' widths and the bottom zone's height, in points.
     public var zoneWidths: [PanelZone: Double]
-    /// Relative height per panel within its zone; 0 means never sized.
+    /// Relative size per panel along its zone's stacking axis (height in a
+    /// side zone, width in the bottom zone); 0 means never sized.
     public private(set) var heights: [PanelID: Double]
     /// The primary reader's share of the reader group while it is split.
     public var readerSplitFraction: Double
 
     public static let standard = PanelLayout(
-        zones: [.left: [.files, .outline], .right: [.relations, .context, .search, .docs]],
+        zones: [.left: [.files, .outline], .right: [.relations, .context, .search, .docs], .bottom: []],
         hidden: [.relations, .search, .docs],
-        zoneWidths: [.left: 240, .right: 300],
+        zoneWidths: [.left: 240, .right: 300, .bottom: 260],
         heights: [.files: 0.55, .outline: 0.45, .relations: 0.5, .context: 0.25, .search: 0.25, .docs: 0],
         readerSplitFraction: 0.5
     )
@@ -102,7 +105,7 @@ public struct PanelLayout: Equatable, Sendable {
         hidden = Set(PanelID.allCases).subtracting(preset.visiblePanels)
     }
 
-    /// Height shares of `panels` (the ones on screen, in order) summing to
+    /// Size shares of `panels` (the ones on screen, in order) summing to
     /// 1. Never-sized panels share 40% of the zone; the rest keep their
     /// stored proportions.
     public func heightFractions(for panels: [PanelID]) -> [Double] {
@@ -115,7 +118,8 @@ public struct PanelLayout: Equatable, Sendable {
         return weights.map { $0 > 0 ? 0.6 * $0 / sized : 0.4 / Double(unsized) }
     }
 
-    /// Records the on-screen heights of `panels` (one zone, in order).
+    /// Records the on-screen sizes of `panels` (one zone, in order) along
+    /// the zone's stacking axis.
     /// Hidden panels in the zone keep their weights relative to the rest;
     /// the zone's weights are renormalized to sum to 1.
     public mutating func recordHeights(_ measured: [Double], for panels: [PanelID]) {
@@ -152,7 +156,7 @@ public struct PanelLayout: Equatable, Sendable {
         guard let data, let stored = try? JSONDecoder().decode(Stored.self, from: data) else {
             return standard
         }
-        var zones: [PanelZone: [PanelID]] = [.left: [], .right: []]
+        var zones = Dictionary(uniqueKeysWithValues: PanelZone.allCases.map { ($0, [PanelID]()) })
         var heights: [PanelID: Double] = [:]
         for zone in PanelZone.allCases {
             let names = stored.zones?[zone.rawValue] ?? []

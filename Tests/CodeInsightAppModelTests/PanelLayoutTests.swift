@@ -130,6 +130,11 @@ func panelLayoutDecodingRepairsBadFieldsAndRejectsNonLayouts() throws {
     #expect(decode("{}") == standard)
     #expect(decode(#"{"zones": {}}"#).zones == standard.zones)
     #expect(decode(#"{"zones": {"left": [], "right": []}}"#).zones == standard.zones)
+    // A layout saved before the bottom zone existed keeps it empty at its default height.
+    let legacy = decode(#"{"zones": {"left": ["outline"], "right": ["docs"]}, "zoneWidths": {"left": 200, "right": 320}}"#)
+    #expect(legacy.panels(in: .bottom) == [])
+    #expect(legacy.width(of: .bottom) == standard.width(of: .bottom))
+    expectInvariants(legacy, "legacy")
 
     // Unknown IDs drop with their heights, duplicates keep the first place,
     // missing panels go to the end of their default zone.
