@@ -1316,11 +1316,14 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     try #require(await mainWindowWaitUntil(first.model.contextWindow.displayedCandidate != nil))
     first.model.contextWindow.setMode(.pinned)
     first.renderForSelfTest()
-    window.center()
-    window.zoom(nil)
+    // A user-chosen frame that differs from the test default. Zooming would
+    // instead fill the screen, which on a small CI display is too narrow for
+    // the dragged layout. AppKit may still clamp the height to that screen.
+    window.setFrame(NSRect(x: 0, y: 0, width: 1700, height: 800), display: true)
     await settleWindow()
     #expect(!first.selfTestContextPaneCollapsed)
     let sourceFrame = window.frame
+    print("POLISH_USER_FRAME screen=\(NSScreen.main?.visibleFrame.size ?? .zero) frame=\(sourceFrame.size) relations=\(first.selfTestRelationsPaneWidth) dragged=\(width)")
     func expectSourceWindowFrame(_ surface: String) async {
         await settleWindow()
         print("POLISH_SURFACE_FRAME surface=\(surface) before=\(sourceFrame.size) after=\(window.frame.size)")
@@ -1350,8 +1353,6 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     #expect(!first.selfTestContextPaneCollapsed)
     #expect(!first.selfTestRelationsPaneCollapsed)
     #expect(abs(first.selfTestRelationsPaneWidth - width) <= 1, "The override detour keeps the width")
-    window.zoom(nil)
-    await settleWindow()
     first.toggleContext(nil)
     #expect(first.selfTestContextPaneCollapsed, "Closed Context stays closed despite its content")
     first.checkpointSessionSynchronously()
@@ -1685,6 +1686,7 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     #expect(second.selfTestShownPanels[.left] == [.outline, .files])
     #expect(second.selfTestShownPanels[.bottom] == [.relations])
     #expect(abs((second.selfTestZoneWidths[.bottom] ?? 0) - 300) <= 1, "The bottom height survives a rebuild")
+    print("MOVED_PANELS first=\(heights) second=\(second.selfTestPanelHeights) content=\(second.window?.contentView?.frame.size ?? .zero)")
     for (panel, height) in heights {
         #expect(abs((second.selfTestPanelHeights[panel] ?? 0) - height) <= 1, "\(panel) height survives")
     }

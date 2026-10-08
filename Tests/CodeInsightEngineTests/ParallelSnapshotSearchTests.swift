@@ -90,7 +90,11 @@ struct ParallelSnapshotSearchTests {
         let session = try ProjectIndexer(parallelism: 1).index(root: root)
         let source = PausedSearchSource(session: session, blocked: Set(session.manifest.files.map(\.contentID)))
         defer { source.releaseAll() }
-        let stream = try parallelSearchStream(source: source, workers: 4)
+        // Each paused reader blocks a cooperative thread. Leave one for the
+        // consumer and this test, or a small CI runner never pauses them all.
+        let workers = min(4, max(1, ProcessInfo.processInfo.activeProcessorCount - 1))
+        print("PAUSED_READERS cores=\(ProcessInfo.processInfo.activeProcessorCount) workers=\(workers)")
+        let stream = try parallelSearchStream(source: source, workers: workers)
         let consumer = Task {
             defer { source.recordFinished() }
             do {
@@ -98,13 +102,13 @@ struct ParallelSnapshotSearchTests {
             } catch is CancellationError {}
         }
         defer { consumer.cancel() }
-        try await waitForSearchCondition { source.pausedCount == 4 }
+        try await waitForSearchCondition { source.pausedCount == workers }
         consumer.cancel()
         try await waitForSearchCondition { source.finished }
         #expect(source.batches.isEmpty)
         source.releaseAll()
-        try await waitForSearchCondition { source.cancelledReadCount == 4 }
-        #expect(source.readCount == 4, "Each cancelled worker must stop before reading its next file")
+        try await waitForSearchCondition { source.cancelledReadCount == workers }
+        #expect(source.readCount == workers, "Each cancelled worker must stop before reading its next file")
         #expect(source.batches.isEmpty, "No batch may arrive after cancellation")
         try await consumer.value
     }
