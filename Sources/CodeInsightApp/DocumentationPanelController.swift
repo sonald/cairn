@@ -17,6 +17,7 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let candidatesButton = NSPopUpButton(frame: .zero, pullsDown: false)
     private let openInDashButton = NSButton()
+    private let backButton = NSButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
     private var webView: WKWebView?
     private var theme = ReaderTheme(settings: ReaderSettings())
@@ -25,6 +26,9 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     /// Text shown instead of the page after it failed to load.
     private var loadProblem: String?
     private var shownCandidates: [DocumentationCandidate] = []
+    private var webViewObservations: [NSKeyValueObservation] = []
+    /// Whether the dark-theme stylesheet is installed in the web view.
+    private var pageDark = false
 
     /// Bump the version whenever the rules change: the store keeps the
     /// compiled list across launches.
@@ -38,6 +42,14 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
          "selector": "div.related, div.sphinxsidebar, div.footer, div.mobile-nav, nav.sidebar, .sidebar-resizer, rustdoc-search, .sub, #top-link, .theme-selection"}}
     ]
     """
+    /// Dash's own dark-mode stylesheet: invert the page, turn images and
+    /// video back. Injected by a user script, which runs although page
+    /// scripts are off.
+    private static let darkStyleScript = WKUserScript(
+        source: #"var s=document.createElement('style');s.textContent='html:not(.dash-ignore-dark-mode), html:not(.dash-ignore-dark-mode) body { background-image:none !important;} html:not(.dash-ignore-dark-mode) { filter: invert() hue-rotate(180deg) contrast(80%) brightness(120%) contrast(85%); } html img:not(picture > img):not([src*="svg"]), html video, html .dash-ignore-dark-mode { filter: hue-rotate(180deg) invert() brightness(100%) contrast(100%); } ::selection { background-color: lightsalmon; color: #000; }';document.documentElement.appendChild(s);"#,
+        injectionTime: .atDocumentEnd,
+        forMainFrameOnly: true
+    )
     /// Compiled once per run; nothing loads before it is ready.
     private static let ruleList = Task<WKContentRuleList?, Never> { @MainActor in
         guard let store = WKContentRuleListStore.default() else { return nil }
@@ -54,8 +66,9 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override func loadView() {
-        let root = NSView()
+        let root = AppearanceTrackingView()
         root.wantsLayer = true
+        root.onAppearanceChange = { [weak self] in self?.applyPageAppearance() }
         titleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         subtitleLabel.font = .systemFont(ofSize: 11)
         for label in [titleLabel, subtitleLabel] {
@@ -74,15 +87,25 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         openInDashButton.target = self
         openInDashButton.action = #selector(openInDash(_:))
         openInDashButton.setContentHuggingPriority(.required, for: .horizontal)
+        backButton.image = NSImage(systemSymbolName: "chevron.left", accessibilityDescription: localized("docs.back"))
+        backButton.isBordered = false
+        backButton.controlSize = .small
+        backButton.toolTip = localized("docs.back")
+        backButton.setAccessibilityLabel(localized("docs.back"))
+        backButton.target = self
+        backButton.action = #selector(goBack(_:))
+        backButton.isEnabled = false
+        backButton.setContentHuggingPriority(.required, for: .horizontal)
 
         let titles = NSStackView(views: [titleLabel, subtitleLabel])
         titles.orientation = .vertical
         titles.alignment = .leading
         titles.spacing = 1
-        titles.setHuggingPriority(.defaultLow, for: .horizontal)
-        let topRow = NSStackView(views: [titles, openInDashButton])
+        titles.setContentHuggingPriority(.init(1), for: .horizontal)
+        let topRow = NSStackView(views: [backButton, titles, openInDashButton])
         topRow.orientation = .horizontal
         topRow.spacing = 6
+        topRow.distribution = .fill
         header.setViews([topRow, candidatesButton], in: .leading)
         header.orientation = .vertical
         header.alignment = .leading
@@ -118,6 +141,7 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         header.layer?.backgroundColor = theme.chromeColor.cgColor
         titleLabel.textColor = theme.foregroundColor
         subtitleLabel.textColor = theme.chromeSecondaryColor
+        backButton.contentTintColor = theme.chromeSecondaryColor
         statusLabel.textColor = theme.chromeSecondaryColor
         openInDashButton.attributedTitle = NSAttributedString(
             string: "↗ " + localized("docs.open.in.dash"),
@@ -169,8 +193,8 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
 
     private func renderHeader(candidate: DocumentationCandidate?, candidates: [DocumentationCandidate]) {
         titleLabel.stringValue = candidate.map { "\($0.name) · \($0.kind)" } ?? model.query
-        subtitleLabel.stringValue = candidate.map { "\($0.sourceName) · \($0.docset)" } ?? model.query
-        subtitleLabel.isHidden = candidate == nil
+        renderSubtitle()
+        backButton.isHidden = candidate == nil
         openInDashButton.isHidden = !DashIntegration.isInstalled
         candidatesButton.isHidden = candidates.count < 2
         shownCandidates = candidates
@@ -186,6 +210,23 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         }
         candidatesButton.menu = menu
         candidatesButton.selectItem(at: candidate.flatMap { candidates.firstIndex(of: $0) } ?? 0)
+    }
+
+    /// The entry's docset, or the page title once the user followed a link
+    /// to another page inside the panel.
+    private func renderSubtitle() {
+        guard let candidate = loadedCandidate else {
+            subtitleLabel.isHidden = true
+            return
+        }
+        subtitleLabel.isHidden = false
+        func page(_ url: URL?) -> String? { url?.absoluteString.split(separator: "#").first.map(String.init) }
+        if let webView, let url = webView.url, page(url) != page(candidate.loadURL),
+           let title = webView.title, !title.isEmpty {
+            subtitleLabel.stringValue = title
+        } else {
+            subtitleLabel.stringValue = "\(candidate.sourceName) · \(candidate.docset)"
+        }
     }
 
     private func text(for notice: DocumentationPanelModel.Notice) -> String {
@@ -211,6 +252,10 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
 
     @objc private func openInDash(_ sender: Any?) {
         DashIntegration.open(query: model.query)
+    }
+
+    @objc private func goBack(_ sender: Any?) {
+        webView?.goBack()
     }
 
     // MARK: - Loading
@@ -250,6 +295,19 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         webView.underPageBackgroundColor = .white
         webView.setAccessibilityLabel(localized("panel.docs"))
         webView.translatesAutoresizingMaskIntoConstraints = false
+        // Same-page anchor jumps never call didFinish; the header follows
+        // the web view's own properties instead.
+        webViewObservations = [
+            webView.observe(\.canGoBack) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.backButton.isEnabled = self?.webView?.canGoBack == true }
+            },
+            webView.observe(\.title) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.renderSubtitle() }
+            },
+            webView.observe(\.url) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.renderSubtitle() }
+            },
+        ]
         view.addSubview(webView, positioned: .below, relativeTo: statusLabel)
         NSLayoutConstraint.activate([
             webView.topAnchor.constraint(equalTo: header.bottomAnchor),
@@ -258,7 +316,45 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
             webView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         self.webView = webView
+        applyPageAppearance()
         return webView
+    }
+
+    private var isDark: Bool {
+        view.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    /// Dark Cairn themes (and Auto in dark mode) invert the page; a change
+    /// reloads the current page so the stylesheet applies or goes away.
+    private func applyPageAppearance() {
+        guard let webView else { return }
+        let dark = isDark
+        webView.underPageBackgroundColor = dark ? theme.backgroundColor : .white
+        guard dark != pageDark else { return }
+        pageDark = dark
+        let controller = webView.configuration.userContentController
+        controller.removeAllUserScripts()
+        if dark { controller.addUserScript(Self.darkStyleScript) }
+        if webView.url != nil { webView.reload() }
+    }
+
+    /// Loopback links stay in the panel; other web links go to the default
+    /// browser, as in the hover card. Nothing else navigates.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction
+    ) async -> WKNavigationActionPolicy {
+        guard let url = navigationAction.request.url else { return .cancel }
+        if url.scheme == "http", url.host == "127.0.0.1" {
+            // A `target=_blank` link would otherwise go nowhere.
+            guard navigationAction.targetFrame == nil else { return .allow }
+            webView.load(navigationAction.request)
+            return .cancel
+        }
+        if navigationAction.navigationType == .linkActivated, url.scheme == "http" || url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+        }
+        return .cancel
     }
 
     func webView(
@@ -297,5 +393,15 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     private func showLoadProblem(_ text: String) {
         loadProblem = text
         render()
+    }
+}
+
+/// Reports appearance changes, including Auto following the system.
+private final class AppearanceTrackingView: NSView {
+    var onAppearanceChange: (() -> Void)?
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onAppearanceChange?()
     }
 }

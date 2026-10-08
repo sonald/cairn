@@ -798,3 +798,4 @@
 "docs.rules.failed" = "内容规则未能加载";
 "main.show.in.docs.panel" = "在文档面板中显示";
 "app.menu.show.hide.docs" = "显示或隐藏文档";
+"docs.back" = "后退";

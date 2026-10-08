@@ -798,3 +798,4 @@
 "docs.rules.failed" = "The content rules could not be loaded";
 "main.show.in.docs.panel" = "Show in Documentation Panel";
 "app.menu.show.hide.docs" = "Show/Hide Documentation";
+"docs.back" = "Back";
