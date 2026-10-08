@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightReaderCore
 
@@ -35,4 +36,18 @@ enum DashIntegration {
         guard let url = url(query: query) else { return }
         NSWorkspace.shared.open(url)
     }
+
+    /// Dash's direct-download and Setapp builds.
+    static let bundleIdentifiers = ["com.kapeli.dashdoc", "com.kapeli.dash-setapp"]
+
+    static var isRunning: Bool {
+        bundleIdentifiers.contains { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+    }
+
+    /// The documentation panel's source, shared by every window so the docset
+    /// list is fetched once per run. It never launches Dash.
+    static let documentationSource = DashDocumentationSource(
+        isInstalled: { isInstalled },
+        isRunning: { isRunning }
+    )
 }

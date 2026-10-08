@@ -178,6 +178,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
     private let symbolDocCard = SymbolDocCard()
+    private let docsController = DocumentationPanelController(
+        model: DocumentationPanelModel(source: DashIntegration.documentationSource)
+    )
     /// Screen rects of recently hovered tokens, so the card anchors to the
     /// token it shows even after the pointer moved on.
     private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
@@ -1939,7 +1942,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let self else { return }
             self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
         }
-        for controller in [sidebarController, relationController, contextController, panel] as [NSViewController] {
+        for controller in [sidebarController, relationController, contextController, panel, docsController]
+            as [NSViewController] {
             host.addChild(controller)
         }
         sidebarController.loadViewIfNeeded()
@@ -1949,6 +1953,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             (.relations, relationController.view, []),
             (.context, contextController.view, []),
             (.search, panel.view, []),
+            (.docs, docsController.view, []),
         ]
         for (id, content, accessories) in contents {
             let chrome = PanelChromeView(id: id, title: panelTitle(id), content: content, accessories: accessories)
@@ -2582,6 +2587,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.apply(settings: settings)
         palettePanel?.apply(settings: settings)
         searchPanel?.apply(settings: settings)
+        docsController.apply(settings: settings)
         for chrome in chromes.values { chrome.apply(theme: theme) }
         for zoneView in zoneViews.values { zoneView.apply(theme: theme) }
         bookmarkPanel?.apply(settings: settings)

@@ -783,3 +783,16 @@
 "panel.move.down" = "Move Down";
 "panel.drop.here" = "Drop Here";
 "panel.docs" = "Documentation";
+"docs.empty" = "Select a symbol in the reader, then use the context menu, the hover card or ⌃⌘D to see its documentation here";
+"docs.notInstalled" = "Dash is not installed";
+"docs.notRunning" = "Dash is not running";
+"docs.apiDisabled" = "Dash’s API server is off. Turn it on in Dash → Settings → Integration";
+"docs.trialExpired" = "Dash’s trial has ended, so its API is unavailable";
+"docs.noResults" = "Dash has nothing for %@";
+"docs.failed" = "Couldn’t load the documentation: %@";
+"docs.searching" = "Looking up %@ in Dash…";
+"docs.choose" = "Dash has several entries for %@. Choose one above";
+"docs.choose.placeholder" = "Choose a Result";
+"docs.results" = "Dash search results";
+"docs.open.in.dash" = "Open in Dash";
+"docs.rules.failed" = "The content rules could not be loaded";

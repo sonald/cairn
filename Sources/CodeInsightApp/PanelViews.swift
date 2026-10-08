@@ -26,13 +26,13 @@ final class PanelChromeView: NSView, NSDraggingSource {
     var minimumHeight: CGFloat {
         switch id {
         case .context: 120
-        case .search: 240
+        case .search, .docs: 240
         default: 80
         }
     }
 
     /// The zone keeps at least the widest minimum of its panels (soft).
-    var minimumWidth: CGFloat { id == .relations || id == .search ? 300 : 180 }
+    var minimumWidth: CGFloat { [.relations, .search, .docs].contains(id) ? 300 : 180 }
 
     init(id: PanelID, title: String, content: NSView, accessories: [NSButton] = []) {
         self.id = id
