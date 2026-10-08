@@ -43,10 +43,22 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     ]
     """
     /// Dash's own dark-mode stylesheet: invert the page, turn images and
-    /// video back. Injected by a user script, which runs although page
-    /// scripts are off.
+    /// video back. The root scrollbar is outside the filter, so it gets dark
+    /// colors of its own. Injected by a user script, which runs although
+    /// page scripts are off.
+    private static let darkStyleSheet = [
+        "html:not(.dash-ignore-dark-mode), html:not(.dash-ignore-dark-mode) body { background-image:none !important;}",
+        "html:not(.dash-ignore-dark-mode) { filter: invert() hue-rotate(180deg) contrast(80%) brightness(120%) contrast(85%); }",
+        "html img:not(picture > img):not([src*=\"svg\"]), html video, html .dash-ignore-dark-mode "
+            + "{ filter: hue-rotate(180deg) invert() brightness(100%) contrast(100%); }",
+        "::selection { background-color: lightsalmon; color: #000; }",
+        "::-webkit-scrollbar { width: 12px; height: 12px; background-color: #262626; }",
+        "::-webkit-scrollbar-track { background-color: #262626; }",
+        "::-webkit-scrollbar-thumb { background-color: #5c5c5c; border-radius: 6px; border: 3px solid #262626; }",
+    ].joined(separator: " ")
     private static let darkStyleScript = WKUserScript(
-        source: #"var s=document.createElement('style');s.textContent='html:not(.dash-ignore-dark-mode), html:not(.dash-ignore-dark-mode) body { background-image:none !important;} html:not(.dash-ignore-dark-mode) { filter: invert() hue-rotate(180deg) contrast(80%) brightness(120%) contrast(85%); } html img:not(picture > img):not([src*="svg"]), html video, html .dash-ignore-dark-mode { filter: hue-rotate(180deg) invert() brightness(100%) contrast(100%); } ::selection { background-color: lightsalmon; color: #000; }';document.documentElement.appendChild(s);"#,
+        source: "var s=document.createElement('style');s.textContent='\(darkStyleSheet)';"
+            + "document.documentElement.appendChild(s);",
         injectionTime: .atDocumentEnd,
         forMainFrameOnly: true
     )
@@ -329,7 +341,10 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     private func applyPageAppearance() {
         guard let webView else { return }
         let dark = isDark
+        // Tiles WebKit has not painted yet show the view's own background;
+        // in dark themes let the panel's dark background through instead.
         webView.underPageBackgroundColor = dark ? theme.backgroundColor : .white
+        webView.setValue(!dark, forKey: "drawsBackground")
         guard dark != pageDark else { return }
         pageDark = dark
         let controller = webView.configuration.userContentController
