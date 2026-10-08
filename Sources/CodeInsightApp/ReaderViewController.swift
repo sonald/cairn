@@ -315,6 +315,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onRevealPath: ((URL) -> Void)?
     /// Context menu "Open in Dash": the identifier under the click, its byte offset and document.
     var onOpenInDash: ((String, UInt32, ReaderDocument) -> Void)?
+    /// Context menu "Show in Documentation Panel", with the same arguments.
+    var onShowInDocsPanel: ((String, UInt32, ReaderDocument) -> Void)?
     var projectRoot: URL?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onOpenPreviewLink: ((URL) -> Void)?
@@ -790,6 +792,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             action: #selector(openInDash(_:)),
             keyEquivalent: ""
         ))
+        relationMenu.addItem(NSMenuItem(
+            title: localized("main.show.in.docs.panel"),
+            action: #selector(showInDocsPanel(_:)),
+            keyEquivalent: ""
+        ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
         textView.onContextMenu = { [weak self] characterIndex in
@@ -805,11 +812,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 }
             }
             for item in textView.view.menu?.items ?? [] where !item.isSeparatorItem {
-                if item.action == #selector(openInDash(_:)) {
+                let dashItem = item.action == #selector(openInDash(_:)) || item.action == #selector(showInDocsPanel(_:))
+                if dashItem {
                     item.isHidden = !DashIntegration.isInstalled
                 }
                 item.isEnabled = if item.action == #selector(toggleHighlightFromMenu(_:)) || item.submenu != nil
-                    || item.action == #selector(openInDash(_:)) {
+                    || dashItem {
                     highlightName != nil
                 } else if item.action == #selector(revealInFinder(_:)) {
                     location.map {
@@ -3241,6 +3249,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
               let identifier = textView.identifier(atByteOffset: offset)
         else { return }
         onOpenInDash?(identifier, offset, document)
+    }
+
+    @objc private func showInDocsPanel(_ sender: Any?) {
+        guard let offset = contextMenuOffset, let document = displayedDocument,
+              let identifier = textView.identifier(atByteOffset: offset)
+        else { return }
+        onShowInDocsPanel?(identifier, offset, document)
     }
 
     @objc private func revealInFinder(_ sender: Any?) {

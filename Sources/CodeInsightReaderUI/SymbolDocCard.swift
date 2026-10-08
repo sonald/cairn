@@ -82,7 +82,7 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
     private let footer = NSTextField(wrappingLabelWithString: "")
     private var theme: ReaderTheme?
     private var notes: [String] = []
-    private var externalLink: (title: String, url: URL)?
+    private var externalLinks: [(title: String, url: URL)] = []
     private weak var parent: NSWindow?
 
     override public init() {
@@ -161,14 +161,14 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         anchor: NSRect,
         in parent: NSWindow,
         theme: ReaderTheme,
-        externalLink: (title: String, url: URL)? = nil
+        externalLinks: [(title: String, url: URL)] = []
     ) {
         let unchangedContent = shownDoc == doc && self.notes == notes && self.theme == theme
-            && externalLink?.url == self.externalLink?.url
+            && externalLinks.map(\.url) == self.externalLinks.map(\.url)
         shownDoc = doc
         self.notes = notes
         self.theme = theme
-        self.externalLink = externalLink
+        self.externalLinks = externalLinks
         panel.appearance = parent.effectiveAppearance
         if !unchangedContent { applyContent() }
         let size = layoutSize()
@@ -224,7 +224,7 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
             root?.layer?.borderColor = theme.chromeDividerColor.withAlphaComponent(0.8).cgColor
             footerDivider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
         }
-        textView.textStorage?.setAttributedString(Self.content(for: doc, theme: theme, externalLink: externalLink))
+        textView.textStorage?.setAttributedString(Self.content(for: doc, theme: theme, externalLinks: externalLinks))
         textView.selectedTextAttributes = [.backgroundColor: theme.chromeSelectionColor]
         applyFooter(notes)
     }
@@ -232,7 +232,7 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
     static func content(
         for doc: SymbolDoc,
         theme: ReaderTheme,
-        externalLink: (title: String, url: URL)? = nil
+        externalLinks: [(title: String, url: URL)] = []
     ) -> NSAttributedString {
         let output = NSMutableAttributedString()
         let pad = paddingBlock(top: 9, bottom: 0)
@@ -282,15 +282,22 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         }
         // Above the body, so a long doc never scrolls it away and the footer's
         // link preview never covers it.
-        if let externalLink {
+        // The links share one line; an external one's title carries its ↗.
+        if !externalLinks.isEmpty {
             let style = NSMutableParagraphStyle()
             style.textBlocks = [paddingBlock(top: 8, bottom: 0)]
-            output.append(NSAttributedString(string: "↗ " + externalLink.title + "\n", attributes: [
+            let attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 11),
                 .foregroundColor: theme.accentColor,
-                .link: externalLink.url,
                 .paragraphStyle: style,
-            ]))
+            ]
+            for (index, link) in externalLinks.enumerated() {
+                if index > 0 { output.append(NSAttributedString(string: "    ", attributes: attributes)) }
+                var linked = attributes
+                linked[.link] = link.url
+                output.append(NSAttributedString(string: link.title, attributes: linked))
+            }
+            output.append(NSAttributedString(string: "\n", attributes: attributes))
         }
         let body: NSAttributedString?
         if !doc.markdown.isEmpty {
@@ -371,7 +378,7 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
 
     private func showLinkInFooter(_ url: URL?) {
         guard let theme else { return }
-        guard let url, url.scheme != symbolLinkScheme else {
+        guard let url, url.scheme != symbolLinkScheme, url.scheme != docsPanelLinkScheme else {
             applyFooter(notes)
             relayout()
             return

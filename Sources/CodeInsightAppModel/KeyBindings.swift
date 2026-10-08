@@ -179,6 +179,7 @@ extension CommandID {
     public static let viewPanelFiles = CommandID(rawValue: "view.panel.files")
     public static let viewPanelOutline = CommandID(rawValue: "view.panel.outline")
     public static let viewPanelContext = CommandID(rawValue: "view.panel.context")
+    public static let viewPanelDocs = CommandID(rawValue: "view.panel.docs")
     public static let viewRestoreDefaultLayout = CommandID(rawValue: "view.restoreDefaultLayout")
     public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
     public static let viewCloseSplit = CommandID(rawValue: "view.closeSplit")
@@ -203,6 +204,7 @@ extension CommandID {
         CommandID(rawValue: "relations.showSymbolDocumentation")
     public static let relationsShowResolutionInspector =
         CommandID(rawValue: "relations.showResolutionInspector")
+    public static let relationsShowInDocsPanel = CommandID(rawValue: "relations.showInDocsPanel")
 
     public static let lensPreviousCandidate = CommandID(rawValue: "lens.previousCandidate")
     public static let lensNextCandidate = CommandID(rawValue: "lens.nextCandidate")
@@ -391,6 +393,7 @@ public extension KeyBindingScheme {
             def(.viewPanelFiles, .view, "app.menu.show.hide.files", []),
             def(.viewPanelOutline, .view, "app.menu.show.hide.outline", []),
             def(.viewPanelContext, .view, "app.menu.show.hide.context", []),
+            def(.viewPanelDocs, .view, "app.menu.show.hide.docs", []),
             def(.viewRestoreDefaultLayout, .view, "app.menu.restore.default.layout", []),
             def(.viewOpenToSide, .view, "app.menu.open.to.side", [
                 keyboard([.command], .character("\\")),
@@ -443,6 +446,9 @@ public extension KeyBindingScheme {
             ]),
             def(.relationsShowResolutionInspector, .relations, "app.menu.show.resolution.inspector", [
                 keyboard([.command], .character("i")),
+            ]),
+            def(.relationsShowInDocsPanel, .relations, "main.show.in.docs.panel", [
+                keyboard([.control, .command], .character("d")),
             ]),
 
             def(.lensTrackSymbol, .lens, "lens.trackSymbol", []),

@@ -1681,6 +1681,48 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
     #expect(PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")) == .standard)
 }
 
+/// The docs panel's first explicit show un-hides it and keeps the 40% a
+/// never-sized panel gets; after × the next explicit show brings it back.
+@MainActor
+@Test
+func firstDocsPanelShowUnhidesItAndRecordsItsHeight() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
+    let suite = "CairnDocsPanelTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true,
+                                          layoutDefaults: defaults)
+    defer { controller.close() }
+    controller.window?.setContentSize(NSSize(width: 1600, height: 900))
+    controller.openProject(root: root)
+    try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.openFileForSelfTest(root.appendingPathComponent("main.rs"))
+    controller.renderForSelfTest()
+    #expect(controller.panelLayout.hidden.contains(.docs))
+    #expect(controller.panelLayout.heights[.docs] == 0)
+    controller.toggleRelations()
+    controller.revealDocsPanel()
+    #expect(controller.selfTestShownPanels[.right] == [.relations, .docs])
+    let shown = controller.selfTestPanelHeights
+    let share = (shown[.docs] ?? 0) / ((shown[.docs] ?? 0) + (shown[.relations] ?? 0))
+    #expect(abs(share - 0.4) < 0.03, "First show gives docs 40% of its zone, got \(share)")
+    let recorded = try #require(controller.panelLayout.heights[.docs])
+    #expect(recorded > 0)
+    let saved = PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2"))
+    #expect(!saved.hidden.contains(.docs))
+    #expect(saved.heights[.docs] == recorded)
+    controller.setPanelVisible(.docs, false)
+    #expect(controller.selfTestShownPanels[.right] == [.relations])
+    controller.revealDocsPanel()
+    #expect(controller.selfTestShownPanels[.right] == [.relations, .docs])
+    #expect(controller.panelLayout.heights[.docs] == recorded, "Only the first show records a height")
+}
+
 /// Layout passes after an ordinary click (a stale mouse-up as the current
 /// event) must not be recorded as a divider drag. The dequeued event changes
 /// process-wide AppKit state, so ci.sh runs this test in its own process.

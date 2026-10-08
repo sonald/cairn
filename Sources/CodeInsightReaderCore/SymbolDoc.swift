@@ -123,6 +123,9 @@ func hidingRustdocLines(_ markdown: String) -> String {
 /// URL scheme for an intra-doc reference the card resolves in-app.
 public let symbolLinkScheme = "cairn-symbol"
 
+/// URL scheme for the card's "Show in Documentation Panel" link.
+public let docsPanelLinkScheme = "cairn-docs"
+
 /// The identifier under `offset`, or `nil` when the pointer is over anything
 /// that must not open a card: keywords, literals, comments, attributes,
 /// punctuation or whitespace. Reads only the bytes around `offset` and one

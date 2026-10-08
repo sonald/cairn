@@ -1601,6 +1601,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.showSymbolDocumentationAtSelection()
     }
 
+    @objc private func showInDocsPanel(_ sender: Any?) {
+        projectCommandTarget()?.showInDocsPanelAtSelection()
+    }
+
     @objc func showReadingTrail(_ sender: Any?) {
         projectCommandTarget()?.showReadingTrail()
     }
@@ -1721,6 +1725,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return target?.canShowResolutionInspector == true
         case #selector(showSymbolDocumentation(_:)):
             return target?.canShowSymbolDocumentation == true
+        case #selector(showInDocsPanel(_:)):
+            // Like "Open in Dash", absent without Dash.
+            menuItem.isHidden = !DashIntegration.isInstalled
+            return target?.canShowInDocsPanel == true
         case #selector(showReadingTrail(_:)):
             return target?.canShowReadingTrail == true
         case #selector(toggleFold(_:)):
@@ -1934,6 +1942,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .viewPanelContext: CommandAction(
             #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.context.rawValue
         ),
+        .viewPanelDocs: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.docs.rawValue
+        ),
         .viewRestoreDefaultLayout: CommandAction(#selector(AppDelegate.restoreDefaultLayout(_:))),
         .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
         .viewReadingHeightFull: CommandAction(#selector(AppDelegate.useFullReadingHeight(_:))),
@@ -1963,6 +1974,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .relationsShowResolutionInspector: CommandAction(
             #selector(AppDelegate.showResolutionInspector(_:))
         ),
+        .relationsShowInDocsPanel: CommandAction(#selector(AppDelegate.showInDocsPanel(_:))),
         .lensPreviousCandidate: CommandAction(
             #selector(AppDelegate.previousContextCandidate(_:))
         ),
@@ -2203,6 +2215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             (.relations, .relationsToggle),
             (.context, .viewPanelContext),
             (.search, .toggleProjectSearchResults),
+            (.docs, .viewPanelDocs),
         ]
         for (panel, id) in panelCommands {
             let before = panelsMenu.items.count
@@ -2253,6 +2266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .relationsShowImplementations, to: relationsMenu)
         relationsMenu.addItem(.separator())
         appendMenuItem(for: .relationsShowSymbolDocumentation, to: relationsMenu)
+        appendMenuItem(for: .relationsShowInDocsPanel, to: relationsMenu)
         appendMenuItem(for: .relationsShowResolutionInspector, to: relationsMenu)
         relationsItem.submenu = relationsMenu
         mainMenu.addItem(relationsItem)

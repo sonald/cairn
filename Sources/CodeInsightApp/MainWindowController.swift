@@ -560,6 +560,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 guard let self else { return }
                 DashIntegration.open(query: dashQuery(identifier: identifier, in: document, byteOffset: offset))
             }
+            reader.onShowInDocsPanel = { [weak self] identifier, offset, document in
+                self?.showInDocsPanel(identifier: identifier, in: document, byteOffset: offset)
+            }
         }
         symbolDocCard.onPointerEntered = { [weak self] in
             self?.model.symbolHover.pointerEnteredCard()
@@ -3899,18 +3902,60 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             anchor: anchor,
             in: window,
             theme: ReaderTheme(settings: currentReaderSettings),
-            externalLink: dashLink(for: token, doc: doc)
+            externalLinks: dashLinks(for: token, doc: doc)
         )
     }
 
-    /// The card's "Open in Dash" link; nil without Dash or an identifier.
-    private func dashLink(for token: SymbolHoverModel.Token, doc: SymbolDoc) -> (title: String, url: URL)? {
+    /// The card's "Open in Dash" and "Show in Documentation Panel" links;
+    /// none without Dash or an identifier.
+    private func dashLinks(for token: SymbolHoverModel.Token, doc: SymbolDoc) -> [(title: String, url: URL)] {
         guard DashIntegration.isInstalled, let document = token.document,
-              let identifier = String(bytes: document.bytes[Int(token.lowerBound)..<Int(token.upperBound)], encoding: .utf8),
+              let identifier = identifierText(in: document, token.range),
               let url = DashIntegration.url(query: DashIntegration.query(
                   identifier: identifier, doc: doc, language: document.languageMode.language))
-        else { return nil }
-        return (localized("main.open.in.dash"), url)
+        else { return [] }
+        return [("↗ " + localized("main.open.in.dash"), url), (localized("main.show.in.docs.panel"), Self.docsPanelLink)]
+    }
+
+    /// The card's link to the docs panel; the card's token says what to show.
+    private static let docsPanelLink = URL(string: "\(docsPanelLinkScheme):show")!
+
+    private func identifierText(in document: ReaderDocument, _ range: ByteRange) -> String? {
+        guard range.upperBound <= document.bytes.count, range.lowerBound < range.upperBound else { return nil }
+        return String(bytes: document.bytes[Int(range.lowerBound)..<Int(range.upperBound)], encoding: .utf8)
+    }
+
+    /// The one action behind the context menu, the card link and ⌃⌘D: shows
+    /// the panel (sized once, the first time) and searches the source.
+    func showInDocsPanel(identifier: String, in document: ReaderDocument, byteOffset: UInt32) {
+        let query = dashQuery(identifier: identifier, in: document, byteOffset: byteOffset)
+        revealDocsPanel()
+        docsController.model.show(query: query)
+    }
+
+    /// Shows the docs panel. The first time it also records the 40% a
+    /// never-sized panel gets, so the panel keeps that share when other
+    /// panels come and go; widths are not touched.
+    func revealDocsPanel() {
+        let neverSized = (panelLayout.heights[.docs] ?? 0) <= 0
+        setPanelVisible(.docs, true)
+        let zoneView = zoneViews[panelLayout.zone(of: .docs).zone]!
+        guard neverSized, !panelOverrideActive, !isDraggingPanel,
+              zoneView.panels.contains(where: { $0.id == .docs })
+        else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
+        savePanelLayout()
+    }
+
+    /// ⌃⌘D: the identifier at the caret, in any language.
+    var canShowInDocsPanel: Bool { focusedReader.hoverRequestAtSelection() != nil }
+
+    func showInDocsPanelAtSelection() {
+        guard let request = focusedReader.hoverRequestAtSelection(),
+              let identifier = identifierText(in: request.document, request.target.byteRange)
+        else { return }
+        showInDocsPanel(identifier: identifier, in: request.document, byteOffset: request.target.byteRange.lowerBound)
     }
 
     /// Context-menu query: the hover card's exact result is reused when it is
@@ -3981,6 +4026,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// matches; anything else opens in the default browser, because the user
     /// clicked it.
     private func openSymbolDocLink(_ url: URL) {
+        if url == Self.docsPanelLink {
+            if case let .showing(token, _) = model.symbolHover.phase, let document = token.document,
+               let identifier = identifierText(in: document, token.range) {
+                showInDocsPanel(identifier: identifier, in: document, byteOffset: token.lowerBound)
+            }
+            model.symbolHover.dismiss()
+            return
+        }
         let name = symbolName(fromDocLink: url)
         if let name, let target = model.contextWindow.definition(named: name) {
             model.symbolHover.dismiss()
