@@ -1,3 +1,4 @@
+import CodeInsightCore
 import Foundation
 import Observation
 
@@ -38,7 +39,8 @@ public final class DocumentationPanelModel {
         self.source = source
     }
 
-    public func show(query: String) {
+    /// `language` is the reading file's; results for it rank first.
+    public func show(query: String, language: LanguageID? = nil) {
         task?.cancel()
         generation &+= 1
         let current = generation
@@ -46,7 +48,7 @@ public final class DocumentationPanelModel {
         state = .searching(query)
         let source = source
         task = Task { [weak self] in
-            let next = await Self.resolve(query, source: source)
+            let next = await Self.resolve(query, language: language, source: source)
             guard let self, generation == current, !Task.isCancelled else { return }
             state = next
             task = nil
@@ -63,7 +65,7 @@ public final class DocumentationPanelModel {
         }
     }
 
-    private static func resolve(_ query: String, source: any DocumentationSource) async -> State {
+    private static func resolve(_ query: String, language: LanguageID?, source: any DocumentationSource) async -> State {
         switch await source.availability() {
         case .notInstalled: return .unavailable(.notInstalled)
         case .notRunning: return .unavailable(.notRunning)
@@ -71,7 +73,7 @@ public final class DocumentationPanelModel {
         case .available: break
         }
         do {
-            let candidates = try await source.search(query)
+            let candidates = try await source.search(query, language: language)
             guard !candidates.isEmpty else { return .unavailable(.noResults) }
             let index = autoLoadIndex(query: query, candidates: candidates) {
                 source.isExactMatch($0, for: query)
@@ -86,10 +88,15 @@ public final class DocumentationPanelModel {
         }
     }
 
-    /// The result to load without asking: the only result; the only exact
-    /// match; for a qualified query (`a.b`, `a::b`), the first of several
-    /// exact matches in the source's order. A bare identifier with several
-    /// exact matches, or no exact match, waits for the user.
+    /// The result to load without asking:
+    /// - the only result, or the only exact match;
+    /// - for a qualified query (`a.b`, `a::b`) with several exact matches,
+    ///   the one with the shortest URL path in the docset of the first
+    ///   (std documents `Mutex` under `std/sync/` and again under
+    ///   `std/sync/poison/`; the shorter path is the canonical re-export);
+    /// - for a bare identifier with several exact matches, the only one in a
+    ///   docset for the reading file's language.
+    /// Anything else waits for the user.
     public nonisolated static func autoLoadIndex(
         query: String,
         candidates: [DocumentationCandidate],
@@ -98,7 +105,11 @@ public final class DocumentationPanelModel {
         if candidates.count == 1 { return 0 }
         let exact = candidates.indices.filter { isExact(candidates[$0]) }
         if exact.count == 1 { return exact[0] }
-        let qualified = query.contains("::") || query.contains(".")
-        return qualified ? exact.first : nil
+        if query.contains("::") || query.contains("."), let first = exact.first {
+            return exact.filter { candidates[$0].docset == candidates[first].docset }
+                .min { candidates[$0].loadURL.pathComponents.count < candidates[$1].loadURL.pathComponents.count }
+        }
+        let inLanguage = exact.filter { candidates[$0].matchesLanguage }
+        return inLanguage.count == 1 ? inLanguage[0] : nil
     }
 }

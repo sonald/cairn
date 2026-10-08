@@ -22,14 +22,45 @@ enum DashIntegration {
         return URL(string: "dash-plugin://query=\(encoded)")
     }
 
-    /// The search text for `identifier`. rust-analyzer's hover carries the
-    /// containing path (`std::sync::Mutex`); prefixing it disambiguates `lock`.
-    /// Other servers give no qualified name, so the identifier alone is sent.
-    static func query(identifier: String, doc: SymbolDoc?, language: LanguageID) -> String {
-        guard language == .rust, let doc, doc.source == .exact,
-              let path = doc.location, !path.isEmpty, !path.contains(" ")
+    /// The search text for `identifier`.
+    /// - Rust: rust-analyzer's hover carries the defining path
+    ///   (`std::sync::poison::mutex::Mutex`). The full path is often not
+    ///   where the docs live (std re-exports it as `std::sync::Mutex`), so
+    ///   only its last segment is kept: `Mutex::lock`.
+    /// - Python, TypeScript, JavaScript: the receiver written before a `.`
+    ///   (`os.getenv`), one level, when `receiver` is given.
+    /// - Otherwise the identifier alone.
+    static func query(identifier: String, doc: SymbolDoc?, language: LanguageID, receiver: String? = nil) -> String {
+        guard language == .rust else {
+            return receiver.map { "\($0).\(identifier)" } ?? identifier
+        }
+        guard let doc, doc.source == .exact,
+              let path = doc.location, !path.isEmpty, !path.contains(" "),
+              let owner = path.components(separatedBy: "::").last, !owner.isEmpty
         else { return identifier }
-        return path.hasSuffix("::\(identifier)") || path == identifier ? path : "\(path)::\(identifier)"
+        return owner == identifier ? identifier : "\(owner)::\(identifier)"
+    }
+
+    /// The identifier written right before `.` and the identifier around
+    /// `offset` (`os` in `os.getenv`), or nil. One level only; `self` and
+    /// `this` say nothing a docset could match.
+    static func receiver(in bytes: [UInt8], identifierAt offset: UInt32) -> String? {
+        func isIdentifier(_ byte: UInt8) -> Bool {
+            byte >= 0x80 || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "$")
+                || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
+                || (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(byte | 0x20)
+        }
+        var start = min(Int(offset), bytes.count)
+        while start > 0, isIdentifier(bytes[start - 1]) { start -= 1 }
+        guard start > 1, bytes[start - 1] == UInt8(ascii: ".") else { return nil }
+        var receiverStart = start - 1
+        while receiverStart > 0, isIdentifier(bytes[receiverStart - 1]) { receiverStart -= 1 }
+        guard receiverStart < start - 1,
+              !(UInt8(ascii: "0")...UInt8(ascii: "9")).contains(bytes[receiverStart]),
+              let receiver = String(bytes: bytes[receiverStart..<(start - 1)], encoding: .utf8),
+              receiver != "self", receiver != "this"
+        else { return nil }
+        return receiver
     }
 
     static func open(query: String) {

@@ -1,3 +1,4 @@
+import CodeInsightCore
 import Foundation
 
 /// One search result a documentation source can show: a page on the local
@@ -8,13 +9,27 @@ public struct DocumentationCandidate: Hashable, Sendable {
     public let docset: String
     public let loadURL: URL
     public let sourceName: String
+    /// The docset's platform as the source names it (Dash: `python`, `crate`…).
+    public let platform: String
+    /// Whether the docset documents the language of the file being read.
+    public var matchesLanguage: Bool
 
-    public init(name: String, kind: String, docset: String, loadURL: URL, sourceName: String) {
+    public init(
+        name: String,
+        kind: String,
+        docset: String,
+        loadURL: URL,
+        sourceName: String,
+        platform: String = "",
+        matchesLanguage: Bool = false
+    ) {
         self.name = name
         self.kind = kind
         self.docset = docset
         self.loadURL = loadURL
         self.sourceName = sourceName
+        self.platform = platform
+        self.matchesLanguage = matchesLanguage
     }
 }
 
@@ -36,7 +51,8 @@ public enum DocumentationSourceError: Error, Equatable, Sendable {
 public protocol DocumentationSource: Sendable {
     var name: String { get }
     func availability() async -> DocumentationAvailability
-    func search(_ query: String) async throws -> [DocumentationCandidate]
+    /// Results in the source's order, those for `language` first.
+    func search(_ query: String, language: LanguageID?) async throws -> [DocumentationCandidate]
     /// Whether `candidate` is the entry `query` names, not just a fuzzy hit.
     func isExactMatch(_ candidate: DocumentationCandidate, for query: String) -> Bool
 }
@@ -84,15 +100,43 @@ public actor DashDocumentationSource: DocumentationSource {
         return .available
     }
 
-    public func search(_ query: String) async throws -> [DocumentationCandidate] {
+    public func search(_ query: String, language: LanguageID?) async throws -> [DocumentationCandidate] {
         guard let port = port() else { throw DocumentationSourceError.apiDisabled }
         let cached = docsets?.port == port ? docsets?.identifiers : nil
         var ids = cached ?? []
         if cached == nil { ids = try await identifiers(port: port) }
-        let results = try await search(query, port: port, identifiers: ids)
+        var results = try await search(query, port: port, identifiers: ids)
         // A docset installed since the list was cached: refresh once.
-        guard results.isEmpty, cached != nil else { return results }
-        return try await search(query, port: port, identifiers: identifiers(port: port))
+        if results.isEmpty, cached != nil {
+            results = try await search(query, port: port, identifiers: identifiers(port: port))
+        }
+        return Self.ranked(results, language: language)
+    }
+
+    /// Dash platforms that document each language.
+    static let platforms: [LanguageID: Set<String>] = [
+        .python: ["python"],
+        .rust: ["rust", "crate"],
+        .typescript: ["typescript", "javascript", "nodejs"],
+        .javascript: ["typescript", "javascript", "nodejs"],
+    ]
+
+    /// Docsets for `language` first, then user-contributed ones (third-party
+    /// libraries whose language Dash does not record), then the rest; Dash's
+    /// order within each group.
+    public static func ranked(_ candidates: [DocumentationCandidate], language: LanguageID?) -> [DocumentationCandidate] {
+        let wanted = language.flatMap { platforms[$0] } ?? []
+        func group(_ candidate: DocumentationCandidate) -> Int {
+            if wanted.contains(candidate.platform) { return 0 }
+            return candidate.platform.hasPrefix("usercontrib") ? 1 : 2
+        }
+        return candidates.enumerated()
+            .sorted { (group($0.element), $0.offset) < (group($1.element), $1.offset) }
+            .map { entry in
+                var candidate = entry.element
+                candidate.matchesLanguage = wanted.contains(candidate.platform)
+                return candidate
+            }
     }
 
     public nonisolated func isExactMatch(_ candidate: DocumentationCandidate, for query: String) -> Bool {
@@ -134,7 +178,8 @@ public actor DashDocumentationSource: DocumentationSource {
                 kind: result["type"] as? String ?? "",
                 docset: result["docset"] as? String ?? "",
                 loadURL: url,
-                sourceName: sourceName
+                sourceName: sourceName,
+                platform: result["platform"] as? String ?? ""
             )
         }
     }

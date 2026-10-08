@@ -1,3 +1,4 @@
+import CodeInsightCore
 @testable import CodeInsightAppModel
 import Foundation
 import Testing
@@ -7,8 +8,11 @@ import Testing
 // docset for cases this machine's Dash did not return.
 private let dash = "http://127.0.0.1:59166/Dash"
 
-private func candidate(_ name: String, _ kind: String, _ docset: String, _ url: String) -> DocumentationCandidate {
-    DocumentationCandidate(name: name, kind: kind, docset: docset, loadURL: URL(string: url)!, sourceName: "Dash")
+private func candidate(
+    _ name: String, _ kind: String, _ docset: String, _ url: String, platform: String = ""
+) -> DocumentationCandidate {
+    DocumentationCandidate(name: name, kind: kind, docset: docset, loadURL: URL(string: url)!, sourceName: "Dash",
+                           platform: platform)
 }
 
 private func encoded(_ url: String) -> String {
@@ -32,13 +36,24 @@ private let threadingResults: [DocumentationCandidate] = [
     candidate("set_multithreading_enabled", "Class", "PyTorch 2.11.0", "\(dash)/zsvkebcr/generated/torch.autograd.grad_mode.set_multithreading_enabled.html#torch.autograd.grad_mode.set_multithreading_enabled"),
 ]
 
+// `Mutex::lock`, the query rust-analyzer's `std::sync::poison::mutex::Mutex`
+// location now yields; Dash lists the poison/nonpoison copies in between.
 private let mutexLockResults: [DocumentationCandidate] = [
-    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/struct.Mutex.html#//dash_ref_183062/Method/lock/0"),
-    candidate("try_lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/struct.Mutex.html#//dash_ref_183063/Method/try_lock/0"),
-    // built from the live poison/nonpoison `try_lock` entries
-    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/poison/struct.Mutex.html#//dash_ref_183984/Method/lock/0"),
-    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/nonpoison/struct.Mutex.html#//dash_ref_184787/Method/lock/0"),
-    candidate("try_lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/nonpoison/struct.Mutex.html#//dash_ref_184788/Method/try_lock/0"),
+    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/struct.Mutex.html#//dash_ref_183062/Method/lock/0", platform: "rust"),
+    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/nonpoison/struct.Mutex.html#//dash_ref_184787/Method/lock/0", platform: "rust"),
+    candidate("lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/poison/struct.Mutex.html#//dash_ref_183984/Method/lock/0", platform: "rust"),
+    candidate("lock", "Method", "C++", "\(dash)/flkkgwpw/en.cppreference.com/cpp/thread/mutex/lock.html", platform: "cpp"),
+    candidate("lock", "Method", "tokio", "\(dash)/pktemvcm/docs/tokio/sync/struct.Mutex.html#//dash_ref_8066/Method/lock/0", platform: "crate"),
+    candidate("try_lock", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/sync/struct.Mutex.html#//dash_ref_183063/Method/try_lock/0", platform: "rust"),
+]
+
+private let getenvResults: [DocumentationCandidate] = [
+    candidate("getenv", "Function", "C++", "\(dash)/flkkgwpw/en.cppreference.com/cpp/utility/program/getenv.html", platform: "cpp"),
+    candidate("Getenv", "Function", "Go", "\(dash)/jstznmnl/pkg.go.dev/os@go1.27.html#//dash_ref_Getenv/Function/Getenv/0", platform: "go"),
+    candidate("getenv", "Function", "Python", "\(dash)/lfexfdfn/doc/library/os.html#//apple_ref/Function/os.getenv", platform: "python"),
+    // built: a user-contributed docset, to place the third-party group
+    candidate("getenv", "Function", "PyTorch 2.11.0", "\(dash)/zsvkebcr/generated/torch.getenv.html#torch.getenv", platform: "usercontribPyTorch"),
+    candidate("get_envs", "Method", "Rust", "\(dash)/eyztlmjg/doc.rust-lang.org/1.98.1/std/process/struct.Command.html#//dash_ref_213816/Method/get_envs/0", platform: "rust"),
 ]
 
 private let acquireResults: [DocumentationCandidate] = [
@@ -75,11 +90,18 @@ func dashExactMatchAndAutoLoadFollowRecordedResults() {
                           "\(dash)/lfexfdfn/doc/library/threading.html#//apple_ref/Method/threading.Thread.start")
     #expect(DashDocumentationSource.isExactMatch(name: start.name, loadURL: start.loadURL, query: "threading.Thread.start"))
     #expect(autoLoad("threading.Thread.start", [start]) == start)
-    // rustdoc spreads the path over the URL; three `lock`s match, std's comes first.
+    // `Mutex` must be a whole, case-sensitive URL token: std's three copies
+    // and tokio's match, cppreference's `mutex/lock.html` does not.
     #expect(mutexLockResults.filter {
-        DashDocumentationSource.isExactMatch(name: $0.name, loadURL: $0.loadURL, query: "std::sync::Mutex::lock")
-    }.count == 3)
-    #expect(autoLoad("std::sync::Mutex::lock", mutexLockResults) == mutexLockResults[0])
+        DashDocumentationSource.isExactMatch(name: $0.name, loadURL: $0.loadURL, query: "Mutex::lock")
+    }.map(\.docset) == ["Rust", "Rust", "Rust", "tokio"])
+    // Several exact matches: the shortest path in the first one's docset,
+    // whatever order Dash lists std's re-exported copies in.
+    #expect(autoLoad("Mutex::lock", mutexLockResults) == mutexLockResults[0])
+    let poisonFirst = [mutexLockResults[2], mutexLockResults[1], mutexLockResults[4], mutexLockResults[0]]
+    #expect(autoLoad("Mutex::lock", poisonFirst) == mutexLockResults[0])
+    // A receiver prefix (`os.getenv`) leaves one exact match.
+    #expect(autoLoad("os.getenv", getenvResults) == getenvResults[2])
     // A bare `acquire` names several entries (case-sensitively, so not `Acquire`): the user picks.
     #expect(acquireResults.filter {
         DashDocumentationSource.isExactMatch(name: $0.name, loadURL: $0.loadURL, query: "acquire")
@@ -101,6 +123,20 @@ func dashExactMatchAndAutoLoadFollowRecordedResults() {
 }
 
 @Test
+func dashResultsRankTheReadingLanguageFirstThenThirdPartyDocsets() {
+    let ranked = DashDocumentationSource.ranked(getenvResults, language: .python)
+    #expect(ranked.map(\.docset) == ["Python", "PyTorch 2.11.0", "C++", "Go", "Rust"])
+    #expect(ranked.map(\.matchesLanguage) == [true, false, false, false, false])
+    let rust = DashDocumentationSource.ranked(mutexLockResults, language: .rust)
+    #expect(rust.map(\.docset) == ["Rust", "Rust", "Rust", "tokio", "Rust", "C++"], "rust and crate docsets both match")
+    // A bare identifier with several exact matches loads the one in the
+    // reading language's docset, and only when it is the only one.
+    #expect(autoLoad("getenv", ranked) == ranked[0])
+    #expect(autoLoad("getenv", getenvResults) == nil, "Unranked results match no language")
+    #expect(autoLoad("lock", rust) == nil, "std and tokio both document Rust")
+}
+
+@Test
 func dashSearchResponseDropsTheEmptyResultAndMalformedEntries() {
     let empty = Data(#"{"results":[{}]}"#.utf8)
     #expect(DashDocumentationSource.candidates(fromSearchResponse: empty, sourceName: "Dash").isEmpty)
@@ -109,7 +145,8 @@ func dashSearchResponseDropsTheEmptyResultAndMalformedEntries() {
     """#.utf8)
     let parsed = DashDocumentationSource.candidates(fromSearchResponse: body, sourceName: "Dash")
     #expect(parsed == [candidate("start", "Method", "Python",
-                                 "\(dash)/lfexfdfn/doc/library/threading.html#//apple_ref/Method/threading.Thread.start")])
+                                 "\(dash)/lfexfdfn/doc/library/threading.html#//apple_ref/Method/threading.Thread.start",
+                                 platform: "python")])
     #expect(DashDocumentationSource.isTrialExpired(
         status: 403, body: Data("API access blocked due to Dash trial expiration".utf8)))
     #expect(!DashDocumentationSource.isTrialExpired(status: 403, body: Data("Forbidden".utf8)))
@@ -125,6 +162,7 @@ private actor StubSource: DocumentationSource {
     private let blockedQuery: String?
     private var waiting: CheckedContinuation<Void, Never>?
     private(set) var started: [String] = []
+    private(set) var languages: [LanguageID?] = []
 
     init(
         availability: DocumentationAvailability = .available,
@@ -140,11 +178,12 @@ private actor StubSource: DocumentationSource {
 
     func availability() async -> DocumentationAvailability { state }
 
-    func search(_ query: String) async throws -> [DocumentationCandidate] {
+    func search(_ query: String, language: LanguageID?) async throws -> [DocumentationCandidate] {
         started.append(query)
+        languages.append(language)
         if query == blockedQuery { await withCheckedContinuation { waiting = $0 } }
         if let failure { throw failure }
-        return results[query] ?? []
+        return DashDocumentationSource.ranked(results[query] ?? [], language: language)
     }
 
     func release() { waiting?.resume(); waiting = nil }
@@ -190,11 +229,13 @@ func documentationPanelModelReportsUnavailableSourcesAndMissingResults() async {
 @Test
 func documentationPanelModelLoadsSingleAndExactResultsAndWaitsOnAmbiguousOnes() async {
     let lone = threadingResults[1]
-    let model = DocumentationPanelModel(source: StubSource(results: [
+    let source = StubSource(results: [
         "ThreadingMock": [lone],
         "threading": threadingResults,
         "acquire": acquireResults,
-    ]))
+        "getenv": getenvResults,
+    ])
+    let model = DocumentationPanelModel(source: source)
     model.show(query: "ThreadingMock")
     #expect(await settled(model) == .showing(lone, [lone]))
     model.show(query: "threading")
@@ -205,6 +246,12 @@ func documentationPanelModelLoadsSingleAndExactResultsAndWaitsOnAmbiguousOnes() 
     #expect(model.state == .showing(acquireResults[4], acquireResults))
     model.select(threadingResults[0])
     #expect(model.state == .showing(acquireResults[4], acquireResults), "A stale candidate is ignored")
+    // The reading file's language reaches the source; its one exact match loads.
+    model.show(query: "getenv", language: .python)
+    let ranked = DashDocumentationSource.ranked(getenvResults, language: .python)
+    #expect(await settled(model) == .showing(ranked[0], ranked))
+    #expect(ranked[0].docset == "Python")
+    #expect(await source.languages.last == .python)
 }
 
 @MainActor
@@ -246,11 +293,14 @@ private func dashAPIAnswers() async -> Bool {
 func dashSourceSearchesTheLocalDashAPI() async throws {
     let source = DashDocumentationSource(isInstalled: { true }, isRunning: { true })
     #expect(await source.availability() == .available)
-    let results = try await source.search("threading.Thread.start")
+    let results = try await source.search("threading.Thread.start", language: .python)
     let exact = try #require(results.first { source.isExactMatch($0, for: "threading.Thread.start") })
     #expect(exact.loadURL.host == "127.0.0.1")
     #expect(exact.loadURL.fragment?.contains("threading.Thread.start") == true)
-    #expect(try await source.search("zzzqqq-no-such-symbol").isEmpty)
+    #expect(try await source.search("zzzqqq-no-such-symbol", language: nil).isEmpty)
+    // Live ranking: Python's `getenv` comes first for a Python file.
+    let getenv = try await source.search("getenv", language: .python)
+    #expect(getenv.first?.platform == "python" && getenv.first?.matchesLanguage == true)
     let missing = DashDocumentationSource(
         isInstalled: { true }, isRunning: { true },
         statusFile: URL(fileURLWithPath: "/nonexistent/status.json"))

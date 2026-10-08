@@ -3912,7 +3912,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard DashIntegration.isInstalled, let document = token.document,
               let identifier = identifierText(in: document, token.range),
               let url = DashIntegration.url(query: DashIntegration.query(
-                  identifier: identifier, doc: doc, language: document.languageMode.language))
+                  identifier: identifier, doc: doc, language: document.languageMode.language,
+                  receiver: DashIntegration.receiver(in: document.bytes, identifierAt: token.lowerBound)))
         else { return [] }
         return [("↗ " + localized("main.open.in.dash"), url), (localized("main.show.in.docs.panel"), Self.docsPanelLink)]
     }
@@ -3925,12 +3926,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return String(bytes: document.bytes[Int(range.lowerBound)..<Int(range.upperBound)], encoding: .utf8)
     }
 
-    /// The one action behind the context menu, the card link and ⌃⌘D: shows
+    /// The one action behind the context menu, the card link and ⌃⇧D: shows
     /// the panel (sized once, the first time) and searches the source.
     func showInDocsPanel(identifier: String, in document: ReaderDocument, byteOffset: UInt32) {
         let query = dashQuery(identifier: identifier, in: document, byteOffset: byteOffset)
         revealDocsPanel()
-        docsController.model.show(query: query)
+        docsController.model.show(query: query, language: document.languageMode.language)
     }
 
     /// Shows the docs panel. The first time it also records the 40% a
@@ -3948,7 +3949,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         savePanelLayout()
     }
 
-    /// ⌃⌘D: the identifier at the caret, in any language.
+    /// ⌃⇧D: the identifier at the caret, in any language.
     var canShowInDocsPanel: Bool { focusedReader.hoverRequestAtSelection() != nil }
 
     func showInDocsPanelAtSelection() {
@@ -3958,8 +3959,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         showInDocsPanel(identifier: identifier, in: request.document, byteOffset: request.target.byteRange.lowerBound)
     }
 
-    /// Context-menu query: the hover card's exact result is reused when it is
-    /// showing the clicked identifier, otherwise the identifier alone is sent.
+    /// The query for "Open in Dash" and the docs panel: the hover card's
+    /// exact result is reused when it is showing the identifier; the receiver
+    /// before a `.` is read from the document.
     private func dashQuery(identifier: String, in document: ReaderDocument, byteOffset: UInt32) -> String {
         var doc: SymbolDoc?
         if case let .showing(token, shown) = model.symbolHover.phase,
@@ -3967,7 +3969,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
            token.lowerBound <= byteOffset, byteOffset < token.upperBound {
             doc = shown
         }
-        return DashIntegration.query(identifier: identifier, doc: doc, language: document.languageMode.language)
+        return DashIntegration.query(
+            identifier: identifier, doc: doc, language: document.languageMode.language,
+            receiver: DashIntegration.receiver(in: document.bytes, identifierAt: byteOffset)
+        )
     }
 
     /// Languages with a hover docs layer (hover docs plans Q16, P1);
