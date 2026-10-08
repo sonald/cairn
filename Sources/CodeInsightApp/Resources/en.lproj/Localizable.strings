@@ -783,7 +783,7 @@
 "panel.move.down" = "Move Down";
 "panel.drop.here" = "Drop Here";
 "panel.docs" = "Documentation";
-"docs.empty" = "Select a symbol in the reader, then use the context menu, the hover card or ⌃⌘D to see its documentation here";
+"docs.empty" = "Select a symbol in the reader, then use the context menu, the hover card or ⌃⇧D to see its documentation here";
 "docs.notInstalled" = "Dash is not installed";
 "docs.notRunning" = "Dash is not running";
 "docs.apiDisabled" = "Dash’s API server is off. Turn it on in Dash → Settings → Integration";

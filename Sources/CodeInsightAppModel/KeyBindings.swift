@@ -447,8 +447,9 @@ public extension KeyBindingScheme {
             def(.relationsShowResolutionInspector, .relations, "app.menu.show.resolution.inspector", [
                 keyboard([.command], .character("i")),
             ]),
+            // ⌃⌘D is the system's Look Up in text views and never reaches the menu.
             def(.relationsShowInDocsPanel, .relations, "main.show.in.docs.panel", [
-                keyboard([.control, .command], .character("d")),
+                keyboard([.control, .shift], .character("d")),
             ]),
 
             def(.lensTrackSymbol, .lens, "lens.trackSymbol", []),

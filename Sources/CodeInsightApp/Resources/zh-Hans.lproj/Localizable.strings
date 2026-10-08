@@ -783,7 +783,7 @@
 "panel.move.down" = "下移";
 "panel.drop.here" = "放到这里";
 "panel.docs" = "文档";
-"docs.empty" = "在阅读区选中一个符号，用右键菜单、悬浮卡片或 ⌃⌘D 在这里查看文档";
+"docs.empty" = "在阅读区选中一个符号，用右键菜单、悬浮卡片或 ⌃⇧D 在这里查看文档";
 "docs.notInstalled" = "未安装 Dash";
 "docs.notRunning" = "Dash 未运行";
 "docs.apiDisabled" = "Dash 的 API 服务未开启，在 Dash → Settings → Integration 打开";
