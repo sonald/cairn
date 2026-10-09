@@ -56,6 +56,7 @@
 - [ReaderDerivedDataStore](../Sources/CodeInsightReaderCore/ReaderDerivedDataStore.swift) 是应用拥有的有界共享缓存。视图拥有订阅，不拥有共享 worker；关闭一个视图只释放其订阅。任务取消、过期发布与视图消失都必须释放 token。
 - 派生索引在后台构建；UI 只接收仍匹配 generation/内容的结果。共享计算不能由某个窗口的临时状态决定是否属于其他窗口。
 - 颜色修改不应更换源码或重建投影；局部折叠用局部投影更新。声明形状、装饰与大纲等仍使用各自已有数据入口，不为每个主题增设通用层。
+- 主题颜色全部来自 [ThemePalette](../Sources/CodeInsightReaderCore/ThemePalette.swift)：内置三套是手调字面量，base16 方案由 [Base16Scheme](../Sources/CodeInsightReaderCore/Base16Scheme.swift) 解析并在同一文件映射到全部角色。[ThemeCatalog](../Sources/CodeInsightReaderCore/ThemeCatalog.swift) 是进程内注册表：内置与随附 `Themes/` 在首次使用时载入，用户主题文件夹由 App 在启动和打开设置时重新扫描。`ReaderTheme` 按主题 id（Auto 按配对）解析出浅/深两份调色板，读取接口不变，`Equatable` 含调色板，所以切换同一明暗的两个主题也会触发重绘；窗口外观只取解析后的明暗（`cairnAppearance(for:)`）。
 - [ReaderDocumentCost](../Sources/CodeInsightReaderCore/ReaderDocumentCost.swift) 在已有行表上计算源成本。高成本文档先选择有界视口路径，再考虑旧视口恢复；没有旧视口不代表可以同步全文布局。
 - 概览竖条按显示行比例定位。2026-10-05 进程内测量（3,000 与 60,000 行、换行开关、折叠前后）：某行在 TextKit 估算文档高度中的位置与其行比例相差最多约 14%，同一行先后两次访问的位置也会变，因为未排版区域只有估算高度；行比例则稳定。显示行由 [ProjectedLines](../Sources/CodeInsightReaderCore/ProjectedLines.swift) 从行表和折叠段算出，不扫描文本。
 - App 主动不扫描全文不等于 TextKit 保证不布局全文。长自然段落仍可能昂贵；源坐标、选区、复制和几何不能为性能被悄悄改变。

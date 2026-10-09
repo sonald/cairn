@@ -13,7 +13,7 @@
 - A Context window that follows symbols or the enclosing function, previews binding types, and can be pinned.
 - Optional rust-analyzer, Pyright, and typescript-language-server analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
-- Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes, and English/Simplified Chinese UI.
+- Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes plus bundled and user-supplied base16 themes, and English/Simplified Chinese UI.
 - Read-only Markdown, restricted HTML, image, PDF, and UTF-8 text previews.
 
 Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally.

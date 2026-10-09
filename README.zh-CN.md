@@ -13,7 +13,7 @@
 - 跟随符号或所在函数的 Context 窗口，支持值绑定的类型预览与固定。
 - 可选 rust-analyzer、Pyright、typescript-language-server 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
-- 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题、中英文界面。
+- 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题及随附与自选的 base16 主题、中英文界面。
 - 只读 Markdown、受限 HTML、图片、PDF 和 UTF-8 文本预览。
 
 默认 Safe 模式禁止网络，关闭 Rust 构建脚本与 proc macros。用户明确信任项目后可以开启这些分析步骤，并允许向项目 `target` 目录写入，网络仍关闭。语言服务和依赖需已存在于本机。
