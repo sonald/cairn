@@ -747,9 +747,19 @@ struct TextLexer {
         "HEALTHCHECK", "SHELL",
     ]
 
+    /// Keywords whose next word is a command name (`if grep …`, `do make`).
+    private static let shellCommandKeywords: Set<String> = [
+        "if", "then", "else", "elif", "do", "while", "until", "!", "time", "exec",
+    ]
+
+    /// Command names read as declaration titles and `-`/`--` options as
+    /// attributes, so README command lines show their structure.
     mutating func shell(_ start: Int, _ end: Int, dockerfile: Bool) {
         var i = start
         var command = true
+        // `command` also stays set after `export` for `NAME=` assignments;
+        // this one marks where the next word names a program.
+        var expectsCommand = true
         var lineStart = true
         var expectIn = 0
         var heredocs: [(delimiter: String, stripTabs: Bool)] = []
@@ -759,7 +769,7 @@ struct TextLexer {
                 i += 1
                 let continued = i >= 2 && s[i - 2] == 0x5C
                 lineStart = !continued
-                if !continued { command = true }
+                if !continued { command = true; expectsCommand = true }
                 for heredoc in heredocs {
                     let bodyStart = i
                     var matched = false
@@ -796,6 +806,7 @@ struct TextLexer {
                     emit(i, j, .keyword)
                     // RUN takes a command; ARG/ENV take assignments.
                     command = ["RUN", "ARG", "ENV"].contains(word(i, j).uppercased())
+                    expectsCommand = word(i, j).uppercased() == "RUN"
                     i = j
                     lineStart = false
                     continue
@@ -808,6 +819,7 @@ struct TextLexer {
                 emit(i, close, .string)
                 i = close
                 command = false
+                expectsCommand = false
             case 0x22:
                 var j = i + 1
                 var run = i
@@ -829,6 +841,7 @@ struct TextLexer {
                 emit(run, j, .string)
                 i = j
                 command = false
+                expectsCommand = false
             case 0x24:
                 if char(i + 1) == 0x27 {
                     let close = quoted(i + 1, limit: end)
@@ -837,10 +850,12 @@ struct TextLexer {
                 } else if char(i + 1) == 0x28 {
                     i += 2
                     command = true
+                    expectsCommand = true
                 } else {
                     let varEnd = shellVariableEnd(i, end)
                     emit(i, varEnd, .parameter)
                     i = max(varEnd, i + 1)
+                    expectsCommand = false
                 }
             case 0x3C where char(i + 1) == 0x3C && char(i + 2) != 0x3C:
                 var j = i + 2
@@ -865,6 +880,11 @@ struct TextLexer {
                 i = max(j, i + 2)
             case 0x3B, 0x7C, 0x26, 0x28, 0x7B, 0x60:
                 command = true
+                expectsCommand = true
+                i += 1
+            case 0x5C where i + 1 >= end || char(i + 1) == Self.newline || char(i + 1) == 0x0D:
+                // A line continuation recedes like a comment.
+                emit(i, i + 1, .comment)
                 i += 1
             default:
                 guard Self.isWord(c) || c == 0x5B || c == 0x5D || c == 0x21 || c == 0x2D
@@ -897,6 +917,7 @@ struct TextLexer {
                         emit(i, j, .keyword)
                         i = j
                         command = false
+                        expectsCommand = false
                         continue
                     }
                 }
@@ -910,11 +931,13 @@ struct TextLexer {
                         emit(name, nameEnd, .functionName)
                         i = nameEnd
                         command = false
+                        expectsCommand = false
                         continue
                     }
                     // Declarations keep command position so `export NAME=` reads as an assignment.
                     command = !["unset", "return", "exit", "shift", "source", "for", "select", "case"]
                         .contains(token)
+                    expectsCommand = Self.shellCommandKeywords.contains(token)
                     i = j
                     continue
                 }
@@ -923,8 +946,13 @@ struct TextLexer {
                     emit(i, j, .functionName)
                 } else if s[i..<j].allSatisfy(Self.isDigit) {
                     emit(i, j, .number)
+                } else if expectsCommand {
+                    emit(i, j, .declarationTitle)
+                } else if s[i] == 0x2D, j > i + 1 {
+                    emit(i, j, .attribute)
                 }
                 command = false
+                expectsCommand = false
                 i = j
             }
         }

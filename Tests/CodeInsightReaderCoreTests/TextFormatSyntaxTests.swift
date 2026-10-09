@@ -191,6 +191,29 @@ func shellHighlightsKeywordsVariablesStringsAndHeredocs() {
 }
 
 @Test
+func shellMarksCommandNamesOptionsAndContinuations() {
+    let result = tokens(.shell, """
+    uv run tail.py \\
+      --image data/dog.png -n 3 \\
+      --out=dir 2>&1 | tee log
+    export PATH
+    if grep -q x f; then make; fi
+    """)
+    #expect(result.contains("declarationTitle:uv"))
+    #expect(!result.contains("declarationTitle:run"))
+    #expect(result.filter { $0 == "comment:\\" }.count == 2)
+    #expect(result.contains("attribute:--image"))
+    #expect(result.contains("attribute:-n"))
+    #expect(result.contains("attribute:--out"))
+    #expect(result.contains("declarationTitle:tee"))
+    #expect(!result.contains("declarationTitle:log"))
+    #expect(!result.contains("declarationTitle:PATH"))
+    #expect(result.contains("declarationTitle:grep"))
+    #expect(result.contains("attribute:-q"))
+    #expect(result.contains("declarationTitle:make"))
+}
+
+@Test
 func dockerfileAndMakefileHighlightTheirStructure() {
     let docker = tokens(.dockerfile, """
     FROM swift:6.1 AS build
