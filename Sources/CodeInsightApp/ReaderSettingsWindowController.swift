@@ -360,7 +360,7 @@ private struct ReaderSettingsView: View {
             ScrollViewReader { proxy in
                 Form {
                     Picker(localized("settings.theme"), selection: $settings.theme) {
-                        ForEach(ReaderSettings.Theme.allCases, id: \.self) { theme in
+                        ForEach(ReaderSettings.Theme.builtIns, id: \.self) { theme in
                             Text(localized("settings.theme.\(theme.rawValue)")).tag(theme)
                         }
                     }

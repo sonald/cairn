@@ -175,11 +175,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
-        window?.appearance = switch settings.theme {
-        case .dark: NSAppearance(named: .darkAqua)
-        case .light, .siClassic: NSAppearance(named: .aqua)
-        case .auto: nil
-        }
+        window?.appearance = cairnAppearance(for: settings.theme)
         guard let content = window?.contentView else { return }
         content.layer?.backgroundColor = theme.backgroundColor.cgColor
         content.layer?.borderColor = theme.chromeDividerColor.cgColor

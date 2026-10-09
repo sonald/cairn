@@ -125,7 +125,7 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
 
 @Test
 func readerThemePaletteMeetsRequiredContrastRatios() {
-    for selection in ReaderSettings.Theme.allCases {
+    for selection in ReaderSettings.Theme.builtIns {
         let theme = ReaderTheme(settings: ReaderSettings(theme: selection))
         for isDark in [false, true] {
             let checks: [(String, UInt32, UInt32, Double)] = [

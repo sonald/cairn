@@ -2613,11 +2613,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         currentReaderSettings = settings
         model.symbolHover.isHoverEnabled = settings.hoverDocs
         if symbolDocCard.isShown { renderSymbolHover() }
-        window?.appearance = switch settings.theme {
-        case .dark: NSAppearance(named: .darkAqua)
-        case .light, .siClassic: NSAppearance(named: .aqua)
-        case .auto: nil
-        }
+        window?.appearance = cairnAppearance(for: settings.theme)
         let theme = ReaderTheme(settings: settings)
         window?.backgroundColor = theme.chromeColor
         window?.titlebarAppearsTransparent = true

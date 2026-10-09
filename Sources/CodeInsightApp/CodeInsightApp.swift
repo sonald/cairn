@@ -1682,11 +1682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     private func applyApplicationAppearance() {
-        NSApplication.shared.appearance = switch readerSettings.theme {
-        case .dark: NSAppearance(named: .darkAqua)
-        case .light, .siClassic: NSAppearance(named: .aqua)
-        case .auto: nil
-        }
+        NSApplication.shared.appearance = cairnAppearance(for: readerSettings.theme)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

@@ -324,7 +324,7 @@ func everyThemeAppliesTypographyWithinStorageBounds() throws {
         byteUpperBound: Int(commentSpan.range.upperBound)
     ))
 
-    for theme in ReaderSettings.Theme.allCases {
+    for theme in ReaderSettings.Theme.builtIns {
         for humanistComments in [false, true] {
             let settings = ReaderSettings(
                 theme: theme,

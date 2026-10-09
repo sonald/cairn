@@ -552,12 +552,7 @@ func runFoldPerformance(
     let viewport = scrollView.contentView.bounds.size
     let windowSize = window.contentView?.bounds.size ?? .zero
     let effective = reader.foldPerformanceEffectiveSettings
-    let themeName = switch effective.theme {
-    case .siClassic: "SI Classic"
-    case .dark: "Dark"
-    case .light: "Light"
-    case .auto: "Auto"
-    }
+    let themeName = effective.theme.rawValue
     let wrapLines = reader.view.textContainer?.widthTracksTextView == true
     let fixtureSHA = document.contentID.bytes
         .map { String(format: "%02x", $0) }

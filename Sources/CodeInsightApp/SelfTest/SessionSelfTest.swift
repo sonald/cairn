@@ -1393,9 +1393,7 @@ extension AppDelegate {
         let compareDisabled = !validateMenuItem(toggle)
             && toggle.accessibilityHelp() == "Compare views cannot be bookmarked."
         self.model.compare.clear()
-        let themeCaptures = ReaderSettings.Theme.allCases.filter {
-            [.light, .dark, .siClassic].contains($0)
-        }.map { theme in
+        let themeCaptures = [ReaderSettings.Theme.light, .dark, .siClassic].map { theme in
             var settings = self.readerSettings
             settings.theme = theme
             controller.applyReaderSettings(settings)
