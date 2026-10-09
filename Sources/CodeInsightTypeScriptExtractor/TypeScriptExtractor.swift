@@ -447,6 +447,26 @@ let tsPrimitiveNames: Set<String> = [
         return emitted
     }
 
+    /// A bodyless class member (`abstract area(): number;`): a facet, no scope.
+    func emitMethodSignature(_ node: Node) {
+        guard shouldEmitFacetForFunction(isMethod: true),
+              let name = childField(node, "name"),
+              let nameString = text(name, in: bytes)
+        else { return }
+        let index = UInt32(symbols.count)
+        symbols.append(DeclarationFacet(
+            symbolGroupID: SymbolGroupID(rawValue: index),
+            space: .value,
+            kind: .typescriptFunction,
+            nameID: names.intern(nameString),
+            range: coreRange(node),
+            nameRange: coreRange(name),
+            parentFacetIndex: facetStack.last,
+            signatureFingerprint: fingerprint(coreRange(node), bytes: bytes),
+            bodyFingerprint: nil
+        ))
+    }
+
     func exitFunctionBody() {
         popRegion()
         popScope()
@@ -834,7 +854,7 @@ let tsPrimitiveNames: Set<String> = [
                 walk(body)
             }
             return
-        case "class_declaration":
+        case "class_declaration", "abstract_class_declaration":
             if let emittedClass = enterClassBody(node) {
                 enterBodyNode(node, body: childField(node, "body")!) {
                     exitClassBody(afterEmit: emittedClass)
@@ -851,6 +871,9 @@ let tsPrimitiveNames: Set<String> = [
             } else if let body = childField(node, "body") {
                 walk(body)
             }
+            return
+        case "abstract_method_signature":
+            emitMethodSignature(node)
             return
         case "lexical_declaration", "variable_declaration":
             enterVariableDeclaration(node)

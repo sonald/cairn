@@ -140,7 +140,7 @@ private func typeScriptWalk(
             spans: &spans,
             facets: &facets
         )
-    case "class_declaration":
+    case "class_declaration", "abstract_class_declaration":
         appendTypeScriptDeclaration(
             function: node,
             bytes: bytes,
@@ -149,7 +149,7 @@ private func typeScriptWalk(
             spans: &spans,
             facets: &facets
         )
-    case "method_definition":
+    case "method_definition", "abstract_method_signature":
         appendTypeScriptDeclaration(
             function: node,
             bytes: bytes,
@@ -195,7 +195,8 @@ private func typeScriptWalk(
     for index in 0..<node.childCount {
         guard let child = node.child(at: index) else { continue }
         if ["function_declaration", "generator_function_declaration", "class_declaration",
-            "method_definition", "public_field_definition", "enum_declaration"].contains(node.kind),
+            "abstract_class_declaration", "method_definition", "abstract_method_signature",
+            "public_field_definition", "enum_declaration"].contains(node.kind),
            child.byteRange == node.child(namedField: "name")?.byteRange,
            child.kind != "computed_property_name",
            contentRegionKind(nodeKind: child.kind, language: .typescript) == nil
@@ -206,7 +207,8 @@ private func typeScriptWalk(
         let childDepth = isBody
             && node.child(namedField: "body")?.byteRange == child.byteRange
             ? depth + 1
-            : depth + (node.kind == "class_declaration" || node.kind == "enum_declaration" ? 1 : 0)
+            : depth + (node.kind == "class_declaration" || node.kind == "abstract_class_declaration"
+                || node.kind == "enum_declaration" ? 1 : 0)
         let childRole: HighlightKind?
         switch node.kind {
         case "decorator": childRole = .attribute
@@ -309,8 +311,8 @@ private func visitTypeScriptFoldCandidate(
 ) {
     switch node.kind {
     case "function_declaration", "generator_function_declaration",
-         "method_definition", "class_declaration", "arrow_function",
-         "function_expression", "class":
+         "method_definition", "class_declaration", "abstract_class_declaration",
+         "arrow_function", "function_expression", "class":
         if let body = node.child(namedField: "body") {
             appendTypeScriptBracedCandidate(
                 kind: node.kind.contains("class") ? .container : .declaration,
@@ -532,7 +534,7 @@ private func typeScriptLocalReferences(
                 leaveScope()
                 return
             }
-        case "class_declaration", "class":
+        case "class_declaration", "abstract_class_declaration", "class":
             if let body = node.child(namedField: "body") {
                 if let name = node.child(namedField: "name"),
                    let text = typeScriptText(bytes, range: coreRange(name))

@@ -190,7 +190,24 @@ struct Resolver {
         if !imported.isEmpty { return sorted(imported, from: file) }
         if !unresolved.isEmpty { return unresolved }
 
-        if session.analysisProfile.language == .typescript { return [] }
+        if session.analysisProfile.language == .typescript {
+            // No global name fallback in TypeScript, so a click on a member's
+            // own declaration name (a method) resolves that declaration here.
+            guard located.call == nil,
+                  let facetIndex = index.symbols.firstIndex(where: {
+                      $0.nameRange == located.range
+                  }),
+                  let localIndex = UInt32(exactly: facetIndex)
+            else { return [] }
+            return [candidate(
+                pathID: file,
+                localIndex: localIndex,
+                certainty: .strong,
+                dispatch: .direct,
+                evidence: [.sameFile(pathID: file)],
+                context: context
+            )]
+        }
 
         let definitions = session.definitionOccurrences(named: located.nameID).filter {
             guard located.identifierFallback else { return true }
