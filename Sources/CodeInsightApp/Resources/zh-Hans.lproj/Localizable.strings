@@ -451,6 +451,13 @@
 "settings.theme.Dark" = "深色";
 "settings.theme.Light" = "浅色";
 "settings.theme.SI Classic" = "SI 经典";
+"settings.theme.builtIn" = "内置";
+"settings.theme.bundled" = "随附 base16";
+"settings.theme.user" = "主题文件夹";
+"settings.theme.autoLight" = "浅色主题";
+"settings.theme.autoDark" = "深色主题";
+"settings.theme.quietSyntax" = "导入主题使用安静的语法着色";
+"settings.theme.openFolder" = "打开主题文件夹";
 "settings.title" = "设置";
 "settings.trust.confirm" = "撤销信任？";
 "settings.trust.empty" = "没有受信任的仓库";

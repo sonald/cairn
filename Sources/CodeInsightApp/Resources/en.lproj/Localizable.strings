@@ -451,6 +451,13 @@
 "settings.theme.Dark" = "Dark";
 "settings.theme.Light" = "Light";
 "settings.theme.SI Classic" = "SI Classic";
+"settings.theme.builtIn" = "Built-in";
+"settings.theme.bundled" = "Included base16";
+"settings.theme.user" = "Theme folder";
+"settings.theme.autoLight" = "Light theme";
+"settings.theme.autoDark" = "Dark theme";
+"settings.theme.quietSyntax" = "Quiet syntax colors for imported themes";
+"settings.theme.openFolder" = "Open Theme Folder";
 "settings.title" = "Settings";
 "settings.trust.confirm" = "Revoke Trust?";
 "settings.trust.empty" = "No Trusted Repositories";

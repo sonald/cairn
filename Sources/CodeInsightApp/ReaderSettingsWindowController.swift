@@ -30,6 +30,11 @@ final class TrustListModel {
     }
 }
 
+/// Where users drop base16 `.yaml` themes: beside the session file.
+@MainActor let userThemesFolder = AppModel.defaultSessionURL
+    .deletingLastPathComponent()
+    .appendingPathComponent("Themes", isDirectory: true)
+
 /// Result of the app-level materialized-cache clear (§8.4).
 enum MaterializedCacheClearOutcome: Equatable {
     case cleared
@@ -359,11 +364,7 @@ private struct ReaderSettingsView: View {
         VStack(spacing: 12) {
             ScrollViewReader { proxy in
                 Form {
-                    Picker(localized("settings.theme"), selection: $settings.theme) {
-                        ForEach(ReaderSettings.Theme.builtIns, id: \.self) { theme in
-                            Text(localized("settings.theme.\(theme.rawValue)")).tag(theme)
-                        }
-                    }
+                    themeControls
                     Stepper(
                         localizedFormat("settings.fontSize", settings.fontSize),
                         value: $settings.fontSize,
@@ -470,6 +471,48 @@ private struct ReaderSettingsView: View {
         .onChange(of: suppliedSettings) { _, value in settings = value }
         .onChange(of: settings) { _, value in
             if value != suppliedSettings { onChange(value) }
+        }
+    }
+
+    @ViewBuilder
+    private var themeControls: some View {
+        let entries = ThemeCatalog.entries
+        Picker(localized("settings.theme"), selection: $settings.theme) {
+            themeOptions(entries)
+        }
+        if settings.theme == .auto {
+            Picker(localized("settings.theme.autoLight"), selection: $settings.autoLightTheme) {
+                themeOptions(entries.filter { $0.variant == .light })
+            }
+            Picker(localized("settings.theme.autoDark"), selection: $settings.autoDarkTheme) {
+                themeOptions(entries.filter { $0.variant == .dark })
+            }
+        }
+        Toggle(localized("settings.theme.quietSyntax"), isOn: $settings.quietSyntax)
+        Button(localized("settings.theme.openFolder")) {
+            try? FileManager.default.createDirectory(at: userThemesFolder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(userThemesFolder)
+        }
+    }
+
+    /// Built-in, bundled and user themes as three picker sections.
+    @ViewBuilder
+    private func themeOptions(_ entries: [ThemeEntry]) -> some View {
+        let groups: [(String, ThemeEntry.Source)] = [
+            (localized("settings.theme.builtIn"), .builtIn),
+            (localized("settings.theme.bundled"), .bundled),
+            (localized("settings.theme.user"), .user),
+        ]
+        ForEach(groups, id: \.0) { title, source in
+            let members = entries.filter { $0.source == source }
+            if !members.isEmpty {
+                Section(title) {
+                    ForEach(members, id: \.theme) { entry in
+                        Text(source == .builtIn ? localized("settings.theme.\(entry.theme.rawValue)") : entry.name)
+                            .tag(entry.theme)
+                    }
+                }
+            }
         }
     }
 

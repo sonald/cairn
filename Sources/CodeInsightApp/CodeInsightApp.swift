@@ -55,7 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// self-tests inject an isolated URL so multi-window acceptance never
     /// touches real user data (§11).
     let windowSessionURL: URL?
-    private(set) var readerSettings = ReaderSettings(defaults: .standard)
+    private(set) var readerSettings: ReaderSettings = {
+        // User themes must be known before the stored theme id is validated.
+        ThemeCatalog.reloadUserThemes(in: userThemesFolder)
+        return ReaderSettings(defaults: .standard)
+    }()
     private let readerDerivedDataStore = ReaderDerivedDataStore()
     nonisolated(unsafe) private var wrapKeyMonitor: Any?
     // Window collection and routing state (all MainActor, §4.1).
@@ -1212,6 +1216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     private(set) lazy var trustListModel = TrustListModel()
 
     @objc func showSettings(_ sender: Any?) {
+        ThemeCatalog.reloadUserThemes(in: userThemesFolder)
+        let validated = readerSettings.validatingThemes()
+        if validated != readerSettings { commitReaderSettings(validated) }
         if settingsWindowController == nil {
             settingsWindowController = ReaderSettingsWindowController(
                 settings: readerSettings,

@@ -129,6 +129,9 @@ public struct ReaderSettings: Equatable, Sendable {
     }
     public var codeLigatures: CodeLigatureMode
     public var theme: Theme
+    /// The pair Auto switches between with the system appearance.
+    public var autoLightTheme: Theme
+    public var autoDarkTheme: Theme
     /// Base16 themes color functions, properties and parameters like body
     /// text and types in blue; off follows the base16 conventions fully.
     public var quietSyntax: Bool
@@ -190,6 +193,8 @@ public struct ReaderSettings: Equatable, Sendable {
         blockEndAnnotations = true
         overviewRuler = true
         showQuerySuggestions = true
+        autoLightTheme = .light
+        autoDarkTheme = .dark
         quietSyntax = true
     }
 
@@ -256,6 +261,12 @@ public struct ReaderSettings: Equatable, Sendable {
         showQuerySuggestions = (defaults.object(forKey: Keys.showQuerySuggestions) as? NSNumber)?
             .boolValue
             ?? true
+        autoLightTheme = defaults.string(forKey: Keys.autoLightTheme).map(Theme.init(rawValue:))
+            ?? .light
+        autoDarkTheme = defaults.string(forKey: Keys.autoDarkTheme).map(Theme.init(rawValue:))
+            ?? .dark
+        quietSyntax = (defaults.object(forKey: Keys.quietSyntax) as? NSNumber)?.boolValue ?? true
+        self = validatingThemes()
         // Revision 2 (UI redesign): settings saved before it hold the old
         // defaults for every key; adopt the new ones once where unchanged.
         if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
@@ -290,6 +301,10 @@ public struct ReaderSettings: Equatable, Sendable {
         validated.blockEndAnnotations = blockEndAnnotations
         validated.overviewRuler = overviewRuler
         validated.showQuerySuggestions = showQuerySuggestions
+        validated.autoLightTheme = autoLightTheme
+        validated.autoDarkTheme = autoDarkTheme
+        validated.quietSyntax = quietSyntax
+        validated = validated.validatingThemes()
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -321,6 +336,9 @@ public struct ReaderSettings: Equatable, Sendable {
         }
         defaults.set(validated.codeLigatures.rawValue, forKey: Keys.codeLigatures)
         defaults.set(validated.theme.rawValue, forKey: Keys.theme)
+        defaults.set(validated.autoLightTheme.rawValue, forKey: Keys.autoLightTheme)
+        defaults.set(validated.autoDarkTheme.rawValue, forKey: Keys.autoDarkTheme)
+        defaults.set(validated.quietSyntax, forKey: Keys.quietSyntax)
         defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
         defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
@@ -329,6 +347,21 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
         defaults.set(validated.overviewRuler, forKey: Keys.overviewRuler)
         defaults.set(validated.showQuerySuggestions, forKey: Keys.showQuerySuggestions)
+    }
+
+    /// Settings whose theme ids all name catalog themes: an unknown theme
+    /// (its file was deleted) becomes Auto, and an Auto slot holding an
+    /// unknown theme or one of the other variant gets the slot's default.
+    public func validatingThemes() -> ReaderSettings {
+        var validated = self
+        if ThemeCatalog.entry(for: theme) == nil { validated.theme = .auto }
+        if ThemeCatalog.entry(for: autoLightTheme)?.variant != .light {
+            validated.autoLightTheme = .light
+        }
+        if ThemeCatalog.entry(for: autoDarkTheme)?.variant != .dark {
+            validated.autoDarkTheme = .dark
+        }
+        return validated
     }
 
     private enum Keys {
@@ -347,6 +380,9 @@ public struct ReaderSettings: Equatable, Sendable {
         static let declarationEmphasisFontWeight =
             "reader.declarationEmphasisFontWeight"
         static let theme = "reader.theme"
+        static let autoLightTheme = "reader.theme.light"
+        static let autoDarkTheme = "reader.theme.dark"
+        static let quietSyntax = "reader.theme.quietSyntax"
         static let syntaxFormatting = "reader.syntaxFormatting"
         static let humanistComments = "reader.humanistComments"
         static let lineNumbers = "reader.lineNumbers"
@@ -395,14 +431,21 @@ public struct ReaderTheme: Equatable, Sendable {
         syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
         blockEndAnnotations = settings.blockEndAnnotations
-        if let fixed = ThemeCatalog.entry(for: settings.theme)?.palette(quiet: settings.quietSyntax) {
+        let quiet = settings.quietSyntax
+        if let fixed = ThemeCatalog.entry(for: settings.theme)?.palette(quiet: quiet) {
             lightPalette = fixed
             darkPalette = fixed
             variant = fixed.variant
         } else {
-            // Auto, or an id the catalog no longer has.
-            lightPalette = .light
-            darkPalette = .dark
+            // Auto, or an id the catalog no longer has: follow the system
+            // with the Auto pair, each slot falling back to its default.
+            func slot(_ theme: ReaderSettings.Theme, _ variant: ThemePalette.Variant) -> ThemePalette? {
+                ThemeCatalog.entry(for: theme)?.palette(quiet: quiet).flatMap {
+                    $0.variant == variant ? $0 : nil
+                }
+            }
+            lightPalette = slot(settings.autoLightTheme, .light) ?? .light
+            darkPalette = slot(settings.autoDarkTheme, .dark) ?? .dark
             variant = nil
         }
     }

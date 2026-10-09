@@ -236,3 +236,43 @@ func readerSettingsAdoptRedesignDefaultsOnceWhereOldDefaultsWereStored() throws 
     #expect(reloaded.typeNameDelta == 5)
     #expect(ReaderTheme(settings: reloaded).typeNameFontSize == 15 + 5)
 }
+
+@Test
+func readerSettingsValidateStoredThemeIdsAndTheAutoPair() throws {
+    let suite = "ReaderSettingsTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let fresh = ReaderSettings(defaults: defaults)
+    #expect(fresh.quietSyntax)
+    #expect(fresh.autoLightTheme == .light)
+    #expect(fresh.autoDarkTheme == .dark)
+
+    var chosen = fresh
+    chosen.theme = .init(id: "base16:nord")
+    chosen.autoLightTheme = .init(id: "base16:catppuccin-latte")
+    chosen.autoDarkTheme = .init(id: "base16:catppuccin-mocha")
+    chosen.quietSyntax = false
+    chosen.save(to: defaults)
+    #expect(ReaderSettings(defaults: defaults) == chosen)
+
+    // A deleted theme file: the stored id is unknown, so Auto, saved back as Auto.
+    defaults.set("base16:deleted", forKey: "reader.theme")
+    // Slots: an unknown id, and a dark theme stored in the light slot.
+    defaults.set("base16:also-deleted", forKey: "reader.theme.dark")
+    defaults.set("base16:nord", forKey: "reader.theme.light")
+    let reloaded = ReaderSettings(defaults: defaults)
+    #expect(reloaded.theme == .auto)
+    #expect(reloaded.autoLightTheme == .light)
+    #expect(reloaded.autoDarkTheme == .dark)
+    reloaded.save(to: defaults)
+    #expect(defaults.string(forKey: "reader.theme") == "Auto")
+
+    // Auto resolves through the pair: Latte under light, Mocha under dark.
+    var auto = ReaderSettings()
+    auto.autoLightTheme = .init(id: "base16:catppuccin-latte")
+    auto.autoDarkTheme = .init(id: "base16:catppuccin-mocha")
+    let theme = ReaderTheme(settings: auto)
+    #expect(theme.variant == nil)
+    #expect(theme.backgroundRGB(isDark: false) == 0xEFF1F5)
+    #expect(theme.backgroundRGB(isDark: true) == 0x1E1E2E)
+}
