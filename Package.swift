@@ -330,7 +330,8 @@ let package = Package(
                 "CodeInsightTypeScriptExtractor",
                 "CodeInsightRustExtractor",
                 "CodeInsightPythonExtractor",
-            ]
+            ],
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "CodeInsightReaderUITests",
