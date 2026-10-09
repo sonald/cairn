@@ -1597,6 +1597,53 @@ private func makeRelationNavigationFixture(
 
 @MainActor
 @Test
+func markdownPreviewHeadingLinksScrollWithinAndAcrossFiles() async throws {
+    let filler = (1...80).map { "filler \($0)\n" }.joined(separator: "\n")
+    let fixture = try await makeRelationNavigationFixture(
+        extraFiles: [
+            ("README.md", "[later](#中断恢复与产物) [deep](docs/guide.md#deep-section) "
+                + "[early](docs/guide.md#early-section)\n\n"
+                + filler + "\n## 中断、恢复与产物\n\nhere\n\n" + filler),
+            ("docs/guide.md", "# Guide\n\n" + filler + "\n## Early Section\n\n" + filler
+                + "\n## Deep Section\n\nthere\n\n" + filler),
+        ]
+    )
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let readme = fixture.root.appendingPathComponent("README.md")
+    let guide = fixture.root.appendingPathComponent("docs/guide.md")
+    fixture.controller.openFileForSelfTest(readme)
+    try #require(await relationTestWaitUntil("README preview shows") {
+        fixture.controller.selfTestReaderPreviewTopParagraph?.hasPrefix("later") == true
+    })
+
+    #expect(fixture.controller.selfTestActivatePreviewLink(at: 0))
+    #expect(fixture.controller.selfTestReaderPreviewTopParagraph == "中断、恢复与产物")
+
+    #expect(fixture.controller.selfTestActivatePreviewLink(at: 1))
+    try #require(await relationTestWaitUntil("guide opens at its heading") {
+        fixture.model.selectedFile?.standardizedFileURL == guide.standardizedFileURL
+            && fixture.controller.selfTestReaderPreviewTopParagraph == "Deep Section"
+    })
+
+    // With the guide in its own tab, following the link focuses that tab.
+    fixture.controller.openFileInNewTabForSelfTest(readme)
+    try #require(await relationTestWaitUntil("README opens in a second tab") {
+        fixture.model.selectedFile?.standardizedFileURL == readme.standardizedFileURL
+            && fixture.controller.selfTestReaderPreviewTopParagraph?.hasPrefix("later") == true
+    })
+    #expect(fixture.controller.selfTestTabCount == 2)
+    #expect(fixture.controller.selfTestActivatePreviewLink(at: 2))
+    try #require(await relationTestWaitUntil("existing guide tab scrolls to the new heading") {
+        fixture.model.selectedFile?.standardizedFileURL == guide.standardizedFileURL
+            && fixture.controller.selfTestReaderPreviewTopParagraph == "Early Section"
+    })
+}
+
+@MainActor
+@Test
 func markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge()
     async throws
 {

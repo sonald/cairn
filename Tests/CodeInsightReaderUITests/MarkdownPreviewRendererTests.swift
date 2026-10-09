@@ -39,4 +39,28 @@ struct MarkdownPreviewRendererTests {
         #expect(text.contains("echo 中**“x”**中"))
         #expect(!text.contains("\u{2E31}"))
     }
+
+    @Test func headingsCarryGitHubAnchors() throws {
+        let renderer = MarkdownPreviewRenderer(theme: ReaderTheme(settings: ReaderSettings()), baseURL: nil)
+        let output = try #require(renderer.render("""
+        # 中断、恢复与产物
+
+        ## Two-Stage A: `lipsync.py`!
+
+        ## FAQ
+
+        ## FAQ
+        """))
+        func anchored(_ fragment: String) -> String? {
+            MarkdownPreviewRenderer.anchorRange(for: fragment, in: output)
+                .map { (output.string as NSString).substring(with: $0) }
+        }
+        #expect(anchored("中断恢复与产物") == "中断、恢复与产物")
+        #expect(anchored("%E4%B8%AD%E6%96%AD%E6%81%A2%E5%A4%8D%E4%B8%8E%E4%BA%A7%E7%89%A9") == "中断、恢复与产物")
+        #expect(anchored("Two-Stage-A-lipsyncpy") == "Two-Stage A: lipsync.py!")
+        let first = try #require(MarkdownPreviewRenderer.anchorRange(for: "faq", in: output))
+        let second = try #require(MarkdownPreviewRenderer.anchorRange(for: "faq-1", in: output))
+        #expect(first.location < second.location)
+        #expect(anchored("missing") == nil)
+    }
 }

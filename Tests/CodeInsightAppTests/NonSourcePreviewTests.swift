@@ -147,7 +147,8 @@ func markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() throws {
     let controller = ReaderViewController()
     controller.loadViewIfNeeded()
     var opened: [URL] = []
-    controller.onOpenPreviewLink = { opened.append($0) }
+    var fragments: [String?] = []
+    controller.onOpenPreviewLink = { opened.append($0); fragments.append($1) }
 
     controller.display(markdown, languageMode: nil)
 
@@ -155,6 +156,7 @@ func markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() throws {
     #expect(opened == [
         root.appendingPathComponent("docs/guide.md").standardizedFileURL
     ])
+    #expect(fragments == ["install"])
 }
 
 @MainActor
@@ -176,7 +178,7 @@ func htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() throws {
     let controller = ReaderViewController()
     controller.loadViewIfNeeded()
     var opened: [URL] = []
-    controller.onOpenPreviewLink = { opened.append($0) }
+    controller.onOpenPreviewLink = { url, _ in opened.append(url) }
     controller.display(page, languageMode: nil)
 
     #expect(controller.selfTestHTMLNavigationPolicy(

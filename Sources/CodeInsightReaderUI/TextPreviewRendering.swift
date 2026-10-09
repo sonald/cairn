@@ -86,6 +86,11 @@ package final class MarkdownPreviewTextView: NSTextView {
     }
 }
 
+package extension NSAttributedString.Key {
+    /// A heading's GitHub-style id, for `#fragment` links.
+    static let markdownAnchor = NSAttributedString.Key("CairnMarkdownAnchor")
+}
+
 /// Renders CommonMark/GFM (via Foundation's parser) into a native reading
 /// layout: typographic hierarchy, highlighted fenced code, quote bars, real
 /// tables, task lists, front matter and local images.
@@ -218,6 +223,7 @@ package struct MarkdownPreviewRenderer {
         var tables: [Int: NSTextTable] = [:]
         var quoteBlocks: [Int: NSTextBlock] = [:]
         var codeBlockCount = 0
+        var anchorCounts: [String: Int] = [:]
     }
 
     private static func blocks(of markdown: AttributedString) -> [Block] {
@@ -436,8 +442,46 @@ package struct MarkdownPreviewRenderer {
                                    range: NSRange(location: 2, length: max(0, paragraph.length - 2)))
         }
         paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
+        if case .header = leaf {
+            var slug = Self.headingSlug(paragraph.string)
+            let count = state.anchorCounts[slug, default: 0]
+            state.anchorCounts[slug] = count + 1
+            if count > 0 { slug += "-\(count)" }
+            paragraph.addAttribute(.markdownAnchor, value: slug, range: NSRange(location: 0, length: paragraph.length))
+        }
         paragraph.append(NSAttributedString(string: "\n", attributes: [.paragraphStyle: style, .font: baseFont]))
         output.append(paragraph)
+    }
+
+    /// GitHub's heading ids: lowercase, drop punctuation other than `-` and
+    /// `_`, spaces become hyphens; repeats get `-1`, `-2` in `render`.
+    static func headingSlug(_ text: String) -> String {
+        var slug = String.UnicodeScalarView()
+        for scalar in text.lowercased().unicodeScalars {
+            if scalar == " " || scalar == "-" {
+                slug.append("-")
+            } else if scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+                || scalar.properties.generalCategory == .connectorPunctuation
+                || scalar.properties.generalCategory == .nonspacingMark
+                || scalar.properties.generalCategory == .spacingMark
+            {
+                slug.append(scalar)
+            }
+        }
+        return String(slug)
+    }
+
+    /// The heading a `#fragment` link points at, matched as GitHub does,
+    /// case-insensitively.
+    package static func anchorRange(for fragment: String, in text: NSAttributedString) -> NSRange? {
+        let target = (fragment.removingPercentEncoding ?? fragment).lowercased()
+        var found: NSRange?
+        text.enumerateAttribute(.markdownAnchor, in: NSRange(location: 0, length: text.length)) { value, range, stop in
+            guard (value as? String)?.lowercased() == target else { return }
+            found = range
+            stop.pointee = true
+        }
+        return found
     }
 
     private func components(_ block: Block, matching predicate: (PresentationIntent.Kind) -> Bool) -> Int {

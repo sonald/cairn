@@ -653,8 +653,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
             refreshProjectSearchHits()
         }
-        readerController.onOpenPreviewLink = { [weak self] url in
-            self?.openPreviewLink(url)
+        readerController.onOpenPreviewLink = { [weak self] url, fragment in
+            self?.openPreviewLink(url, fragment: fragment)
         }
         readerController.onReadingSetScrollChange = { [weak self] offset in
             guard let self else { return }
@@ -1167,6 +1167,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestReaderPreviewText: String? {
         readerController.selfTestPreviewState.renderedText
+    }
+    var selfTestReaderPreviewTopParagraph: String? {
+        readerController.selfTestPreviewTopParagraph
     }
     var selfTestReaderHTMLFinished: Bool {
         readerController.selfTestReaderHTMLFinished
@@ -4883,12 +4886,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     @discardableResult
-    private func openPreviewLink(_ url: URL) -> Bool {
+    private func openPreviewLink(_ url: URL, fragment: String? = nil) -> Bool {
         let file = url.standardizedFileURL
         guard let path = model.fileTree?.selectionPath(for: file),
               let node = path.last,
               !node.isDirectory
         else { return false }
+        readerController.pendingPreviewAnchor = fragment.map { (file, $0) }
         navigate(to: file)
         return true
     }

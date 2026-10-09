@@ -7,6 +7,7 @@ import Observation
 import PDFKit
 import WebKit
 
+
 /// Reader click gesture dispatch through the key binding table (K0a) instead
 /// of hardcoded modifier checks. Empty modifiers are the plain click;
 /// combinations no gesture is bound to do nothing (pre-table behavior for
@@ -319,7 +320,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onShowInDocsPanel: ((String, UInt32, ReaderDocument) -> Void)?
     var projectRoot: URL?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
-    var onOpenPreviewLink: ((URL) -> Void)?
+    /// A project file to open from a preview link, with the heading
+    /// fragment to scroll to once it shows.
+    var onOpenPreviewLink: ((URL, String?) -> Void)?
+    /// Heading to scroll to once `file`'s Markdown preview shows; opening
+    /// a file is asynchronous.
+    var pendingPreviewAnchor: (file: URL, fragment: String)?
     var onReadingSetScrollChange: ((Double) -> Void)?
     var onCopyPathLine: ((URL, UInt32) -> Void)?
     var onRevealInFinder: ((URL) -> Void)?
@@ -1206,7 +1212,40 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         guard let file = displayedFile,
               let resolved = resolvedPreviewLink(link, relativeTo: file)
         else { return true }
-        onOpenPreviewLink?(resolved)
+        let fragment = previewLinkFragment(link, relativeTo: file)
+        if let fragment, resolved == file.standardizedFileURL {
+            scrollPreview(toAnchor: fragment)
+        } else {
+            onOpenPreviewLink?(resolved, fragment)
+        }
+        return true
+    }
+
+    private func previewLinkFragment(_ value: Any, relativeTo file: URL) -> String? {
+        let url = (value as? URL) ?? (value as? String).flatMap { URL(string: $0, relativeTo: file) }
+        guard let url,
+              let fragment = URLComponents(url: url, resolvingAgainstBaseURL: true)?.fragment,
+              !fragment.isEmpty
+        else { return nil }
+        return fragment
+    }
+
+    /// Puts the Markdown heading named by `fragment` at the top of the
+    /// preview; unknown fragments leave the position alone.
+    @discardableResult
+    func scrollPreview(toAnchor fragment: String) -> Bool {
+        guard let scrollView = previewView as? NSScrollView,
+              let textView = scrollView.documentView as? NSTextView,
+              let storage = textView.textStorage,
+              let range = MarkdownPreviewRenderer.anchorRange(for: fragment, in: storage),
+              let layout = textView.layoutManager,
+              let container = textView.textContainer
+        else { return false }
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+        // In text-view coordinates: the view need not sit at the clip origin.
+        textView.scroll(NSPoint(x: 0, y: max(0, rect.minY + textView.textContainerOrigin.y
+            - textView.textContainerInset.height)))
         return true
     }
 
@@ -1222,7 +1261,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         )
         decisionHandler(result.policy)
         if let callback = result.callback {
-            onOpenPreviewLink?(callback)
+            onOpenPreviewLink?(callback, nil)
         }
     }
 
@@ -1315,7 +1354,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             isMainFrame: true
         )
         if let callback = result.callback {
-            onOpenPreviewLink?(callback)
+            onOpenPreviewLink?(callback, nil)
         }
         return result.policy
     }
@@ -1801,6 +1840,21 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             previewPDFPageCount,
             previewImageSize
         )
+    }
+    /// The preview paragraph at the top of the visible area.
+    var selfTestPreviewTopParagraph: String? {
+        guard let scrollView = previewView as? NSScrollView,
+              let textView = scrollView.documentView as? NSTextView,
+              let layout = textView.layoutManager,
+              let container = textView.textContainer
+        else { return nil }
+        let y = textView.visibleRect.minY + textView.textContainerInset.height
+            - textView.textContainerOrigin.y + 1
+        let glyph = layout.glyphIndex(for: NSPoint(x: 1, y: y), in: container)
+        let index = layout.characterIndexForGlyph(at: glyph)
+        let text = textView.string as NSString
+        return text.substring(with: text.paragraphRange(for: NSRange(location: index, length: 0)))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
     func selfTestPreviewFont(at substring: String) -> NSFont? {
         selfTestPreviewAttribute(.font, at: substring) as? NSFont
@@ -2560,6 +2614,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         _ file: URL,
         source: DocumentLoader.ContentSource?
     ) {
+        // Consumed by this display whatever it shows, so it never fires later.
+        let anchor = pendingPreviewAnchor.flatMap {
+            $0.file.standardizedFileURL == file.standardizedFileURL ? $0.fragment : nil
+        }
+        pendingPreviewAnchor = nil
         findBar.isHidden = true
         invalidateFind()
         savedSymbolOccurrenceByteOffset = nil
@@ -2646,6 +2705,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 accessibilityLabel: localized("main.markdown.preview")
             )
             previewRestyle = render
+            if let anchor { scrollPreview(toAnchor: anchor) }
             return
         }
         if extensionName == "html" || extensionName == "htm" {
