@@ -133,7 +133,7 @@ public struct ReaderSettings: Equatable, Sendable {
     public var autoLightTheme: Theme
     public var autoDarkTheme: Theme
     /// Base16 themes keep calls, properties and parameters in body text,
-    /// function names in base06 and types in blue; off follows the base16
+    /// function names in body text and types in blue; off follows the base16
     /// conventions fully. Built-in themes ignore it.
     public var quietSyntax: Bool
     public var syntaxFormatting: Bool

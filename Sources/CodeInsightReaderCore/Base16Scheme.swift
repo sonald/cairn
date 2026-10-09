@@ -101,7 +101,7 @@ extension ThemePalette {
             comment: syntax(commentSource),
             string: syntax(b[0x0B]),
             number: syntax(b[0x09]),
-            functionName: syntax(quiet ? b[0x06] : b[0x0D]),
+            functionName: quiet ? fg : syntax(b[0x0D]),
             declarationTitle: syntax(quiet ? b[0x0D] : b[0x0A]),
             functionCall: quiet ? fg : syntax(b[0x0D]),
             declarationEmphasis: fg,

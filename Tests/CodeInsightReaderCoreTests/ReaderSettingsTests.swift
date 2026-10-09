@@ -178,7 +178,7 @@ func readerThemePaletteMeetsRequiredContrastRatios() {
         return ReaderTheme(settings: settings)
     }
     #expect(mapped("base16:catppuccin-latte").warningRGB(isDark: false) == 0x715E56)
-    #expect(mapped("base16:catppuccin-latte").rgb(for: .functionName, isDark: false) == 0xB97B74)
+    #expect(mapped("base16:catppuccin-latte").rgb(for: .functionName, isDark: false) == 0x4C4F69)
     #expect(mapped("base16:solarized-light").chromeSecondaryRGB(isDark: false) == 0x576C73)
     // Nord tones toward base06, not its cyan base07.
     #expect(mapped("base16:nord").inferredRGB(isDark: true) == 0x9FB8CF)
