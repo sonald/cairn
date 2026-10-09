@@ -26,6 +26,11 @@ palette:
   base0F: "#5E81AC"
 """
 
+/// A base24 scheme: same layout, colors up to base17.
+private let base24YAML = nordYAML
+    .replacingOccurrences(of: "system: \"base16\"", with: "system: \"base24\"")
+    + "\n  base10: \"#000000\"\n  base17: \"#FFFFFF\"\n"
+
 @Test
 func base16SchemeReadsPublishedFilesWithAndWithoutTrailingComments() throws {
     let nord = try Base16Scheme(yaml: nordYAML)
@@ -76,8 +81,7 @@ func base16SchemeInfersVariantAndRejectsIncompleteOrForeignFiles() throws {
     #expect(throws: Base16Scheme.LoadError.missingColor("base0C")) {
         try Base16Scheme(yaml: missing)
     }
-    let base24 = nordYAML.replacingOccurrences(of: "system: \"base16\"", with: "system: \"base24\"")
-    #expect(throws: Base16Scheme.LoadError.notBase16) { try Base16Scheme(yaml: base24) }
+    #expect(throws: Base16Scheme.LoadError.notBase16) { try Base16Scheme(yaml: base24YAML) }
     #expect(throws: Base16Scheme.LoadError.notBase16) { try Base16Scheme(yaml: "\u{0}\u{1}::\n\"#") }
 }
 
@@ -92,6 +96,7 @@ func userThemeFolderLoadsGoodFilesAndSkipsBadOnes() throws {
     let eightColors = nordYAML.split(separator: "\n").prefix(13).joined(separator: "\n")
     try eightColors.write(to: folder.appendingPathComponent("bad.yaml"), atomically: true, encoding: .utf8)
     try Data([0xFF, 0xFE, 0x00, 0x9F]).write(to: folder.appendingPathComponent("garbage.yaml"))
+    try base24YAML.write(to: folder.appendingPathComponent("base24.yaml"), atomically: true, encoding: .utf8)
 
     ThemeCatalog.reloadUserThemes(in: folder)
     defer { ThemeCatalog.reloadUserThemes(in: folder.appendingPathComponent("missing")) }

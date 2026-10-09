@@ -36,7 +36,7 @@ public struct Base16Scheme: Equatable, Sendable {
                 value = value[..<hash.lowerBound].trimmingCharacters(in: .whitespaces)
             }
             if key.count == 6, key.lowercased().hasPrefix("base"),
-               let index = Int(key.dropFirst(4), radix: 16) {
+               let index = Int(key.dropFirst(4), radix: 16), colors.indices.contains(index) {
                 let hex = value.hasPrefix("#") ? value.dropFirst() : Substring(value)
                 if hex.count == 6, let rgb = UInt32(hex, radix: 16) { colors[index] = rgb }
             } else {
