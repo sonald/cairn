@@ -132,8 +132,9 @@ public struct ReaderSettings: Equatable, Sendable {
     /// The pair Auto switches between with the system appearance.
     public var autoLightTheme: Theme
     public var autoDarkTheme: Theme
-    /// Base16 themes color functions, properties and parameters like body
-    /// text and types in blue; off follows the base16 conventions fully.
+    /// Base16 themes keep calls, properties and parameters in body text,
+    /// function names in base06 and types in blue; off follows the base16
+    /// conventions fully. Built-in themes ignore it.
     public var quietSyntax: Bool
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
