@@ -123,7 +123,8 @@ package struct MarkdownPreviewRenderer {
     }
 
     package func render(_ source: String) -> NSAttributedString? {
-        let (frontMatter, markdownSource) = Self.splitFrontMatter(source)
+        let (frontMatter, rawMarkdown) = Self.splitFrontMatter(source)
+        let markdownSource = Self.cjkFriendlyEmphasis(rawMarkdown)
         guard let markdown = try? AttributedString(
             markdown: markdownSource,
             options: .init(failurePolicy: .returnPartiallyParsedIfPossible),
@@ -139,10 +140,67 @@ package struct MarkdownPreviewRenderer {
             let next = index + 1 < blocks.count ? blocks[index + 1] : nil
             renderBlock(block, next: next, markdown: markdown, state: &state, into: output)
         }
+        if markdownSource != rawMarkdown {
+            let text = output.string as NSString
+            var range = NSRange(location: text.length, length: 0)
+            while true {
+                range = text.range(of: Self.flankSentinel, options: .backwards,
+                                   range: NSRange(location: 0, length: range.location))
+                guard range.location != NSNotFound else { break }
+                output.deleteCharacters(in: range)
+            }
+        }
         while output.string.hasSuffix("\n") {
             output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1))
         }
         return output
+    }
+
+    /// CommonMark only lets `**` close when it is not wedged between
+    /// punctuation and a letter, so `**命令`code`**继续` and `**“引”**后`
+    /// stay literal in Chinese prose. A punctuation sentinel on the CJK side
+    /// makes such a run both-flanking; `render` removes it afterwards.
+    private static let flankSentinel = "\u{2E31}"
+
+    static func cjkFriendlyEmphasis(_ source: String) -> String {
+        let scalars = Array(source.unicodeScalars)
+        let sentinel = flankSentinel.unicodeScalars.first!
+        guard scalars.contains("*"), !scalars.contains(sentinel) else { return source }
+        func isCJK(_ c: Unicode.Scalar) -> Bool {
+            switch c.value {
+            case 0x1100...0x11FF, 0x3040...0x30FF, 0x3130...0x318F, 0x3400...0x4DBF,
+                 0x4E00...0x9FFF, 0xAC00...0xD7AF, 0xF900...0xFAFF, 0x20000...0x3134F: true
+            default: false
+            }
+        }
+        func isPunctuation(_ c: Unicode.Scalar) -> Bool {
+            switch c.properties.generalCategory {
+            case .connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+                 .initialPunctuation, .finalPunctuation, .otherPunctuation,
+                 .mathSymbol, .currencySymbol, .modifierSymbol, .otherSymbol: true
+            default: false
+            }
+        }
+        var result = String.UnicodeScalarView()
+        var i = 0
+        while i < scalars.count {
+            let c = scalars[i]
+            if c == "\\" {
+                result.append(contentsOf: scalars[i..<min(i + 2, scalars.count)])
+                i += 2
+                continue
+            }
+            guard c == "*" else { result.append(c); i += 1; continue }
+            var end = i
+            while end < scalars.count, scalars[end] == "*" { end += 1 }
+            let before = i > 0 ? scalars[i - 1] : nil
+            let after = end < scalars.count ? scalars[end] : nil
+            if let before, let after, isCJK(before), isPunctuation(after) { result.append(sentinel) }
+            result.append(contentsOf: scalars[i..<end])
+            if let before, let after, isPunctuation(before), isCJK(after) { result.append(sentinel) }
+            i = end
+        }
+        return String(result)
     }
 
     // MARK: Block model
