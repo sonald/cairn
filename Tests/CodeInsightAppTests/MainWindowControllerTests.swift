@@ -1353,6 +1353,23 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     #expect(!first.selfTestContextPaneCollapsed)
     #expect(!first.selfTestRelationsPaneCollapsed)
     #expect(abs(first.selfTestRelationsPaneWidth - width) <= 1, "The override detour keeps the width")
+    // Narrower than the stored layout: the zones are squeezed in proportion,
+    // and a detour must land on the same squeeze, not on a fresh clamp.
+    window.setFrame(NSRect(x: 0, y: 0, width: 1024, height: 674), display: true)
+    await settleWindow()
+    let squeezed = first.selfTestZoneWidths
+    first.model.openReadingSet(title: "Narrow path", excerpts: [])
+    first.renderForSelfTest()
+    first.openFileForSelfTest(root.appendingPathComponent("main.rs"))
+    try #require(await mainWindowWaitUntil(first.displayedReaderFile?.lastPathComponent == "main.rs"))
+    await settleWindow()
+    print("POLISH_NARROW before=\(squeezed) after=\(first.selfTestZoneWidths)")
+    #expect((squeezed[.right] ?? 0) < width, "A 1024pt window cannot hold the dragged layout")
+    for zone in [PanelZone.left, .right] {
+        #expect(abs((first.selfTestZoneWidths[zone] ?? 0) - (squeezed[zone] ?? 0)) <= 1, "\(zone) keeps its squeezed width")
+    }
+    window.setFrame(sourceFrame, display: true)
+    await settleWindow()
     first.toggleContext(nil)
     #expect(first.selfTestContextPaneCollapsed, "Closed Context stays closed despite its content")
     first.checkpointSessionSynchronously()

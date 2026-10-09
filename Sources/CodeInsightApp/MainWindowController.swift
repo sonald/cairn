@@ -2533,17 +2533,33 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         needsPanelGeometry = false
         let frameBefore = window?.frame
-        func size(_ zone: PanelZone) -> CGFloat {
+        // An empty zone is the 72pt drop target shown while dragging.
+        func minimum(_ zone: PanelZone) -> CGFloat {
             let panels = zoneViews[zone]!.panels
             guard !panels.isEmpty else { return 72 }
-            let minimum = panels.map { zone == .bottom ? $0.minimumHeight : $0.minimumWidth }.max() ?? 0
-            return max(panelLayout.width(of: zone), minimum)
+            return panels.map { zone == .bottom ? $0.minimumHeight : $0.minimumWidth }.max() ?? 0
+        }
+        func size(_ zone: PanelZone) -> CGFloat {
+            guard !zoneViews[zone]!.panels.isEmpty else { return 72 }
+            return max(panelLayout.width(of: zone), minimum(zone))
+        }
+        var left = zoneItems[.left]!.isCollapsed ? 0 : size(.left)
+        var right = zoneItems[.right]!.isCollapsed ? 0 : size(.right)
+        // A window narrower than the stored layout: shrink both zones in
+        // proportion, as a live resize does, so a rebuild lands where the
+        // user last saw them instead of squeezing the left zone first.
+        let shown = CGFloat([left, right].filter { $0 > 0 }.count)
+        let room = split.bounds.width - Self.minimumPaneWidth - split.dividerThickness * shown
+        if left + right > room, room > 0 {
+            let scale = room / (left + right)
+            if left > 0 { left = max(minimum(.left), left * scale) }
+            if right > 0 { right = max(minimum(.right), right * scale) }
         }
         if !zoneItems[.left]!.isCollapsed {
-            split.setPosition(size(.left), ofDividerAt: 0)
+            split.setPosition(left, ofDividerAt: 0)
         }
         if !zoneItems[.right]!.isCollapsed {
-            split.setPosition(split.bounds.width - size(.right) - split.dividerThickness, ofDividerAt: 1)
+            split.setPosition(split.bounds.width - right - split.dividerThickness, ofDividerAt: 1)
         }
         if !zoneItems[.bottom]!.isCollapsed {
             center.setPosition(center.bounds.height - size(.bottom) - center.dividerThickness, ofDividerAt: 0)
