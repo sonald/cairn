@@ -3328,3 +3328,31 @@ func largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() throws {
     #expect(reader.view.string == source)
     withExtendedLifetime(window) {}
 }
+
+@MainActor
+@Test
+func quietSyntaxToggleRecolorsAnAlreadyDisplayedReader() throws {
+    let source = "fn greet(name: &str) -> String { name.to_string() }\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    withExtendedLifetime(window) {
+        var settings = ReaderSettings(theme: ReaderSettings.Theme(rawValue: "base16:nord"))
+        settings.quietSyntax = true
+        reader.apply(settings: settings)
+        let greet = (source as NSString).range(of: "greet")
+        let quietColor = ReaderTheme(settings: settings).color(for: .functionName)
+        #expect(renderedColors(in: reader, intersecting: greet).contains { colorsEqual($0, quietColor) })
+
+        settings.quietSyntax = false
+        reader.apply(settings: settings)
+        let fullColor = ReaderTheme(settings: settings).color(for: .functionName)
+        #expect(!colorsEqual(quietColor, fullColor))
+        #expect(renderedColors(in: reader, intersecting: greet).contains { colorsEqual($0, fullColor) })
+    }
+}

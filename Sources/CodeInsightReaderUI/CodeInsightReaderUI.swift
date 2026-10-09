@@ -2780,6 +2780,9 @@ public final class ReaderTextView {
                 renderingCoordinator.update(document: document, map: map, theme: theme)
                 installRenderingValidator(in: layoutManager)
                 validateVisibleRenderingAttributes(in: layoutManager, updateLayout: false)
+                // A palette change with no reflow leaves the fragment subviews
+                // showing the old colors until they scroll (see redisplayRenderedText).
+                redisplayRenderedText()
             }
             ruler?.needsDisplay = true
             view.needsDisplay = true
