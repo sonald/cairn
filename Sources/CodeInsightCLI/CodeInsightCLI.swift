@@ -622,7 +622,7 @@ extension CodeInsight {
 
         @OptionGroup var options: ProjectOptions
 
-        @Option(name: .long, help: "Project-relative Rust file.")
+        @Option(name: .long, help: "Project-relative source file.")
         var file: String
 
         @Option(name: .long, help: "One-based source line in the function.")
@@ -647,9 +647,7 @@ extension CodeInsight {
                 throw ValidationError("Line is outside \(file): \(line)")
             }
             let match = index.symbols.enumerated().filter { _, facet in
-                guard facet.kind == .rustFn || facet.kind == .rustMethod else {
-                    return false
-                }
+                guard facet.kind.shape == .function else { return false }
                 return facet.range.contains(lineStart)
                     || index.lineTable.lineColumn(
                         at: facet.range.lowerBound

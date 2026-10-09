@@ -1638,7 +1638,12 @@ public final class RelationTreeModel {
             case .unresolved: localized("model.relation.unresolved")
             case .strong, .probable, .possible: localized("model.relation.inferred")
             }
-            let dispatchLabel = edge.certainty == .unresolved ? nil
+            // Only Rust implementations are trait dispatch; elsewhere the
+            // "Implementations" tab already says what the row is.
+            let dispatchLabel = edge.certainty == .unresolved
+                || direction == .implementations
+                    && session?.analysisProfile.language != .rust
+                ? nil
                 : resolutionDispatchLabel(edge.dispatch)
             var modifiers: [String] = []
             if edge.certainty == .unresolved, edge.exactOrigin != nil {
@@ -2096,7 +2101,9 @@ public final class RelationTreeModel {
         case .callers, .calls:
             return true
         case .implementations:
-            if session.analysisProfile.language == .python {
+            // Python and TypeScript have no syntactic implementations; the
+            // language server answers or reports that it can't.
+            if session.analysisProfile.language != .rust {
                 return true
             }
             if facet.kind == .rustTrait { return true }
