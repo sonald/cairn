@@ -503,7 +503,7 @@ private final class ReadingSetExcerptView: NSView {
             || resolvedFont?.key.fontEnvironmentRevision != ReaderFontResolver.shared.fontEnvironmentRevision
         self.settings = settings
         let theme = ReaderTheme(settings: settings)
-        if signature == nil || self.theme.selection != theme.selection {
+        if signature == nil || self.theme != theme {
             codeView.textColor = theme.foregroundColor
         }
         self.theme = theme

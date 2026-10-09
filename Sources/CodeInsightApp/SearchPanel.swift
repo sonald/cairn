@@ -65,7 +65,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         theme = ReaderTheme(settings: settings)
         hintsEnabled = settings.showQuerySuggestions
         panelModel.setSuggestionsEnabled(hintsEnabled)
-        view.appearance = cairnAppearance(for: settings.theme)
+        view.appearance = cairnAppearance(for: theme.variant)
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
         header.layer?.backgroundColor = theme.chromeColor.cgColor
         summary.layer?.backgroundColor = theme.backgroundColor.cgColor

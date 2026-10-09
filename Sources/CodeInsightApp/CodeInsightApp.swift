@@ -1689,7 +1689,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     private func applyApplicationAppearance() {
-        NSApplication.shared.appearance = cairnAppearance(for: readerSettings.theme)
+        NSApplication.shared.appearance = cairnAppearance(for: ReaderTheme(settings: readerSettings).variant)
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {

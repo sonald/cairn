@@ -614,7 +614,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
-        window?.appearance = cairnAppearance(for: settings.theme)
+        window?.appearance = cairnAppearance(for: theme.variant)
         window?.backgroundColor = theme.chromeColor
         window?.contentView?.layer?.backgroundColor = theme.chromeColor.cgColor
         statsLabel.textColor = theme.chromeSecondaryColor

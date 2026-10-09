@@ -58,7 +58,7 @@ final class CommitPickerPopover: NSViewController,
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
         guard isViewLoaded else { return }
-        view.appearance = cairnAppearance(for: settings.theme)
+        view.appearance = cairnAppearance(for: theme.variant)
         view.layer?.backgroundColor = theme.chromeColor.cgColor
         statusLabel.textColor = theme.chromeSecondaryColor
         materializedNote.textColor = theme.chromeSecondaryColor

@@ -148,7 +148,7 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
-        view.appearance = cairnAppearance(for: settings.theme)
+        view.appearance = cairnAppearance(for: theme.variant)
         view.layer?.backgroundColor = theme.backgroundColor.cgColor
         header.layer?.backgroundColor = theme.chromeColor.cgColor
         titleLabel.textColor = theme.foregroundColor
