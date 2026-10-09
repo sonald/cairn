@@ -129,6 +129,9 @@ public struct ReaderSettings: Equatable, Sendable {
     }
     public var codeLigatures: CodeLigatureMode
     public var theme: Theme
+    /// Base16 themes color functions, properties and parameters like body
+    /// text and types in blue; off follows the base16 conventions fully.
+    public var quietSyntax: Bool
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
     public var lineNumbers: Bool
@@ -187,6 +190,7 @@ public struct ReaderSettings: Equatable, Sendable {
         blockEndAnnotations = true
         overviewRuler = true
         showQuerySuggestions = true
+        quietSyntax = true
     }
 
     public init(defaults: UserDefaults) {
@@ -391,7 +395,7 @@ public struct ReaderTheme: Equatable, Sendable {
         syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
         blockEndAnnotations = settings.blockEndAnnotations
-        if let fixed = ThemeCatalog.entry(for: settings.theme)?.palette(quiet: true) {
+        if let fixed = ThemeCatalog.entry(for: settings.theme)?.palette(quiet: settings.quietSyntax) {
             lightPalette = fixed
             darkPalette = fixed
             variant = fixed.variant

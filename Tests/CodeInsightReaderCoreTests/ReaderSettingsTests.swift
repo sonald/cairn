@@ -125,33 +125,65 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
 
 @Test
 func readerThemePaletteMeetsRequiredContrastRatios() {
-    for selection in ReaderSettings.Theme.builtIns {
-        let theme = ReaderTheme(settings: ReaderSettings(theme: selection))
-        for isDark in [false, true] {
-            let checks: [(String, UInt32, UInt32, Double)] = [
-                ("foreground/background", theme.foregroundRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 4.5),
-                ("chromeSecondary/chrome", theme.chromeSecondaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
-                ("verified/chrome", theme.verifiedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
-                ("verified/mossSoft", theme.verifiedRGB(isDark: isDark), theme.mossSoftRGB(isDark: isDark), 4.5),
-                ("inferred/chrome", theme.inferredRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
-                ("inferred/slateSoft", theme.inferredRGB(isDark: isDark), theme.slateSoftRGB(isDark: isDark), 4.5),
-                ("unresolved/chrome", theme.unresolvedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
-                ("unresolved/rustSoft", theme.unresolvedRGB(isDark: isDark), theme.rustSoftRGB(isDark: isDark), 4.5),
-                ("warning/chrome", theme.warningRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
-                ("warning/amberSoft", theme.warningRGB(isDark: isDark), theme.amberSoftRGB(isDark: isDark), 4.5),
-                ("hist/histSoft", theme.histRGB(isDark: isDark), theme.histSoftRGB(isDark: isDark), 4.5),
-                ("lineNumber/background", theme.lineNumberRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 3.0),
-                ("chromeTertiary/chrome", theme.chromeTertiaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 3.0),
-            ]
-            for (name, foreground, background, minimum) in checks {
-                let ratio = contrastRatio(foreground, background)
-                #expect(
-                    ratio >= minimum,
-                    "\(selection.rawValue) isDark=\(isDark) \(name) ratio=\(ratio), minimum=\(minimum)"
-                )
+    let entries = ThemeCatalog.entries.filter { $0.source != .user }
+    #expect(entries.filter { $0.source == .bundled }.count == 10)
+    for entry in entries {
+        for quiet in [true, false] {
+            var settings = ReaderSettings(theme: entry.theme)
+            settings.quietSyntax = quiet
+            let theme = ReaderTheme(settings: settings)
+            let selection = "\(entry.theme.id) quiet=\(quiet)"
+            for isDark in [false, true] {
+                let checks: [(String, UInt32, UInt32, Double)] = [
+                    ("foreground/background", theme.foregroundRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 4.5),
+                    ("chromeSecondary/chrome", theme.chromeSecondaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                    ("verified/chrome", theme.verifiedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                    ("verified/mossSoft", theme.verifiedRGB(isDark: isDark), theme.mossSoftRGB(isDark: isDark), 4.5),
+                    ("inferred/chrome", theme.inferredRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                    ("inferred/slateSoft", theme.inferredRGB(isDark: isDark), theme.slateSoftRGB(isDark: isDark), 4.5),
+                    ("unresolved/chrome", theme.unresolvedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                    ("unresolved/rustSoft", theme.unresolvedRGB(isDark: isDark), theme.rustSoftRGB(isDark: isDark), 4.5),
+                    ("warning/chrome", theme.warningRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                    ("warning/amberSoft", theme.warningRGB(isDark: isDark), theme.amberSoftRGB(isDark: isDark), 4.5),
+                    ("hist/histSoft", theme.histRGB(isDark: isDark), theme.histSoftRGB(isDark: isDark), 4.5),
+                    ("lineNumber/background", theme.lineNumberRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 3.0),
+                    ("chromeTertiary/chrome", theme.chromeTertiaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 3.0),
+                ]
+                let background = theme.backgroundRGB(isDark: isDark)
+                let syntaxKinds: [HighlightKind] = [
+                    .comment, .keyword, .string, .number, .functionName, .typeName, .property, .macro,
+                ]
+                let syntaxChecks = syntaxKinds.map {
+                    ("\($0)/background", theme.rgb(for: $0, isDark: isDark), background, 3.0)
+                }
+                let slotChecks = (UInt8(1)...ReaderTheme.highlightSlotCount).map {
+                    ("highlight\($0)/background", theme.highlightRGB(slot: $0, isDark: isDark), background, 1.15)
+                }
+                for (name, foreground, background, minimum) in checks + syntaxChecks + slotChecks {
+                    let ratio = contrastRatio(foreground, background)
+                    #expect(
+                        ratio >= minimum,
+                        "\(selection) isDark=\(isDark) \(name) ratio=\(ratio), minimum=\(minimum)"
+                    )
+                }
             }
         }
     }
+
+    // Spot values the base16 mapping prototype produced (2026-10-09):
+    // contrast alone would not catch a reversed blend or the wrong toning target.
+    func mapped(_ id: String, quiet: Bool = true) -> ReaderTheme {
+        var settings = ReaderSettings(theme: .init(id: id))
+        settings.quietSyntax = quiet
+        return ReaderTheme(settings: settings)
+    }
+    #expect(mapped("base16:catppuccin-latte").warningRGB(isDark: false) == 0x715E56)
+    #expect(mapped("base16:catppuccin-latte").rgb(for: .functionName, isDark: false) == 0xB97B74)
+    #expect(mapped("base16:solarized-light").chromeSecondaryRGB(isDark: false) == 0x576C73)
+    // Nord tones toward base06, not its cyan base07.
+    #expect(mapped("base16:nord").inferredRGB(isDark: true) == 0x9FB8CF)
+    #expect(mapped("base16:dracula").unresolvedRGB(isDark: true) == 0xFF7676)
+    #expect(mapped("base16:nord", quiet: false).rgb(for: .property, isDark: true) == 0xBF616A)
 }
 
 private func contrastRatio(_ first: UInt32, _ second: UInt32) -> Double {

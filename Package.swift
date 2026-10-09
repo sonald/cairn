@@ -221,7 +221,8 @@ let package = Package(
                 "CTreeSitterRust",
                 "CTreeSitterPython",
                 "CTreeSitterTypeScript",
-            ]
+            ],
+            resources: [.copy("Themes")]
         ),
         .target(
             name: "CodeInsightReaderUI",

@@ -115,7 +115,7 @@ cp "$SOURCE_BINARY" "$APP/Contents/MacOS/codeinsight-app"
 chmod 755 "$APP/Contents/MacOS/codeinsight-app"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # SwiftPM resources must travel with the app, before signing it.
-for target in CodeInsightApp CodeInsightAppModel CodeInsightReaderUI; do
+for target in CodeInsightApp CodeInsightAppModel CodeInsightReaderCore CodeInsightReaderUI; do
     resource_bundle="$BIN_DIR/CodeInsight_${target}.bundle"
     test -d "$resource_bundle"
     cp -R "$resource_bundle" "$APP/Contents/Resources/"
