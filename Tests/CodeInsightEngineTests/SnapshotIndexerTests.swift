@@ -1799,3 +1799,28 @@ func s4b2NonSourceBytesDoNotEnterTheSemanticStore() throws {
     }
     #expect(payloadEntry?.size == UInt64(4 << 20))
 }
+
+/// A 3000-term `+` chain nests the syntax tree 3000 levels deep. Every
+/// extractor walks the tree recursively, so extraction must run on threads
+/// whose stack survives that; the 512 KB Dispatch worker stack died near
+/// 80 (Python) and 200 (TypeScript) levels in debug builds.
+@Test
+func deeplyNestedExpressionsIndexWithoutOverflowingTheExtractionStack() throws {
+    let depth = 3000
+    let terms = Array(repeating: "'kw'", count: depth).joined(separator: " +\n  ")
+    let files: [(String, [UInt8], LanguageID)] = [
+        ("deep.py", Array("s = \(terms)\n".utf8), .python),
+        ("deep.ts", Array("const s = \(terms);\n".utf8), .typescript),
+        ("deep.rs", Array(("fn f() -> String { String::new() "
+            + String(repeating: "+ \"kw\" ", count: depth) + "}\n").utf8), .rust),
+    ]
+    for (name, bytes, language) in files {
+        let session = try ProjectIndexer(parallelism: 2).indexSnapshot(
+            CountingSnapshot(files: [name: bytes]),
+            into: ProjectIndexStore(),
+            language: language
+        )
+        #expect(session.stats.extractedCount == 1, "\(name)")
+        #expect(session.stats.filesWithErrorNodes == 0, "\(name)")
+    }
+}

@@ -61,7 +61,10 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
         else { return [] }
         let name = Array(name.utf8)
         var hits: [CodeInsightCore.ByteRange] = []
-        func visit(_ node: Node) {
+        // Explicit stack, not recursion: project search runs this on a
+        // cooperative thread, and a long `+` chain nests thousands deep.
+        var pending = [tree.rootNode]
+        while let node = pending.popLast() {
             if isIdentifierNode(node.kind),
                (node.byteRange.upperBound - node.byteRange.lowerBound) == UInt32(name.count),
                bytes[Int(node.byteRange.lowerBound)..<Int(node.byteRange.upperBound)]
@@ -72,17 +75,14 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
                     upperBound: node.byteRange.upperBound
                 ))
             }
-            for child in node.namedChildren {
-                if ["jsx_opening_element", "jsx_self_closing_element", "jsx_closing_element"].contains(node.kind),
-                   let name = childField(node, "name"),
-                   child.byteRange == name.byteRange
-                {
-                    continue
-                }
-                visit(child)
+            let skippedTagName = ["jsx_opening_element", "jsx_self_closing_element", "jsx_closing_element"]
+                .contains(node.kind) ? childField(node, "name")?.byteRange : nil
+            for child in node.namedChildren.reversed()
+                where child.byteRange != skippedTagName
+            {
+                pending.append(child)
             }
         }
-        visit(tree.rootNode)
         return hits
     }
 

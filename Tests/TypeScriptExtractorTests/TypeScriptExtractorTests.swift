@@ -718,3 +718,15 @@ func tsPrimitiveAnnotationStaysPut() throws {
     #expect(typeRef("label") == .primitive(tsLineRange(of: "string", line: 1, in: source)))
     #expect(typeRef("count") == .primitive(tsLineRange(of: "number", line: 1, in: source)))
 }
+
+/// Project search verifies hits with `identifierRanges` on a cooperative
+/// thread, so the walk must not recurse once per syntax node: a 3000-term
+/// `+` chain nests that deep and overflowed a 512 KB stack.
+@Test
+func identifierRangesSurviveDeeplyNestedExpressions() throws {
+    let source = "const total = " + Array(repeating: "kw", count: 3000).joined(separator: " +\n  ") + ";\n"
+    let ranges = try TypeScriptExtractor().identifierRanges(
+        named: "kw", in: Array(source.utf8), mode: .tsTS
+    )
+    #expect(ranges.count == 3000)
+}

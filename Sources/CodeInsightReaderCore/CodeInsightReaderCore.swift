@@ -1001,20 +1001,45 @@ public struct DocumentLoader: Sendable {
             )
         case .python:
             try Self.requireSupported(languageMode)
-            return try pythonReaderHighlightWithFolds(
-                bytes: bytes,
-                shouldCancel: shouldCancel
-            )
+            return try onLargeStack {
+                try pythonReaderHighlightWithFolds(
+                    bytes: bytes,
+                    shouldCancel: shouldCancel
+                )
+            }
         case .typescript:
             try Self.requireSupported(languageMode)
-            return try typeScriptReaderHighlightWithFolds(
-                bytes: bytes,
-                mode: languageMode,
-                shouldCancel: shouldCancel
-            )
+            return try onLargeStack {
+                try typeScriptReaderHighlightWithFolds(
+                    bytes: bytes,
+                    mode: languageMode,
+                    shouldCancel: shouldCancel
+                )
+            }
         case .javascript:
             throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
+    }
+
+    /// The Python and TypeScript walks recurse once per syntax node, and a
+    /// long `+` chain nests thousands deep; the Rust highlighter keeps its
+    /// own stack. Cooperative and Dispatch threads have 512 KB stacks, so
+    /// the walk runs on a thread with a large stack while the caller waits,
+    /// and the loader stays synchronous.
+    private static func onLargeStack<T>(_ body: @escaping () throws -> T) throws -> T {
+        let work = UncheckedSendable(body)
+        let outcome = UncheckedSendable<Result<T, Error>?>(nil)
+        let finished = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            outcome.value = Result { try work.value() }
+            finished.signal()
+        }
+        thread.name = "CodeInsight.DocumentLoader.syntax"
+        thread.qualityOfService = .userInitiated
+        thread.stackSize = 64 << 20
+        thread.start()
+        finished.wait()
+        return try outcome.value!.get()
     }
 
     /// Builds syntax off the caller's thread. Cancelling the returned task
@@ -1052,3 +1077,11 @@ extension DocumentLoader {
     @TaskLocal package static var pythonParseObserver: (@Sendable () -> Void)?
 }
 #endif
+
+/// Carries a non-Sendable value across the one thread hop in
+/// `DocumentLoader.onLargeStack`; the caller blocks until the thread is done,
+/// so nothing is shared concurrently.
+private final class UncheckedSendable<Value>: @unchecked Sendable {
+    var value: Value
+    init(_ value: Value) { self.value = value }
+}

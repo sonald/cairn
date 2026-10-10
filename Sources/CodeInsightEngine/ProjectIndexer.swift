@@ -802,8 +802,9 @@ package struct ExtractionDraft: Sendable {
 /// concurrency tasks, so the caller may be blocking a cooperative thread. The
 /// workers therefore must not need the cooperative pool. Global concurrent
 /// queues are not enough either: with every cooperative thread blocked, work
-/// sent there was observed to get no thread at all. Each worker gets its own
-/// serial queue, which Dispatch always gives a thread.
+/// sent there was observed to get no thread at all. Each worker is its own
+/// `Thread` with a large stack: extractors recurse once per syntax node, and
+/// the 512 KB stack of a Dispatch worker overflowed on a 500-term `+` chain.
 private func parallelMap<Value>(
     _ count: Int,
     width: Int,
@@ -813,15 +814,17 @@ private func parallelMap<Value>(
     let state = ParallelMapState<Value>(count: count)
     let group = DispatchGroup()
     for _ in 0..<min(max(1, width), count) {
-        let worker = DispatchQueue(
-            label: "CodeInsight.ProjectIndexer.worker",
-            qos: .userInitiated
-        )
-        worker.async(group: group) {
+        group.enter()
+        let worker = Thread {
+            defer { group.leave() }
             while let index = state.next() {
                 state.finish(index, Result { try work(index) })
             }
         }
+        worker.name = "CodeInsight.ProjectIndexer.worker"
+        worker.qualityOfService = .userInitiated
+        worker.stackSize = 64 << 20
+        worker.start()
     }
     group.wait()
     return try state.values()
