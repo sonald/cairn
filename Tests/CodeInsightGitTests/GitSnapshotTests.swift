@@ -698,6 +698,28 @@ func directoriesOutsideAGitRepositoryCaptureAsPlainSnapshots() throws {
     #expect(subdirectory.languages == [.typescript])
 }
 
+// root can read a mode-000 file, so the case cannot be built there.
+@Test(.enabled(if: getuid() != 0))
+func worktreeCaptureSkipsAndReportsUnreadableFiles() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnreadable-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: root.appendingPathComponent("docs"), withIntermediateDirectories: true)
+    let locked = root.appendingPathComponent("docs/secret.txt")
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: locked.path)
+        try? FileManager.default.removeItem(at: root)
+    }
+    try Data("fn main() {}\n".utf8).write(to: root.appendingPathComponent("main.rs"))
+    try Data("secret\n".utf8).write(to: locked)
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+
+    let snapshot = try WorktreeSnapshot(repositoryURL: root)
+
+    #expect(snapshot.languages == [.rust])
+    #expect(snapshot.unreadablePaths == ["docs/secret.txt"])
+    #expect(snapshot.listFiles().map(\.path) == ["main.rs"])
+}
+
 @Test
 func treeWalkKeepsExactlyFilesWhoseAncestorsAndSelfAreIncluded() throws {
     let root = FileManager.default.temporaryDirectory

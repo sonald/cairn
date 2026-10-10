@@ -328,7 +328,8 @@ public struct ProjectIndexer: Sendable {
             snapshotID: snapshot.snapshotID,
             files: occurrences,
             ruleExcludedPathCount: snapshot.ruleExcludedPaths.count,
-            nonSourcePathCount: occurrences.filter { $0.detectedLanguage == nil }.count
+            nonSourcePathCount: occurrences.filter { $0.detectedLanguage == nil }.count,
+            unreadablePathCount: snapshot.unreadablePaths.count
         )
         return try languages.indices.map { slot in
             let stats = try snapshotStats(

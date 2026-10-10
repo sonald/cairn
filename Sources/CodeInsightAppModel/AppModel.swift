@@ -184,6 +184,8 @@ public struct FileTreeModel: Sendable {
     public let fileCount: Int
     /// What the project's exclusion rules removed (topmost path of each branch).
     public let ruleExcludedPaths: [String]
+    /// Files the capture could not read and left out.
+    public let unreadablePaths: [String]
 
     /// The tree lists every file; languages only decide which files are indexed.
     public init(root: URL, pathRules: ProjectPathRules = ProjectPathRules()) throws {
@@ -196,14 +198,21 @@ public struct FileTreeModel: Sendable {
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
         ruleExcludedPaths = walked.ruleExcluded
+        unreadablePaths = []
     }
 
-    public init(root: URL, snapshotPaths: [String], ruleExcludedPaths: [String] = []) {
+    public init(
+        root: URL,
+        snapshotPaths: [String],
+        ruleExcludedPaths: [String] = [],
+        unreadablePaths: [String] = []
+    ) {
         self.root = root.standardizedFileURL
         let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
         self.ruleExcludedPaths = ruleExcludedPaths
+        self.unreadablePaths = unreadablePaths
     }
 
     public func selectionPath(for selectedFile: URL?) -> [FileTreeNode]? {
@@ -2178,7 +2187,8 @@ public final class AppModel {
             self.fileTree = FileTreeModel(
                 root: root,
                 snapshotPaths: files.map(\.path),
-                ruleExcludedPaths: snapshot.ruleExcludedPaths
+                ruleExcludedPaths: snapshot.ruleExcludedPaths,
+                unreadablePaths: snapshot.unreadablePaths
             )
             self.currentSnapshotID = snapshot.snapshotID
             self.snapshotDestinations[snapshot.snapshotID] = switch record.snapshot {
@@ -2825,7 +2835,8 @@ public final class AppModel {
         fileTree = FileTreeModel(
             root: root,
             snapshotPaths: paths,
-            ruleExcludedPaths: snapshot.ruleExcludedPaths
+            ruleExcludedPaths: snapshot.ruleExcludedPaths,
+            unreadablePaths: snapshot.unreadablePaths
         )
         if let selectedPath, paths.contains(selectedPath) {
             selectedFile = root.appendingPathComponent(selectedPath)

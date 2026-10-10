@@ -25,7 +25,7 @@
 
 语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`，共享同一 store。单元根取包含该语言全部源码的最浅 marker 目录，否则为项目根；因此 `SnapshotView` 按单元根过滤活动文件不会丢掉源码，Exact 的 profile 前缀也总等于单元根。
 
-`SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
+`SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化，读不出来的文件被跳过并以 `unreadablePathCount` 计数（未知为 nil，不伪造为零）。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
 
 `AnalysisProfile` 记录语言、项目配置、环境指纹、features 与信任。`QueryContext` 使用 snapshot、profile、generation 拒绝过期结果；切项目、切快照、刷新、切分析配置后，旧请求不能发布到新上下文。信任变化还需停止/restart 相应 Exact 会话，不能仅凭内容缓存相同继续使用旧执行权限。
 
@@ -85,7 +85,7 @@
 
 `ContentIndex.regions` 保存按源码顺序排列、不重叠的注释/字符串范围；`TreeSitterKit` 的共享节点分类同时供三语言抽取器与 Reader 使用。遍历复用原解析树和 tree cursor，识别整段区域后跳过其内部，不跳过宏、导入或导出分支；TS 模板表达式仍是代码。缓存以紧凑 `[lower, upper, kind]` 元组编码，codec 格式 4；Rust/Python/TypeScript extractorVersion 为 10/4/4。旧提取缓存重建，损坏、越界、重叠或无序范围不能进入搜索索引。
 
-`ProjectSearchQuery` 是查询文本与条件控件共用的解析结构，错误携带 UTF-16 编辑范围；`ComposableSearch` 使用索引中的区域二分查询、作用域及声明名求值。单个词、短语及正则复用并行扫描，支持路径、区域与文件级排除；读取区域分类时按实际路径索引扫描，避免相同字节的 TS/TSX 错用同一语法。只有包含条件受数量上限约束，区域过滤发生在计数之前，OR 备选共享同一条件限额。排除在文件级遇首个有效命中即可停止；行距/函数级只保留行或函数内的存在信息，行距判断用有序行号二分。无法确认排除或组合判断超时的文件不发布结果。按行汇总时保留每个条件的真实字节范围，UI 直接画下划线，不重新解释正则。`SnapshotManifest` 保留文件树遍历得到的非源码和规则排除计数，未知值不伪造为零。
+`ProjectSearchQuery` 是查询文本与条件控件共用的解析结构，错误携带 UTF-16 编辑范围；`ComposableSearch` 使用索引中的区域二分查询、作用域及声明名求值。单个词、短语及正则复用并行扫描，支持路径、区域与文件级排除；读取区域分类时按实际路径索引扫描，避免相同字节的 TS/TSX 错用同一语法。只有包含条件受数量上限约束，区域过滤发生在计数之前，OR 备选共享同一条件限额。排除在文件级遇首个有效命中即可停止；行距/函数级只保留行或函数内的存在信息，行距判断用有序行号二分。无法确认排除或组合判断超时的文件不发布结果。按行汇总时保留每个条件的真实字节范围，UI 直接画下划线，不重新解释正则。`SnapshotManifest` 保留文件树遍历得到的非源码、规则排除和无法读取计数，未知值不伪造为零。
 
 模型通过快照、profile、generation 拒绝旧请求；语法错误保留旧结果，快照变化时旧结果禁用导航。`same:fn` 使用完整函数声明范围；Python/TypeScript 的词法 body scope 不变，查询从 executable region 关联的声明取得函数头，TypeScript 无 facet 的嵌套函数区域也保留完整范围。结果名称仅带最近所属类型，不带整条模块链。`AppModel.projectSearch` 拥有查询与历史，会话 schema 5 保存最后查询及最近20条文本/开关状态。提示的学习状态在应用级保存，关闭提示只影响展示，不影响搜索语义。
 

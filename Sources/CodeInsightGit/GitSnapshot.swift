@@ -84,6 +84,8 @@ public protocol Snapshot: Sendable {
     /// directory or file of each pruned branch, sorted. Built-in skips are
     /// not listed.
     var ruleExcludedPaths: [String] { get }
+    /// Worktree files that could not be read and were left out, sorted.
+    var unreadablePaths: [String] { get }
     /// Supported languages with at least one source file in this snapshot,
     /// sorted by `rawValue`.
     var languages: [LanguageID] { get }
@@ -93,6 +95,7 @@ public extension Snapshot {
     var projectRootName: String { "." }
     var configurationPaths: [String] { [] }
     var ruleExcludedPaths: [String] { [] }
+    var unreadablePaths: [String] { [] }
     var languages: [LanguageID] { detectedLanguages(in: listFiles()) }
 }
 
@@ -325,6 +328,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
 public final class WorktreeSnapshot: Snapshot, Sendable {
     private let files: [String: CapturedFile]
     public let ruleExcludedPaths: [String]
+    public let unreadablePaths: [String]
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
@@ -366,11 +370,18 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
 
         var captured: [String: CapturedFile] = [:]
         var excluded: [String] = []
+        var unreadable: [String] = []
         let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
         excluded = walked.ruleExcluded
         for file in walked.files {
-            let bytes = [UInt8](try Data(contentsOf: file, options: .mappedIfSafe))
             let relative = ProjectTreeWalk.relativePath(of: file, under: root)
+            // One unreadable file (permissions, a vanished file) must not
+            // stop the open; it is left out and reported instead.
+            guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else {
+                unreadable.append(relative)
+                continue
+            }
+            let bytes = [UInt8](data)
             captured[relative] = CapturedFile(
                 bytes: bytes,
                 contentID: ContentID.sha256(of: bytes),
@@ -383,6 +394,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         projectRootName = root.lastPathComponent
         files = captured
         ruleExcludedPaths = excluded
+        unreadablePaths = unreadable.sorted()
         configurationPaths = captured.keys.filter { entry in
             configurationLanguage(
                 for: URL(fileURLWithPath: entry).lastPathComponent

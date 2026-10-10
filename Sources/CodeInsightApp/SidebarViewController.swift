@@ -210,10 +210,16 @@ final class SidebarViewController: NSViewController,
         isSynchronizingFileSelection = true
         defer { isSynchronizingFileSelection = false }
         self.tree = tree
+        // Rule-excluded and unreadable paths share the one count button.
         let excluded = tree?.ruleExcludedPaths.count ?? 0
-        exclusionButton.isHidden = excluded == 0
-        exclusionButton.title = String(excluded)
-        let help = localizedFormat("main.rules.excluded", Int64(excluded))
+        let unreadable = tree?.unreadablePaths.count ?? 0
+        exclusionButton.isHidden = excluded == 0 && unreadable == 0
+        exclusionButton.title = [excluded, unreadable].filter { $0 > 0 }.map(String.init)
+            .joined(separator: " · ")
+        let help = [
+            excluded > 0 ? localizedFormat("main.rules.excluded", Int64(excluded)) : nil,
+            unreadable > 0 ? localizedFormat("main.unreadable.files", Int64(unreadable)) : nil,
+        ].compactMap { $0 }.joined(separator: "\n")
         exclusionButton.toolTip = help
         exclusionButton.setAccessibilityLabel(help)
         fileOutlineView.reloadData()
@@ -230,19 +236,28 @@ final class SidebarViewController: NSViewController,
         }
     }
 
-    /// Lists what the rules removed; editing happens in the rules sheet.
+    /// Lists what the rules removed and what could not be read; editing
+    /// happens in the rules sheet.
     @objc private func showExcludedPaths(_ sender: NSButton) {
-        let paths = tree?.ruleExcludedPaths ?? []
-        let title = NSTextField(labelWithString: localizedFormat("main.rules.excluded", Int64(paths.count)))
-        title.font = .systemFont(ofSize: 12, weight: .semibold)
-        let list = NSTextField(wrappingLabelWithString: paths.prefix(50).joined(separator: "\n")
-            + (paths.count > 50 ? "\n" + localizedFormat("main.rules.more", Int64(paths.count - 50)) : ""))
-        list.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-        list.textColor = theme.chromeSecondaryColor
-        list.isSelectable = true
+        var views: [NSView] = []
+        func section(_ titleText: String, _ paths: [String]) {
+            guard !paths.isEmpty else { return }
+            let title = NSTextField(labelWithString: titleText)
+            title.font = .systemFont(ofSize: 12, weight: .semibold)
+            let list = NSTextField(wrappingLabelWithString: paths.prefix(50).joined(separator: "\n")
+                + (paths.count > 50 ? "\n" + localizedFormat("main.rules.more", Int64(paths.count - 50)) : ""))
+            list.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            list.textColor = theme.chromeSecondaryColor
+            list.isSelectable = true
+            views += [title, list]
+        }
+        let excluded = tree?.ruleExcludedPaths ?? []
+        let unreadable = tree?.unreadablePaths ?? []
+        section(localizedFormat("main.rules.excluded", Int64(excluded.count)), excluded)
+        section(localizedFormat("main.unreadable.files", Int64(unreadable.count)), unreadable)
         let edit = NSButton(title: localized("main.rules.edit"), target: self, action: #selector(editRulesFromPopover(_:)))
         edit.bezelStyle = .rounded
-        let stack = NSStackView(views: [title, list, edit])
+        let stack = NSStackView(views: views + [edit])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8

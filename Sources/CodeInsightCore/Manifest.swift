@@ -63,16 +63,21 @@ public struct SnapshotManifest: Sendable {
     public let files: [FileOccurrence]
     public let ruleExcludedPathCount: Int?
     public let nonSourcePathCount: Int?
+    /// Worktree files left out because they could not be read; nil when
+    /// unknown.
+    public let unreadablePathCount: Int?
 
     public init(
         snapshotID: SnapshotID,
         files: [FileOccurrence],
         ruleExcludedPathCount: Int? = nil,
-        nonSourcePathCount: Int? = nil
+        nonSourcePathCount: Int? = nil,
+        unreadablePathCount: Int? = nil
     ) {
         self.snapshotID = snapshotID
         self.files = files
         self.ruleExcludedPathCount = ruleExcludedPathCount
         self.nonSourcePathCount = nonSourcePathCount
+        self.unreadablePathCount = unreadablePathCount
     }
 }

@@ -671,6 +671,7 @@
 "main.rules.excluded" = "按项目规则排除 %lld 个路径";
 "main.rules.more" = "……另有 %lld 个";
 "main.rules.edit" = "编辑排除规则…";
+"main.unreadable.files" = "%lld 个文件无法读取";
 "rules.title" = "项目排除规则";
 "rules.explain" = "每行一条路径 glob（*、**、?、{a,b}；以 / 结尾表示目录）。以 ! 开头表示包含；后面的规则覆盖前面的。被排除目录里的文件不能单独重新包含。被排除的路径不进文件树、不建索引、不参与搜索。规则只保存在这台 Mac 的应用数据里，不读也不写仓库。保存后刷新索引，标签、书签和阅读轨迹保留。";
 "rules.defaults" = "默认跳过（除 .git 外可用 ! 规则恢复）：%@";

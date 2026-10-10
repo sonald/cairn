@@ -2028,6 +2028,32 @@ func openingAFolderWithoutSupportedSourcesFailsWithItsReason() async throws {
 }
 
 @MainActor
+@Test(.enabled(if: getuid() != 0))
+func openingSkipsUnreadableFilesAndCountsThem() async throws {
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn main() {}\n",
+        "secret.txt": "secret\n",
+    ])
+    let locked = root.appendingPathComponent("secret.txt")
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: locked.path)
+        try? FileManager.default.removeItem(at: root)
+    }
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    await model.openProject(root: root).value
+
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("an unreadable file must not fail the open")
+        return
+    }
+    #expect(session.manifest.unreadablePathCount == 1)
+    #expect(model.fileTree?.unreadablePaths == ["secret.txt"])
+    #expect(model.fileTree?.children.map(\.name) == ["main.rs"])
+}
+
+@MainActor
 @Test
 func refreshInProgressSuppressesSessionCheckpoints() async throws {
     let fixture = try SnapshotGitFixture()

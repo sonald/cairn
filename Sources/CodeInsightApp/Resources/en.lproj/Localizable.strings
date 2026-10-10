@@ -671,6 +671,7 @@
 "main.rules.excluded" = "%lld paths excluded by project rules";
 "main.rules.more" = "…and %lld more";
 "main.rules.edit" = "Edit Exclusion Rules…";
+"main.unreadable.files" = "%lld files could not be read";
 "rules.title" = "Project Exclusion Rules";
 "rules.explain" = "One path glob per line (*, **, ?, {a,b}; a trailing / means a directory). A line starting with ! includes what it matches; later lines win. A file inside an excluded directory cannot be included on its own. Excluded paths leave the file tree, the index and search. Rules are kept only in this Mac's application data, never in the repository. Saving refreshes the index; tabs, bookmarks and the reading trail stay.";
 "rules.defaults" = "Skipped by default (restore with ! rules, except .git): %@";
