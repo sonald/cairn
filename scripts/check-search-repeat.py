@@ -25,7 +25,9 @@ class SearchRepeatTests(unittest.TestCase):
     def test_repeating_preserves_one_json_result_and_reports_separate_timings(self):
         baseline = self.search("connect")
         self.assertEqual(baseline.returncode, 0, baseline.stderr)
-        self.assertEqual(baseline.stderr, "")
+        # Without --repeat stderr carries no timing; it may name the
+        # language picked by default.
+        self.assertNotIn("ms=", baseline.stderr)
         self.assertEqual(json.loads(baseline.stdout)["totalMatches"], 2)
         for count in (2, 3):
             with self.subTest(count=count):

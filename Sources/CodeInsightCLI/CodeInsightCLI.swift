@@ -34,29 +34,55 @@ struct ProjectOptions: ParsableArguments {
 
     @Option(
         name: .long,
-        help: "Project language: rust, python, or typescript (default: rust; resolve infers it from the position's file)."
+        help: "Project language: rust, python, or typescript (default: resolve infers it from the position's file; otherwise the language with the most source files)."
     )
     var language: String?
 
     @OptionGroup var global: GlobalOptions
 
     /// The language to index as: the explicit option, else the one the
-    /// given source file implies, else Rust.
+    /// given source file implies, else the project's most common language.
     func languageID(inferringFrom file: String? = nil) throws -> LanguageID {
-        if let language {
-            switch language.lowercased() {
-            case "rust", "rs": return .rust
-            case "python", "py": return .python
-            case "typescript", "ts": return .typescript
-            default: throw ValidationError("Unknown --language \(language); use rust, python, or typescript.")
+        if language == nil {
+            switch URL(fileURLWithPath: file ?? "").pathExtension.lowercased() {
+            case "rs": return .rust
+            case "py", "pyi": return .python
+            case "ts", "tsx", "mts", "cts": return .typescript
+            default: break
             }
         }
-        switch URL(fileURLWithPath: file ?? "").pathExtension.lowercased() {
-        case "py", "pyi": return .python
-        case "ts", "tsx", "mts", "cts": return .typescript
-        default: return .rust
+        return try resolvedLanguage(language, project: project)
+    }
+}
+
+/// The explicit `--language`, else the supported language with the most
+/// source files under `project` (ties go to the earlier of Rust, Python,
+/// TypeScript), announced on stderr. The CLI analyzes one language at a time.
+private func resolvedLanguage(_ option: String?, project: String) throws -> LanguageID {
+    if let option {
+        switch option.lowercased() {
+        case "rust", "rs": return .rust
+        case "python", "py": return .python
+        case "typescript", "ts": return .typescript
+        default: throw ValidationError("Unknown --language \(option); use rust, python, or typescript.")
         }
     }
+    let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
+    var counts: [LanguageID: Int] = [:]
+    for file in try ProjectTreeWalk.regularFiles(under: root, rules: ProjectPathRules()).files {
+        if let mode = LanguageMode.classify(path: file.path) {
+            counts[mode.language, default: 0] += 1
+        }
+    }
+    guard let language = LanguageMode.supported.max(by: { counts[$0, default: 0] < counts[$1, default: 0] }),
+          let count = counts[language]
+    else {
+        throw ValidationError("No supported source files found (Rust, Python, TypeScript) in \(project).")
+    }
+    FileHandle.standardError.write(Data(
+        "language: \(language) (\(count) source files; pass --language to choose another)\n".utf8
+    ))
+    return language
 }
 
 extension CodeInsight {
@@ -399,19 +425,26 @@ extension CodeInsight {
         @Option(name: .long, help: "Commit switched to second.")
         var to: String
 
+        @Option(
+            name: .long,
+            help: "Language: rust, python, or typescript (default: the one with the most source files in the worktree)."
+        )
+        var language: String?
+
         func run() throws {
             let root = URL(fileURLWithPath: project, isDirectory: true)
+            let language = try resolvedLanguage(language, project: project)
             let indexer = ProjectIndexer()
             let store = ProjectIndexStore()
             let fromSnapshot = try CommitSnapshot(
                 repositoryURL: root,
                 revision: from
             )
-            _ = try indexer.indexSnapshot(fromSnapshot, into: store)
+            _ = try indexer.indexSnapshot(fromSnapshot, into: store, language: language)
 
             let startedAt = Date()
             let toSnapshot = try CommitSnapshot(repositoryURL: root, revision: to)
-            let session = try indexer.indexSnapshot(toSnapshot, into: store)
+            let session = try indexer.indexSnapshot(toSnapshot, into: store, language: language)
             let elapsed = Date().timeIntervalSince(startedAt) * 1_000
             let total = session.stats.reusedCount + session.stats.extractedCount
             let hitRate = total == 0
