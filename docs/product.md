@@ -14,9 +14,9 @@ Exact 分析由本机安装的 rust-analyzer、Pyright、typescript-language-ser
 
 ## 项目、快照与窗口
 
-- 打开项目（菜单、最近项目、拖放、Retry、会话恢复）不询问语言。语言由捕获工作区时的文件后缀探测：`.rs` 为 Rust，`.py` 为 Python，`.ts`（不含 `.d.ts`、`.mts`、`.cts`）与 `.tsx` 为 TypeScript；与文件树共用同一次遍历和排除规则，没有条目上限。单语言只是其中一种情形。没有任何受支持源码的目录打开失败，并显示“没有找到受支持的源码（Rust、Python、TypeScript）”。状态栏分析配置菜单逐行列出探测到的语言、源码文件数和单元根；最近项目只记录路径。
+- 打开项目（菜单、最近项目、拖放、Retry、会话恢复）不询问语言。语言由捕获工作区时的文件后缀探测：`.rs` 为 Rust，`.py` 为 Python，`.ts`（不含 `.d.ts`、`.mts`、`.cts`）与 `.tsx` 为 TypeScript；与文件树共用同一次遍历和排除规则，没有条目上限。单语言只是其中一种情形。没有任何受支持源码的目录打开失败，并显示“没有找到受支持的源码（Rust、Python、TypeScript）”。状态栏分析配置菜单逐个分析单元列出语言、源码文件数和单元根；最近项目只记录路径。
 - 语言集合在捕获工作区时确定：首次打开，以及停在工作区时的 Refresh Index 与保存排除规则（停在 commit 时它们重新捕获该 commit，不改变集合）。切到 commit 沿用当前集合：commit 缺少的语言保留空索引，多出的语言只预览；切回工作区不重新探测。Refresh Index 失败时连同集合恢复。重新打开或恢复会话总是重新探测工作区，会话里保存的语言不再使用；因此恢复一个停在旧 commit 的会话时，工作区已不再包含的语言在该 commit 中只预览。
-- 每门语言一个分析单元：包含该语言全部源码的最浅 marker 目录（Rust `Cargo.toml`，Python `pyproject.toml` 或 `pyrightconfig.json`，TypeScript `tsconfig.json`），没有 marker 时为项目根。多个 marker 互不嵌套、又没有覆盖全部源码的 marker 时（如没有 workspace 的多个 crate），单元回退到项目根：源码照常可见、可搜索、有大纲和关系，但 Rust `crate::`、Python 包路径等跨单元模块身份按项目根近似；rust-analyzer 因项目根没有 `Cargo.toml` 显示现有的“缺少配置”原因，加一个 workspace 清单即可恢复 Rust 精确分析。同一语言多个分析单元尚不支持。
+- 每门语言按 marker 目录（Rust `Cargo.toml`，Python `pyproject.toml` 或 `pyrightconfig.json`，TypeScript `tsconfig.json`）划分分析单元。该语言在当前快照里没有源码时（如 commit 中缺少这门语言），保留一个项目根的空单元。没有 marker，或有 marker 目录包含该语言全部源码时，只有一个单元：根为包含全部源码的最浅 marker 目录，没有 marker 时为项目根；带根 workspace 清单的仓库因此仍是一个单元。其余情形（如没有 workspace 的多个 crate、多个互不包含的 `pyproject.toml` 或 `tsconfig.json`）按 marker 拆分：每个源码文件归入包含它的最深 marker 目录，没有 marker 祖先的源码归入项目根单元，嵌套单元里的文件不属于外层单元。选中文件时状态栏、profile 与 Exact 切到该文件所在的单元，Exact 在单元根启动；同一语言的单元之间切换与跨语言切换一样冷启动。两个单元目录同名、配置与环境也相同时无法区分身份，这门语言回退为一个项目根单元：源码照常可见、可搜索、有大纲和关系，但 Rust `crate::`、Python 包路径等跨单元模块身份按项目根近似，rust-analyzer 显示现有的“缺少配置”原因。
 - 不是 Git 仓库的目录（包括仓库的子目录，Git 不向上查找）按目录快照打开，没有提交历史，其余行为相同。
 - 命令行一次只分析一门语言：`resolve` 按位置所在文件的后缀推断，其他命令未给 `--language` 时取源码文件最多的语言，并在 stderr 写明。
 - 一个项目对应一个窗口。再次打开同一实际路径（含符号链接或 `.`/`..` 别名）激活现有窗口；新项目优先使用空白窗口。
@@ -183,6 +183,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 | --- | --- |
 | 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`；`.pyi`、`.d.ts`、`.mts`、`.cts` 不因 CLI 能选择语言就自动获得源码索引支持。JS/JSX 未开放语言分析。 |
 | 自动探测的混合语言项目 | 2026-10-10 在打包应用（分支 `mixed-auto-detect`，0bdca4f 构建）上验收：真实混合仓库（两个 Rust 单元、两个 TypeScript 单元、根 `pyproject.toml`）无对话框打开，分析配置菜单列出三门语言与单元根，按文件切换 profile，Rust 显示缺少根 `Cargo.toml`、Python/TypeScript 精确分析就绪，Refresh 后集合不变，关窗后从最近打开恢复会话；单语言仓库、非 Git 混合目录、零源码目录按设计表现。在同一应用上用版本选择器切到历史 commit（工具栏显示 commit、路径栏“只读快照”，分析配置仍为 Rust）再切回工作区，均正常。后续三个提交（部分索引期间的点击、CLI `index` 默认语言、自测断言）由对应测试与自测通道验证，未重新原生验收。 |
+| 每语言多个分析单元 | 单元数没有上限：N 个 `pyproject.toml` 的 Python monorepo 产生 N 个单元，每个单元的活动视图都扫一遍 manifest（开销随文件数 × 单元数增长），分析配置菜单列 N 行；Exact 一次只在一个单元运行。多单元行为尚未在打包应用中原生验收。 |
 | TypeScript 类型直达 | 句法联合类型当前取首个非 `null`/`undefined` 成员，不承诺 `A \| B` 全候选；interface/type alias 不在当前声明种类中，相关目标依赖 Exact。 |
 | 依赖定义导航 | hover 能显示依赖文档不代表普通定义导航一定成功。无本地候选时，Context 的定义升级入口仍受候选要求限制。 |
 | 可组合查询验收范围 | 2026-10-06 的前轮打包应用已检查查询/颜色/导航、标签、历史恢复、刷新、窄窗口、主题与提示；该轮未覆盖排除上限、跨语言函数头与缓存格式断言，不能据此声明完整验收。反馈修复的相关回归和性能记录见[搜索性能证据](evidence/search-performance-2026-10.md#区域索引与组合查询2026-10-06)；反馈修复后已原生确认查询历史显式记录/重开恢复、编辑时旧结果可导航、中文标签与单短语匹配计数。刷新过期中间帧未作逐帧捕获，快照禁用旧结果由模型回归覆盖；后续原生连续两次刷新已确认 `conn.rs:21` 的列表选中、阅读位置与视口保持一致。 |
