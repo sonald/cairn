@@ -53,7 +53,7 @@ private struct MainWindowFailingIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         throw CocoaError(.featureUnsupported)
     }
 }

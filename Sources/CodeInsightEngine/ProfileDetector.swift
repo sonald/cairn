@@ -59,57 +59,74 @@ enum ProfileDetector {
         }
     }
 
+    /// One profile per analysis unit of `language`, in unit-root order.
     static func detect(
         snapshot: any Snapshot,
         language: LanguageID,
         sourcePaths: [String],
         configurationPaths: [String],
         internPath: (String) -> PathID
-    ) throws -> AnalysisProfile {
-        let selectedRoot = try unitRoot(
+    ) throws -> [AnalysisProfile] {
+        func profile(at selectedRoot: String) -> AnalysisProfile {
+            detect(
+                projectRootName: selectedRoot == "." ? snapshot.projectRootName :
+                    URL(fileURLWithPath: selectedRoot).lastPathComponent,
+                projectRoot: internPath(selectedRoot),
+                language: language,
+                selectedRoot: selectedRoot
+            ) { path in
+                try? snapshot.readBytes(path: path)
+            }
+        }
+        let profiles = try unitRoots(
             language: language,
             sourcePaths: sourcePaths,
             configurationPaths: configurationPaths
-        )
-        return detect(
-            projectRootName: selectedRoot == "." ? snapshot.projectRootName :
-                URL(fileURLWithPath: selectedRoot).lastPathComponent,
-            projectRoot: internPath(selectedRoot),
-            language: language,
-            selectedRoot: selectedRoot
-        ) { path in
-            try? snapshot.readBytes(path: path)
+        ).map(profile(at:))
+        // AnalysisProfileID carries the unit's directory name, not its path:
+        // two units with the same name, config bytes and environment would
+        // share one identity. The language then stays one root unit. The
+        // engine has no diagnostic channel, so the fallback is silent.
+        guard Set(profiles.map(\.id)).count == profiles.count else {
+            return [profile(at: ".")]
         }
+        return profiles
     }
 
-    private static func unitRoot(
+    /// No sources or no marker: one root unit. A marker directory holding
+    /// every source: one unit there (the shallowest such marker). Otherwise
+    /// each source joins its deepest marker ancestor, or the root unit.
+    static func unitRoots(
         language: LanguageID,
         sourcePaths: [String],
         configurationPaths: [String]
-    ) throws -> String {
+    ) throws -> [String] {
         try validateRelativePaths(sourcePaths + configurationPaths)
         let sources = sourcePaths.filter {
             LanguageMode.classify(path: $0, language: language) != nil
         }
         if sources.isEmpty {
-            return "."
+            return ["."]
         }
         let markers = configurationPaths.filter { isMarker($0, language: language) }
         let markerRoots = markers.map(parentDirectory)
         if markerRoots.isEmpty {
-            return "."
+            return ["."]
         }
-        // No marker covers every source (independent crates or Python
-        // projects without a shared parent): the unit is the repository
-        // root, so no source falls outside the active view. Rust Exact then
-        // reports the missing root Cargo.toml through its usual reason.
-        let valid = markerRoots.filter { root in
+        let covering = markerRoots.filter { root in
             sources.allSatisfy { isWithin(root: root, path: $0) }
         }
-        return valid.min {
+        if let shallowest = covering.min(by: {
             ($0.isEmpty ? 0 : $0.split(separator: "/").count)
                 < ($1.isEmpty ? 0 : $1.split(separator: "/").count)
-        } ?? "."
+        }) {
+            return [shallowest]
+        }
+        // ponytail: no cap on the unit count; merge into `.` or page the
+        // menu if repositories with dozens of units show up.
+        return Set(sources.map {
+            deepestUnitRoot(containing: $0, among: markerRoots) ?? "."
+        }).sorted()
     }
 
     private static func validateRelativePaths(_ paths: [String]) throws {
@@ -146,14 +163,6 @@ enum ProfileDetector {
     private static func parentDirectory(_ path: String) -> String {
         let parts = path.split(separator: "/").dropLast()
         return parts.isEmpty ? "." : parts.joined(separator: "/")
-    }
-
-    private static func isWithin(root: String, path: String) -> Bool {
-        if root == "." || root.isEmpty {
-            return true
-        }
-        return path == root
-            || path.hasPrefix(root + "/")
     }
 
     private static func invalidUnitRoot(_ path: String) -> CocoaError {

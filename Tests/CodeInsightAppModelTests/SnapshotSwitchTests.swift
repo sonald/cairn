@@ -1587,9 +1587,9 @@ actor ControlledSnapshotIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
-        let label = try label(for: prepared.cachedSession.snapshotID)
-        let language = prepared.cachedSession.analysisProfile.language
+    ) async throws -> [EngineSession] {
+        let label = try label(for: prepared.cachedSessions[0].snapshotID)
+        let language = prepared.cachedSessions[0].analysisProfile.language
         let key = "\(label)-\(language.rawValue)"
         fullStarted.insert(key)
         if failedFull.contains(label) { throw SnapshotTestError.missing(label) }
@@ -1598,9 +1598,9 @@ actor ControlledSnapshotIndexService: IndexService {
                 try Task.checkCancellation()
                 await Task.yield()
             }
-            let session = try ProjectIndexer().completeSnapshot(prepared)
-            guard let completedLanguageOverride = completedLanguageOverrides[label] else { return session }
-            return EngineSession(
+            let sessions = try ProjectIndexer().completeSnapshot(prepared)
+            guard let completedLanguageOverride = completedLanguageOverrides[label] else { return sessions }
+            return sessions.map { session in EngineSession(
                 store: session.store,
                 snapshotView: SnapshotView(
                     reprofiling: session.snapshotView,
@@ -1609,7 +1609,7 @@ actor ControlledSnapshotIndexService: IndexService {
                         root: session.analysisProfile.projectRoot
                     )
                 )
-            )
+            ) }
         } catch is CancellationError {
             cancelled.insert(label)
             throw CancellationError()

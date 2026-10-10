@@ -73,6 +73,24 @@ public struct LanguageMode: Codable, Hashable, Sendable {
 
 }
 
+/// Whether `path` lies in the project unit rooted at `root`; `.` holds
+/// every path.
+package func isWithin(root: String, path: String) -> Bool {
+    root == "." || root.isEmpty
+        || path == root
+        || path.hasPrefix(root + "/")
+}
+
+/// The deepest of `roots` that holds `path`. A source belongs to exactly
+/// this one unit of its language, so nested units never share files.
+package func deepestUnitRoot(containing path: String, among roots: [String]) -> String? {
+    func depth(_ root: String) -> Int {
+        root == "." || root.isEmpty ? 0 : root.split(separator: "/").count
+    }
+    return roots.filter { isWithin(root: $0, path: path) }
+        .max { depth($0) < depth($1) }
+}
+
 public struct ContentIndexKey: Codable, Hashable, Sendable {
     public let contentID: ContentID
     public let languageMode: LanguageMode

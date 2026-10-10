@@ -2552,7 +2552,7 @@ struct ExactSelfTestIndexService: IndexService {
         }.value
     }
 
-    func completeSnapshot(_ prepared: ProjectIndexer.PreparedSnapshot) async throws -> EngineSession {
+    func completeSnapshot(_ prepared: ProjectIndexer.PreparedSnapshot) async throws -> [EngineSession] {
         try await Task.detached(priority: .userInitiated) {
             try ProjectIndexer().completeSnapshot(prepared)
         }.value

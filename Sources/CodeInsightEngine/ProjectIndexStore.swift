@@ -97,15 +97,21 @@ struct SnapshotView: Sendable {
     let extractor: any LanguageExtractor
     let contentIndexes: [ContentIndexKey: ContentIndex]
     let contentKeysByPath: [PathID: ContentIndexKey]
+    /// This unit's sources, indexed or not.
+    let activePathIDs: Set<PathID>
     let moduleMap: ModuleMap
     let storeState: ProjectIndexStore.State
 
+    /// `unitRoots` lists every unit root of this language, this one
+    /// included; a source is active here only when this is the deepest
+    /// unit holding it. Omitted, the unit is alone.
     init(
         store: ProjectIndexStore,
         manifest: SnapshotManifest,
         stats: IndexStats,
         analysisProfile: AnalysisProfile,
-        extractor: any LanguageExtractor
+        extractor: any LanguageExtractor,
+        unitRoots: [String]? = nil
     ) {
         precondition(extractor.language == analysisProfile.language)
         self.store = store
@@ -115,14 +121,16 @@ struct SnapshotView: Sendable {
         self.extractor = extractor
         storeState = store.snapshot()
         let rootPath = store.paths.resolve(analysisProfile.projectRoot)
+        let unitRoots = unitRoots ?? [rootPath]
         let activeFiles = manifest.files.filter { file in
             let path = store.paths.resolve(file.pathID)
             guard LanguageMode.classify(
                 path: path,
                 language: analysisProfile.language
             ) != nil else { return false }
-            return Self.isWithin(root: rootPath, path: path)
+            return deepestUnitRoot(containing: path, among: unitRoots) == rootPath
         }
+        activePathIDs = Set(activeFiles.map(\.pathID))
         let activeManifest = SnapshotManifest(
             snapshotID: manifest.snapshotID,
             files: activeFiles,
@@ -161,12 +169,6 @@ struct SnapshotView: Sendable {
         )
     }
 
-    private static func isWithin(root: String, path: String) -> Bool {
-        root == "." || root.isEmpty
-            || path == root
-            || path.hasPrefix(root + "/")
-    }
-
     init(
         reprofiling view: SnapshotView,
         analysisProfile: AnalysisProfile
@@ -190,6 +192,7 @@ struct SnapshotView: Sendable {
         extractor = view.extractor
         contentIndexes = view.contentIndexes
         contentKeysByPath = view.contentKeysByPath
+        activePathIDs = view.activePathIDs
         moduleMap = view.moduleMap
         storeState = view.storeState
     }

@@ -65,24 +65,24 @@ func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
     let preparedOlder = try indexer.prepareSnapshot(olderSnapshot, into: store)
 
     #expect(preparedOlder.pendingExtractionCount == 1)
-    #expect(preparedOlder.cachedSession.stats.reusedCount == 1)
-    #expect(preparedOlder.cachedSession.stats.extractedCount == 0)
-    let olderContentIDs = Set(preparedOlder.cachedSession.manifest.files.compactMap {
+    #expect(preparedOlder.cachedSessions[0].stats.reusedCount == 1)
+    #expect(preparedOlder.cachedSessions[0].stats.extractedCount == 0)
+    let olderContentIDs = Set(preparedOlder.cachedSessions[0].manifest.files.compactMap {
         $0.detectedLanguage == .rust ? $0.contentID : nil
     })
-    #expect(preparedOlder.cachedSession.contentIndexes.keys.allSatisfy {
+    #expect(preparedOlder.cachedSessions[0].contentIndexes.keys.allSatisfy {
         olderContentIDs.contains($0.contentID)
     })
-    #expect(try preparedOlder.cachedSession.definitions(
+    #expect(try preparedOlder.cachedSessions[0].definitions(
         of: "shared",
-        context: snapshotQueryContext(for: preparedOlder.cachedSession)
+        context: snapshotQueryContext(for: preparedOlder.cachedSessions[0])
     ).count == 1)
-    #expect(try preparedOlder.cachedSession.definitions(
+    #expect(try preparedOlder.cachedSessions[0].definitions(
         of: "a",
-        context: snapshotQueryContext(for: preparedOlder.cachedSession)
+        context: snapshotQueryContext(for: preparedOlder.cachedSessions[0])
     ).isEmpty)
 
-    let older = try indexer.completeSnapshot(preparedOlder)
+    let older = try indexer.completeSnapshot(preparedOlder)[0]
     #expect(newer.stats.reusedCount == 0)
     #expect(newer.stats.extractedCount == 2)
     #expect(older.stats.reusedCount == 1)
@@ -147,7 +147,7 @@ func explicitRustIndexerMatchesEveryCompatibilityPipeline() throws {
         into: ProjectIndexStore(),
         language: .rust
     )
-    let explicitPrepared = try indexer.completeSnapshot(prepared)
+    let explicitPrepared = try indexer.completeSnapshot(prepared)[0]
 
     for session in [explicitSnapshot, explicitPrepared] {
         try expectEquivalentContent(compatibilitySnapshot, session)
@@ -682,30 +682,140 @@ func indexerRejectsExtractorAndResultIdentityMismatches() throws {
 }
 
 @Test
-func independentUnitRootsFallBackToRepositoryRootAndIndexBothUnits() throws {
+func independentUnitRootsBecomeUnitsThatEachSeeOnlyTheirOwnSources() throws {
     let snapshot = CountingSnapshot(files: [
         "a/src/main.rs": Array("fn main() {}\n".utf8),
         "b/src/main.rs": Array("fn b() {}\n".utf8),
+        "root.rs": Array("fn root() {}\n".utf8),
         "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
         "b/Cargo.toml": Array("[package]\nname = \"b\"\n".utf8),
     ], configurationPaths: [
         "a/Cargo.toml",
         "b/Cargo.toml",
     ])
-
-    let session = try ProjectIndexer(parallelism: 1).indexSnapshot(
+    let indexer = ProjectIndexer(parallelism: 1)
+    let prepared = try indexer.prepareSnapshots(
         snapshot,
         into: ProjectIndexStore(),
-        language: .rust
+        languages: [.rust]
     )
+    #expect(prepared.count == 1)
+    let cached = try #require(prepared.first).cachedSessions
+    #expect(cached.map { $0.paths.resolve($0.analysisProfile.projectRoot) }
+        == [".", "a", "b"])
 
-    #expect(session.paths.resolve(session.analysisProfile.projectRoot) == ".")
-    for path in ["a/src/main.rs", "b/src/main.rs"] {
-        let pathID = try #require(session.manifest.files.first {
-            session.paths.resolve($0.pathID) == path
-        }?.pathID)
-        #expect(session.content(at: pathID) != nil, "\(path) stays in the active view")
+    let sessions = try indexer.completeSnapshot(prepared[0])
+    let roots = sessions.map { $0.paths.resolve($0.analysisProfile.projectRoot) }
+    #expect(roots == [".", "a", "b"])
+    #expect(Set(sessions.map { ObjectIdentifier($0.store) }).count == 1)
+    #expect(sessions.map { $0.stats.extractedCount } == [3, 3, 3])
+    #expect(sessions.map { $0.activePathIDs.count } == [1, 1, 1])
+    let owner = ["root.rs": ".", "a/src/main.rs": "a", "b/src/main.rs": "b"]
+    for (session, root) in zip(sessions, roots) {
+        for (path, unit) in owner {
+            let pathID = try #require(session.manifest.files.first {
+                session.paths.resolve($0.pathID) == path
+            }?.pathID)
+            #expect((session.content(at: pathID) != nil) == (unit == root),
+                    "\(path) in unit \(root)")
+        }
     }
+}
+
+@Test
+func nestedMarkerInsidePartitionBelongsToTheDeepestUnit() throws {
+    let snapshot = CountingSnapshot(files: [
+        "a/src/x.rs": Array("fn x() {}\n".utf8),
+        "a/sub/src/y.rs": Array("fn y() {}\n".utf8),
+        "b/src/z.rs": Array("fn z() {}\n".utf8),
+        "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
+        "a/sub/Cargo.toml": Array("[package]\nname = \"sub\"\n".utf8),
+        "b/Cargo.toml": Array("[package]\nname = \"b\"\n".utf8),
+    ], configurationPaths: [
+        "a/Cargo.toml",
+        "a/sub/Cargo.toml",
+        "b/Cargo.toml",
+    ])
+    let indexer = ProjectIndexer(parallelism: 1)
+    let prepared = try indexer.prepareSnapshots(
+        snapshot,
+        into: ProjectIndexStore(),
+        languages: [.rust]
+    )
+    let sessions = try indexer.completeSnapshot(prepared[0])
+    #expect(sessions.map { $0.paths.resolve($0.analysisProfile.projectRoot) }
+        == ["a", "a/sub", "b"])
+    let a = try #require(sessions.first)
+    let y = try #require(a.manifest.files.first {
+        a.paths.resolve($0.pathID) == "a/sub/src/y.rs"
+    }?.pathID)
+    #expect(a.content(at: y) == nil)
+    #expect(!a.activePathIDs.contains(y))
+    #expect(sessions.dropFirst().first?.content(at: y) != nil)
+}
+
+@Test
+func markerCoveringEverySourceStillYieldsOneUnit() throws {
+    let snapshot = CountingSnapshot(files: [
+        "crates/x/src/lib.rs": Array("pub fn x() {}\n".utf8),
+        "crates/y/src/lib.rs": Array("pub fn y() {}\n".utf8),
+        "Cargo.toml": Array("[workspace]\nmembers = [\"crates/x\", \"crates/y\"]\n".utf8),
+        "crates/x/Cargo.toml": Array("[package]\nname = \"x\"\n".utf8),
+        "crates/y/Cargo.toml": Array("[package]\nname = \"y\"\n".utf8),
+    ], configurationPaths: [
+        "Cargo.toml",
+        "crates/x/Cargo.toml",
+        "crates/y/Cargo.toml",
+    ])
+    let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshots(
+        snapshot,
+        into: ProjectIndexStore(),
+        languages: [.rust]
+    )
+    let sessions = try #require(prepared.first).cachedSessions
+    #expect(sessions.map { $0.paths.resolve($0.analysisProfile.projectRoot) } == ["."])
+    #expect(sessions.first?.activePathIDs.count == 2)
+}
+
+@Test
+func collidingUnitIdentitiesFallBackToOneRootUnit() throws {
+    let pyproject = Array("[project]\nname = \"core\"\n".utf8)
+    let snapshot = CountingSnapshot(files: [
+        "a/core/m.py": Array("def m():\n    pass\n".utf8),
+        "b/core/n.py": Array("def n():\n    pass\n".utf8),
+        "a/core/pyproject.toml": pyproject,
+        "b/core/pyproject.toml": pyproject,
+    ], configurationPaths: [
+        "a/core/pyproject.toml",
+        "b/core/pyproject.toml",
+    ])
+    let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshots(
+        snapshot,
+        into: ProjectIndexStore(),
+        languages: [.python]
+    )
+    let sessions = try #require(prepared.first).cachedSessions
+    #expect(sessions.count == 1)
+    #expect(sessions.map { $0.paths.resolve($0.analysisProfile.projectRoot) } == ["."])
+    #expect(sessions.first?.activePathIDs.count == 2)
+}
+
+@Test
+func languageWithoutSourcesInThisSnapshotStillGetsOneEmptyRootUnit() throws {
+    let snapshot = CountingSnapshot(files: [
+        "src/lib.rs": Array("pub fn rs() {}\n".utf8),
+    ])
+    let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshots(
+        snapshot,
+        into: ProjectIndexStore(),
+        languages: [.rust, .typescript]
+    )
+    #expect(prepared.count == 2)
+    let typescript = try #require(prepared.last).cachedSessions
+    #expect(typescript.count == 1)
+    #expect(typescript.first?.analysisProfile.language == .typescript)
+    #expect(typescript.first.map { $0.paths.resolve($0.analysisProfile.projectRoot) } == ".")
+    #expect(typescript.first?.activePathIDs.isEmpty == true)
 }
 
 @Test
@@ -731,7 +841,7 @@ func mixedPrepareReadsEachFileOnceSharesOneStoreAndKeepsLanguageAndTsVariantIden
     for file in snapshot.listFiles() {
         #expect(snapshot.reads(of: file.path) == 1, "\(file.path) is read once for all languages")
     }
-    let coldCached = [coldRust, coldPython, coldTS].map(\.cachedSession)
+    let coldCached = [coldRust, coldPython, coldTS].map(\.cachedSessions[0])
     #expect(coldCached.map { $0.analysisProfile.language }
         == [.rust, .python, .typescript])
     #expect(Set(coldCached.map { $0.snapshotID }).count == 1)
@@ -739,7 +849,7 @@ func mixedPrepareReadsEachFileOnceSharesOneStoreAndKeepsLanguageAndTsVariantIden
 
     var coldFull: [EngineSession] = []
     for prepared in [coldRust, coldPython, coldTS] {
-        coldFull.append(try coldIndexer.completeSnapshot(prepared))
+        coldFull.append(try coldIndexer.completeSnapshot(prepared)[0])
     }
     #expect(coldFull.map { $0.stats.extractedCount } == [1, 1, 2])
     #expect(coldFull.map { $0.stats.reusedCount } == [0, 0, 0])
@@ -757,13 +867,13 @@ func mixedPrepareReadsEachFileOnceSharesOneStoreAndKeepsLanguageAndTsVariantIden
     )
     let (hotRust, hotPython, hotTS) = (hot[0], hot[1], hot[2])
     #expect([hotRust, hotPython, hotTS].map(\.pendingExtractionCount) == [0, 0, 0])
-    let hotCached = [hotRust, hotPython, hotTS].map(\.cachedSession)
+    let hotCached = [hotRust, hotPython, hotTS].map(\.cachedSessions[0])
     #expect(Set(hotCached.map { ObjectIdentifier($0.store) }).count == 1)
     #expect(Set(hotCached.map { $0.analysisProfile.id }).count == 3)
 
     var hotFull: [EngineSession] = []
     for hot in [hotRust, hotPython, hotTS] {
-        hotFull.append(try hotIndexer.completeSnapshot(hot))
+        hotFull.append(try hotIndexer.completeSnapshot(hot)[0])
     }
     #expect(hotFull.map { $0.stats.reusedCount } == [1, 1, 2])
     #expect(hotFull.map { $0.stats.extractedCount } == [0, 0, 0])
@@ -803,7 +913,7 @@ func nestedPythonActiveViewTrimsUnitRootBeforeModuleIdentity() throws {
         into: ProjectIndexStore(),
         language: .python
     )
-    let session = try ProjectIndexer().completeSnapshot(prepared)
+    let session = try ProjectIndexer().completeSnapshot(prepared)[0]
 
     #expect(session.paths.resolve(session.analysisProfile.projectRoot)
         == "tools/py")
@@ -850,7 +960,7 @@ func nestedRustCrateAndSuperStayInsideUnitRoot() throws {
         into: ProjectIndexStore(),
         language: .rust
     )
-    let session = try ProjectIndexer().completeSnapshot(prepared)
+    let session = try ProjectIndexer().completeSnapshot(prepared)[0]
 
     #expect(session.paths.resolve(session.analysisProfile.projectRoot)
         == "crates/x")
@@ -1148,8 +1258,8 @@ func corruptPersistentPayloadSilentlyFallsBackToExtraction() throws {
 
     let prepared = try indexer.prepareSnapshot(snapshot, into: ProjectIndexStore())
     #expect(prepared.pendingExtractionCount == 1)
-    #expect(prepared.cachedSession.stats.reusedCount == 0)
-    let recovered = try indexer.completeSnapshot(prepared)
+    #expect(prepared.cachedSessions[0].stats.reusedCount == 0)
+    let recovered = try indexer.completeSnapshot(prepared)[0]
     #expect(recovered.stats.extractedCount == 1)
     #expect(recovered.stats.reusedCount == 1)
     try expectEquivalentContent(direct, recovered)
@@ -1793,9 +1903,9 @@ func s4b2NonSourceBytesDoNotEnterTheSemanticStore() throws {
 
     // File-tree membership and sizes survive: the manifest still lists the
     // non-source payload with its captured size.
-    #expect(prepared.cachedSession.manifest.files.count == 20 + 64 + 1)
-    let payloadEntry = prepared.cachedSession.manifest.files.first {
-        prepared.cachedSession.paths.resolve($0.pathID) == "assets/payload0.pdf"
+    #expect(prepared.cachedSessions[0].manifest.files.count == 20 + 64 + 1)
+    let payloadEntry = prepared.cachedSessions[0].manifest.files.first {
+        prepared.cachedSessions[0].paths.resolve($0.pathID) == "assets/payload0.pdf"
     }
     #expect(payloadEntry?.size == UInt64(4 << 20))
 }

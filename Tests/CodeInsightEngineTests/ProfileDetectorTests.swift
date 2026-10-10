@@ -243,7 +243,7 @@ func snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() throws {
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
 
     #expect(rustProfile.projectRoot == interner.intern("crates/qrcode2txt"))
     #expect(rustProfile.projectUnitName == "qrcode2txt")
@@ -255,7 +255,7 @@ func snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() throws {
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
     let expectedTS = typescriptConfigIdentity { path in
         switch path {
         case "tsconfig.json": return tsConfig
@@ -282,7 +282,7 @@ func snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() throws {
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
     #expect(pythonProfile.projectRoot == interner.intern("."))
     #expect(pythonProfile.projectUnitName == "llm-tools")
     #expect(pythonProfile.configFingerprint == expectedPython.config)
@@ -320,7 +320,7 @@ func profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() throws 
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
     #expect(typescript.projectRoot == interner.intern("."))
     let rust = try ProfileDetector.detect(
         snapshot: snapshot,
@@ -328,7 +328,7 @@ func profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() throws 
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
 
     #expect(rust.projectRoot == interner.intern("."))
     #expect(rust.projectUnitName == "workspace")
@@ -351,7 +351,7 @@ func snapshotZeroSourceKeepsEmptyProfile() throws {
         sourcePaths: snapshot.visiblePaths,
         configurationPaths: snapshot.configurationPaths,
         internPath: { interner.intern($0) }
-    )
+    )[0]
 
     #expect(rust.projectRoot == interner.intern("."))
     #expect(rust.projectUnitName == "empty-revision")
@@ -389,13 +389,13 @@ func unsafeRelativePathsAreRejectedBeforeRootSelection() throws {
                 sourcePaths: snapshot.visiblePaths,
                 configurationPaths: snapshot.configurationPaths,
                 internPath: { interner.intern($0) }
-            )
+            )[0]
         }
     }
 }
 
 @Test
-func markersThatDoNotCoverEverySourceFallBackToDot() throws {
+func markersThatDoNotCoverEverySourcePartitionByDeepestMarker() throws {
     let interner = Interner<PathID>()
     let bytes: [String: [UInt8]] = [
         "a/src/inside.rs": Array("fn inside() {}\n".utf8),
@@ -405,26 +405,26 @@ func markersThatDoNotCoverEverySourceFallBackToDot() throws {
         "outside.rs": Array("fn outside() {}\n".utf8),
     ]
     // One marker with a source outside it, and two independent markers.
-    let cases: [(sources: [String], markers: [String])] = [
-        (["a/src/inside.rs", "outside.rs"], ["a/Cargo.toml"]),
-        (["a/src/inside.rs", "b/src/lib.rs"], ["a/Cargo.toml", "b/Cargo.toml"]),
+    let cases: [(sources: [String], markers: [String], roots: [String], names: [String])] = [
+        (["a/src/inside.rs", "outside.rs"], ["a/Cargo.toml"], [".", "a"], ["partial", "a"]),
+        (["a/src/inside.rs", "b/src/lib.rs"], ["a/Cargo.toml", "b/Cargo.toml"], ["a", "b"], ["a", "b"]),
     ]
-    for (sources, markers) in cases {
+    for (sources, markers, roots, names) in cases {
         let snapshot = ProfileSnapshot(
             projectRootName: "partial",
             visiblePaths: sources,
             configurationPaths: markers,
             bytesByPath: bytes
         )
-        let profile = try ProfileDetector.detect(
+        let profiles = try ProfileDetector.detect(
             snapshot: snapshot,
             language: .rust,
             sourcePaths: snapshot.visiblePaths,
             configurationPaths: snapshot.configurationPaths,
             internPath: { interner.intern($0) }
         )
-        #expect(profile.projectRoot == interner.intern("."), "\(markers)")
-        #expect(profile.projectUnitName == "partial")
+        #expect(profiles.map(\.projectRoot) == roots.map { interner.intern($0) }, "\(markers)")
+        #expect(profiles.map(\.projectUnitName) == names, "\(markers)")
     }
 }
 

@@ -51,9 +51,10 @@ public protocol IndexService: Sendable {
         root: URL,
         languages: [LanguageID]
     ) async throws -> [ProjectIndexer.PreparedSnapshot]
+    /// One session per analysis unit of the prepared language.
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession
+    ) async throws -> [EngineSession]
     func flushPersistentIndexCache()
     /// The project's exclusion rules for every later capture and index.
     func setPathRules(_ rules: ProjectPathRules)
@@ -130,7 +131,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
 
     public func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         try await detachedValue {
             try ProjectIndexer().completeSnapshot(prepared)
         }
@@ -2161,7 +2162,7 @@ public final class AppModel {
                       workspaceGeneration: workspaceGeneration
                   ),
                   let cached = self.validatedWorkspaceSessions(
-                      prepared.map(\.cachedSession),
+                      prepared.flatMap(\.cachedSessions),
                       snapshotID: snapshot.snapshotID
                   )
             else { return localized("model.app.bookmarkInstallFailed") }
@@ -2221,7 +2222,7 @@ public final class AppModel {
                 var completed: [EngineSession] = []
                 do {
                     for item in prepared {
-                        completed.append(try await indexService.completeSnapshot(item))
+                        completed.append(contentsOf: try await indexService.completeSnapshot(item))
                         guard let self,
                               self.canPublishWorkspaceResult(
                                   generation: installedGeneration,
@@ -2760,7 +2761,7 @@ public final class AppModel {
                     generation: generation,
                     root: root) else { return }
                 guard self.installWorkspaceSessions(
-                    prepared.map(\.cachedSession),
+                    prepared.flatMap(\.cachedSessions),
                     generation: generation,
                     root: root,
                     expectedSnapshotID: snapshot.snapshotID,
@@ -2776,8 +2777,7 @@ public final class AppModel {
 
                 var completed: [EngineSession] = []
                 for item in prepared {
-                    let session = try await indexService.completeSnapshot(item)
-                    completed.append(session)
+                    completed.append(contentsOf: try await indexService.completeSnapshot(item))
                     try Task.checkCancellation()
                     guard self.canPublishWorkspaceResult(
                         generation: generation,
@@ -3303,7 +3303,7 @@ public final class AppModel {
                 )
                 var completed: [EngineSession] = []
                 for item in prepared {
-                    completed.append(try await indexService.completeSnapshot(item))
+                    completed.append(contentsOf: try await indexService.completeSnapshot(item))
                     try Task.checkCancellation()
                 }
                 guard let self,

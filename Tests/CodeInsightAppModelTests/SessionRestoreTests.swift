@@ -1444,7 +1444,7 @@ struct SessionRestoreIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         try await Task.detached {
             try ProjectIndexer().completeSnapshot(prepared)
         }.value
@@ -1481,7 +1481,7 @@ private actor GatedSessionRestoreIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         try await indexing.completeSnapshot(prepared)
     }
 

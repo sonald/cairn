@@ -20,13 +20,16 @@ public struct IndexStats: Sendable {
 }
 
 public struct ProjectIndexer: Sendable {
+    /// One language of a snapshot: extraction runs once per language, and
+    /// each of its analysis units gets its own session over the same store.
     public struct PreparedSnapshot: Sendable {
-        public let cachedSession: EngineSession
+        /// One cached-only session per unit, in unit-root order.
+        public let cachedSessions: [EngineSession]
         public var pendingExtractionCount: Int { missingInputs.count }
 
         fileprivate let store: ProjectIndexStore
         fileprivate let manifest: SnapshotManifest
-        fileprivate let analysisProfile: AnalysisProfile
+        fileprivate let profiles: [AnalysisProfile]
         fileprivate let extractor: any LanguageExtractor
         fileprivate let missingInputs: [ExtractionInput]
         fileprivate let deferredDrafts: [ExtractionDraft]
@@ -196,8 +199,8 @@ public struct ProjectIndexer: Sendable {
         )
     }
 
-    /// Builds a manifest and a queryable cached-only session. S4 can publish
-    /// `cachedSession` for first paint, then run `completeSnapshot` off-thread.
+    /// Builds a manifest and queryable cached-only sessions. S4 can publish
+    /// `cachedSessions` for first paint, then run `completeSnapshot` off-thread.
     public func prepareSnapshot(
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore
@@ -215,7 +218,8 @@ public struct ProjectIndexer: Sendable {
 
     /// One pass over the snapshot for every language in the project's set:
     /// each file is read once into one shared manifest, and each language
-    /// gets its own prepared session over the shared store.
+    /// gets one prepared snapshot with a session per unit over the shared
+    /// store.
     public func prepareSnapshots(
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore,
@@ -228,16 +232,13 @@ public struct ProjectIndexer: Sendable {
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
         let sourcePaths = files.map(\.path)
         let profiles = try languages.map { language in
-            try validated(
-                ProfileDetector.detect(
-                    snapshot: snapshot,
-                    language: language,
-                    sourcePaths: sourcePaths,
-                    configurationPaths: snapshot.configurationPaths,
-                    internPath: { store.paths.intern($0) }
-                ),
-                for: language
-            )
+            try ProfileDetector.detect(
+                snapshot: snapshot,
+                language: language,
+                sourcePaths: sourcePaths,
+                configurationPaths: snapshot.configurationPaths,
+                internPath: { store.paths.intern($0) }
+            ).map { try validated($0, for: language) }
         }
         var occurrences: [FileOccurrence] = []
         var newInputs = Array(repeating: [ExtractionInput](), count: languages.count)
@@ -341,18 +342,17 @@ public struct ProjectIndexer: Sendable {
                 extractedCount: 0,
                 startedAt: startedAt
             )
-            let view = SnapshotView(
-                store: store,
-                manifest: manifest,
-                stats: stats,
-                analysisProfile: profiles[slot],
-                extractor: extractors[slot]
-            )
             return PreparedSnapshot(
-                cachedSession: EngineSession(store: store, snapshotView: view),
+                cachedSessions: unitSessions(
+                    store: store,
+                    manifest: manifest,
+                    stats: stats,
+                    profiles: profiles[slot],
+                    extractor: extractors[slot]
+                ),
                 store: store,
                 manifest: manifest,
-                analysisProfile: profiles[slot],
+                profiles: profiles[slot],
                 extractor: extractors[slot],
                 missingInputs: pending[slot].missing,
                 deferredDrafts: pending[slot].deferred,
@@ -363,9 +363,11 @@ public struct ProjectIndexer: Sendable {
         }
     }
 
+    /// Extracts the language once, then builds every unit's session from
+    /// the same store state, so no unit depends on another finishing first.
     public func completeSnapshot(
         _ prepared: PreparedSnapshot
-    ) throws -> EngineSession {
+    ) throws -> [EngineSession] {
         try Task.checkCancellation()
         let extractedDrafts = try extract(
             prepared.missingInputs,
@@ -388,14 +390,34 @@ public struct ProjectIndexer: Sendable {
             extractedCount: extractedDrafts.count,
             startedAt: prepared.startedAt
         )
-        let view = SnapshotView(
+        return unitSessions(
             store: prepared.store,
             manifest: prepared.manifest,
             stats: stats,
-            analysisProfile: prepared.analysisProfile,
+            profiles: prepared.profiles,
             extractor: prepared.extractor
         )
-        return EngineSession(store: prepared.store, snapshotView: view)
+    }
+
+    /// Stats are language-level facts shared by every unit's view.
+    private func unitSessions(
+        store: ProjectIndexStore,
+        manifest: SnapshotManifest,
+        stats: IndexStats,
+        profiles: [AnalysisProfile],
+        extractor: any LanguageExtractor
+    ) -> [EngineSession] {
+        let roots = profiles.map { store.paths.resolve($0.projectRoot) }
+        return profiles.map { profile in
+            EngineSession(store: store, snapshotView: SnapshotView(
+                store: store,
+                manifest: manifest,
+                stats: stats,
+                analysisProfile: profile,
+                extractor: extractor,
+                unitRoots: roots
+            ))
+        }
     }
 
     public func indexSnapshot(
@@ -405,16 +427,21 @@ public struct ProjectIndexer: Sendable {
         try indexSnapshot(snapshot, into: store, language: .rust)
     }
 
+    /// The language's unit with the most source files; a tie keeps the
+    /// earlier unit root.
     public func indexSnapshot(
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore,
         language: LanguageID
     ) throws -> EngineSession {
-        try completeSnapshot(prepareSnapshot(
+        let sessions = try completeSnapshot(prepareSnapshot(
             snapshot,
             into: store,
             language: language
         ))
+        return sessions.dropFirst().reduce(sessions[0]) { best, next in
+            next.activePathIDs.count > best.activePathIDs.count ? next : best
+        }
     }
 
     private func snapshotStats(

@@ -1486,21 +1486,21 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
         root: root,
         languages: snapshot.languages
     )
-    #expect(prepared.map { $0.cachedSession.analysisProfile.language }
+    #expect(prepared.map { $0.cachedSessions[0].analysisProfile.language }
         == [.rust, .python, .typescript])
-    #expect(Set(prepared.map { $0.cachedSession.snapshotID }).count == 1)
-    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.store) }).count == 1)
-    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.paths) }).count == 1)
-    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.names) }).count == 1)
-    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.strings) }).count == 1)
+    #expect(Set(prepared.map { $0.cachedSessions[0].snapshotID }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSessions[0].store) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSessions[0].paths) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSessions[0].names) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSessions[0].strings) }).count == 1)
     #expect(prepared.map {
-        $0.cachedSession.paths.resolve($0.cachedSession.analysisProfile.projectRoot)
+        $0.cachedSessions[0].paths.resolve($0.cachedSessions[0].analysisProfile.projectRoot)
     } == ["crates/r", ".", "tools/ts"])
 
-    let cached = prepared.map(\.cachedSession)
+    let cached = prepared.map { $0.cachedSessions[0] }
     var full: [EngineSession] = []
     for item in prepared {
-        full.append(try await service.completeSnapshot(item))
+        full.append(contentsOf: try await service.completeSnapshot(item))
     }
     #expect(full.map { $0.analysisProfile.language }
         == cached.map { $0.analysisProfile.language })
@@ -2027,7 +2027,7 @@ private actor ControlledIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         try ProjectIndexer().completeSnapshot(prepared)
     }
 
@@ -2140,7 +2140,7 @@ private struct FailingIndexService: IndexService {
 
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
+    ) async throws -> [EngineSession] {
         throw Failure.expected
     }
 }
@@ -2368,7 +2368,7 @@ func openAndSwitchFailuresSurfaceTheirUnderlyingReasons() async throws {
 private func indexWorktree(_ service: ProjectIndexService, root: URL) async throws -> EngineSession {
     let snapshot = try await service.captureSnapshot(root: root, revision: nil)
     let prepared = try await service.prepareSnapshots(snapshot, root: root, languages: snapshot.languages)
-    return try await service.completeSnapshot(prepared[0])
+    return try await service.completeSnapshot(prepared[0])[0]
 }
 
 @MainActor

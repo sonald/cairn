@@ -86,6 +86,9 @@ public final class EngineSession: Sendable {
     public var paths: Interner<PathID> { store.paths }
     public var strings: Interner<StringID> { store.strings }
     public var analysisProfile: AnalysisProfile { snapshotView.analysisProfile }
+    /// The unit's source files, indexed or not; the manifest stays the
+    /// whole snapshot.
+    package var activePathIDs: Set<PathID> { snapshotView.activePathIDs }
 
     public var snapshotID: SnapshotID { manifest.snapshotID }
     public var moduleChildren: [PathID: [NameID: PathID]] {
