@@ -1181,6 +1181,42 @@ func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async thr
 
 @MainActor
 @Test
+func twoRustUnitsRouteByContainingUnitAndSwitchProfileOnFileChange() async throws {
+    let root = try temporaryGitProject([
+        "crates/a/Cargo.toml": "[package]\nname = \"a\"\n",
+        "crates/a/src/lib.rs": "pub fn a() {}\n",
+        "crates/b/Cargo.toml": "[package]\nname = \"b\"\n",
+        "crates/b/src/lib.rs": "pub fn b() {}\n",
+        "pkg.py": "def f():\n    pass\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    await model.openProject(root: root).value
+
+    #expect(model.querySessions.count == 3)
+    let rustUnits = model.detectedLanguageUnits.filter { $0.language == .rust }
+    #expect(rustUnits.map(\.unitRoot) == ["crates/a", "crates/b"])
+    #expect(rustUnits.map(\.sourceFiles) == [1, 1])
+
+    func activeUnit() -> (root: String, id: AnalysisProfileID)? {
+        guard case let .ready(session, context) = model.projectState else { return nil }
+        return (session.paths.resolve(session.analysisProfile.projectRoot), context.analysisProfileID)
+    }
+    model.navigate(to: root.appendingPathComponent("crates/a/src/lib.rs"))
+    let first = try #require(activeUnit())
+    #expect(first.root == "crates/a")
+    model.navigate(to: root.appendingPathComponent("crates/b/src/lib.rs"))
+    let second = try #require(activeUnit())
+    #expect(second.root == "crates/b")
+    #expect(second.id != first.id)
+}
+
+@MainActor
+@Test
 func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
     let rustSource = "fn target() {}\nfn use_rust() { target(); }\n"
     let pySource = "def target():\n    pass\n\ndef use_py():\n    target()\n"

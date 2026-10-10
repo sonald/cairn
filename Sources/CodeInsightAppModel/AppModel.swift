@@ -375,16 +375,16 @@ public final class AppModel {
 
     package var querySessions: [(EngineSession, QueryContext)] {
         guard case .ready = projectState,
-              snapshotPhase == .fullReady || snapshotPhase == .cachedReady,
-              workspaceSessions.count == projectLanguages.count
+              snapshotPhase == .fullReady || snapshotPhase == .cachedReady
         else {
             return []
         }
         return querySessionTuples()
     }
 
-    /// What the open detected, one row per language in the set: its source
-    /// files in the shown snapshot and its unit root (`.` or a relative path).
+    /// What the open detected, one row per analysis unit: its language, its
+    /// source files in the shown snapshot and its unit root (`.` or a
+    /// relative path).
     package var detectedLanguageUnits: [(language: LanguageID, sourceFiles: Int, unitRoot: String)] {
         querySessions.map { session, _ in
             (
@@ -3008,48 +3008,43 @@ public final class AppModel {
         relationTree.updateProjectState(state)
     }
 
+    /// Counts only the session's own unit, so units of one language do not
+    /// count each other's files.
     private static func sessionCoverage(for session: EngineSession) -> SnapshotCoverage {
-        let language = session.analysisProfile.language
-        let activeFiles = session.manifest.files.filter {
-            LanguageMode.classify(
-                path: session.paths.resolve($0.pathID),
-                language: language
-            ) != nil
-        }
+        let activeFiles = session.activePathIDs
         return SnapshotCoverage(
             filesIndexed: activeFiles.filter {
-                session.content(at: $0.pathID) != nil
+                session.content(at: $0) != nil
             }.count,
             filesTotal: activeFiles.count
         )
     }
 
+    /// Every unit session, in project-language order and by unit root
+    /// within a language.
     private func querySessionTuples() -> [(EngineSession, QueryContext)] {
         let languages = projectLanguages
+        let sessions = Array(workspaceSessions.values)
         guard !languages.isEmpty,
-              workspaceSessions.count == languages.count
+              Set(sessions.map { $0.analysisProfile.language }) == Set(languages),
+              Set(sessions.map(\.snapshotID)).count == 1
         else { return [] }
-        var result: [(EngineSession, QueryContext)] = []
-        result.reserveCapacity(languages.count)
-        var snapshotID: SnapshotID?
-        for language in languages {
-            let matches = workspaceSessions.values.filter {
-                $0.analysisProfile.language == language
-            }
-            guard matches.count == 1, let session = matches.first else { return [] }
-            if let snapshotID, snapshotID != session.snapshotID { return [] }
-            snapshotID = session.snapshotID
-            result.append((
+        func order(_ session: EngineSession) -> (Int, String) {
+            (
+                languages.firstIndex(of: session.analysisProfile.language) ?? languages.count,
+                session.paths.resolve(session.analysisProfile.projectRoot)
+            )
+        }
+        return sessions.sorted { order($0) < order($1) }.map { session in
+            (
                 session,
                 QueryContext(
                     snapshotID: session.snapshotID,
                     analysisProfileID: session.analysisProfile.id,
                     generation: generation
                 )
-            ))
+            )
         }
-        guard Set(result.map(\.0.snapshotID)).count == 1 else { return [] }
-        return result
     }
 
     private func installWorkspaceSessions(
@@ -3089,7 +3084,7 @@ public final class AppModel {
         let languages = projectLanguages
         var byProfile: [AnalysisProfileID: EngineSession] = [:]
         for session in candidates { byProfile[session.analysisProfile.id] = session }
-        guard byProfile.count == languages.count,
+        guard !languages.isEmpty,
               byProfile.values.allSatisfy({ $0.snapshotID == snapshotID }),
               Set(byProfile.keys) == Set(byProfile.values.map { $0.analysisProfile.id }),
               Set(byProfile.values.map { $0.snapshotID }).count == 1,
@@ -3108,9 +3103,12 @@ public final class AppModel {
 
     private func routedSession(for file: URL) -> (EngineSession, QueryContext)? {
         guard let mode = languageMode(for: file),
-              let session = workspaceSessions.values.first(where: {
-                  $0.analysisProfile.language == mode.language
-              })
+              let session = unitSession(
+                  language: mode.language,
+                  relativePath: projectRoot.flatMap {
+                      Self.relativePath(of: file, under: $0)
+                  }
+              )
         else { return nil }
         return (
             session,
@@ -3120,6 +3118,23 @@ public final class AppModel {
                 generation: generation
             )
         )
+    }
+
+    /// The language's session whose unit is the deepest holding the path;
+    /// outside every unit (or without a path), the language's first session.
+    private func unitSession(
+        language: LanguageID,
+        relativePath: String?
+    ) -> EngineSession? {
+        let sessions = workspaceSessions.values.filter {
+            $0.analysisProfile.language == language
+        }
+        let roots = sessions.map { $0.paths.resolve($0.analysisProfile.projectRoot) }
+        guard let relativePath,
+              let root = deepestUnitRoot(containing: relativePath, among: roots),
+              let index = roots.firstIndex(of: root)
+        else { return sessions.first }
+        return sessions[index]
     }
 
     nonisolated private static func relativePath(
@@ -3145,9 +3160,10 @@ public final class AppModel {
                 languages: projectLanguages
             )
             if let classified,
-               let session = workspaceSessions.values.first(where: {
-                   $0.analysisProfile.language == classified.language
-               }),
+               let session = unitSession(
+                   language: classified.language,
+                   relativePath: path
+               ),
                let occurrence = session.manifest.files.first(where: {
                    session.paths.resolve($0.pathID) == path
                }),

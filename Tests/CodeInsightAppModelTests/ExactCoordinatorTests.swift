@@ -305,6 +305,56 @@ func exactCoordinatorPreparesNestedProfilesAcrossLanguageNavigation() async thro
 
 @MainActor
 @Test
+func exactCoordinatorPreparesSecondRustUnitRootWhenNavigatingBetweenCrates() async throws {
+    let root = try exactTemporaryProject([
+        "crates/a/Cargo.toml": "[package]\nname = \"a\"\n",
+        "crates/a/src/lib.rs": "pub fn a() {}\n",
+        "crates/b/Cargo.toml": "[package]\nname = \"b\"\n",
+        "crates/b/src/lib.rs": "pub fn b() {}\n",
+    ])
+    try FileManager.default.removeItem(at: root.appendingPathComponent("Cargo.toml"))
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let indexService = ProjectIndexService()
+    defer {
+        indexService.flushPersistentIndexCache()
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    let state = ExactProviderState()
+    let model = AppModel(
+        indexService: indexService,
+        exactCoordinator: ExactCoordinator(
+            providerFactory: { projectURL, language in
+                state.recordPrepare(language: language, root: projectURL)
+                return ExactTestProvider(language: language, state: state)
+            },
+            sandboxAvailable: { true },
+            trustRegistry: TrustRegistry(
+                fileURL: root.appendingPathComponent("trust.json")
+            )
+        )
+    )
+    await model.openProject(root: root).value
+    #expect(await testWaitUntil("initial exact prepare count=1") {
+        state.prepareCount == 1
+    })
+    model.navigate(to: root.appendingPathComponent("crates/a/src/lib.rs"))
+    model.navigate(to: root.appendingPathComponent("crates/b/src/lib.rs"))
+    #expect(await testWaitUntil("second crate exact prepare count=2") {
+        state.prepareCount == 2
+    })
+    #expect(state.prepareRoots.map(\.path) == [
+        root.appendingPathComponent("crates/a").path,
+        root.appendingPathComponent("crates/b").path,
+    ])
+}
+
+@MainActor
+@Test
 func exactCoordinatorGateOldPrepareBeforeNewProviderPrepare() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
