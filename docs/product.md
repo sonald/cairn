@@ -181,7 +181,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 | 项目 | 当前依据与限制 |
 | --- | --- |
 | 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`；`.pyi`、`.d.ts`、`.mts`、`.cts` 不因 CLI 能选择语言就自动获得源码索引支持。JS/JSX 未开放语言分析。 |
-| 自动探测的混合语言项目 | 2026-10-10 在打包应用（分支 `mixed-auto-detect`，0bdca4f 构建）上验收：真实混合仓库（两个 Rust 单元、两个 TypeScript 单元、根 `pyproject.toml`）无对话框打开，分析配置菜单列出三门语言与单元根，按文件切换 profile，Rust 显示缺少根 `Cargo.toml`、Python/TypeScript 精确分析就绪，Refresh 后集合不变，关窗后从最近打开恢复会话；单语言仓库、非 Git 混合目录、零源码目录按设计表现。切 commit 只由 `--self-test-mixed`、`switch` 自测通道和 `SnapshotSwitchTests` 覆盖，没有原生交互验证。后续三个提交（部分索引期间的点击、CLI `index` 默认语言、自测断言）由对应测试与自测通道验证，未重新原生验收。 |
+| 自动探测的混合语言项目 | 2026-10-10 在打包应用（分支 `mixed-auto-detect`，0bdca4f 构建）上验收：真实混合仓库（两个 Rust 单元、两个 TypeScript 单元、根 `pyproject.toml`）无对话框打开，分析配置菜单列出三门语言与单元根，按文件切换 profile，Rust 显示缺少根 `Cargo.toml`、Python/TypeScript 精确分析就绪，Refresh 后集合不变，关窗后从最近打开恢复会话；单语言仓库、非 Git 混合目录、零源码目录按设计表现。在同一应用上用版本选择器切到历史 commit（工具栏显示 commit、路径栏“只读快照”，分析配置仍为 Rust）再切回工作区，均正常。后续三个提交（部分索引期间的点击、CLI `index` 默认语言、自测断言）由对应测试与自测通道验证，未重新原生验收。 |
 | 无法读取的文件 | 工作区捕获读取每个常规文件；项目里有一个没有读权限的文件时打开失败并显示读取错误，不会静默跳过。是否改为跳过并显示数量待定。 |
 | TypeScript 类型直达 | 句法联合类型当前取首个非 `null`/`undefined` 成员，不承诺 `A \| B` 全候选；interface/type alias 不在当前声明种类中，相关目标依赖 Exact。 |
 | 依赖定义导航 | hover 能显示依赖文档不代表普通定义导航一定成功。无本地候选时，Context 的定义升级入口仍受候选要求限制。 |
