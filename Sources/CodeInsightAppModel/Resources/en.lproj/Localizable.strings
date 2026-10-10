@@ -28,6 +28,7 @@
 "model.app.newerSession" = "Saved reading session needs a newer Cairn (schema %lld); it is kept untouched";
 "model.app.noContentID" = "missing content identity";
 "model.app.noEvidence" = "no frozen evidence";
+"model.app.noSupportedSources" = "No supported source files found (Rust, Python, TypeScript)";
 "model.app.nodeUnavailable" = "selected node is unavailable";
 "model.app.projectUnavailable" = "Saved reading session belongs to a project that is not available right now";
 "model.app.refreshDetail" = "Index refresh failed — previous index restored (%@)";
@@ -43,7 +44,6 @@
 "model.app.trail" = "Trail";
 "model.app.trailTarget" = "TRAIL TARGET";
 "model.app.unreadableSession" = "Saved reading session could not be read; it is kept untouched. Retry opening the project";
-"model.app.unsupportedLanguage" = "CodeInsight app does not support %@";
 "model.app.versionUnavailable" = "that saved version is unavailable; the current view was kept";
 "model.app.worktreeUnavailable" = "recorded worktree snapshot is unavailable";
 "model.binding.assignment" = "assignment";

@@ -67,7 +67,7 @@ func appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory: Bool) asy
     let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
     delegate.registerProjectWindow(controller)
     defer { controller.window?.orderOut(nil); coordinator.shutdown() }
-    try await model.openProject(root: project, languages: [.rust])
+    await model.openProject(root: project).value
     if case .ready = model.projectState {} else {
         Issue.record("Git fixture did not reach ready: \(String(describing: model.projectFailureReason))")
         return
@@ -142,7 +142,7 @@ func appTrustGrantRefreshesExistingSettingsAndOtherWindows() async throws {
         for window in windows { window.window?.orderOut(nil) }
         for coordinator in coordinators { coordinator.shutdown() }
     }
-    try await models[0].openProject(root: project, languages: [.rust])
+    await models[0].openProject(root: project).value
     if case .ready = models[0].projectState {} else {
         Issue.record("grant fixture must be loaded")
         return

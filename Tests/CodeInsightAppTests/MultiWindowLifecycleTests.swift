@@ -15,14 +15,6 @@ import Testing
 
 // MARK: - Local fixtures
 
-private struct LifecycleIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        try await Task.detached {
-            try ProjectIndexer().index(root: root, language: language)
-        }.value
-    }
-}
-
 private func lifecycleTemporaryDirectory() -> URL {
     FileManager.default.temporaryDirectory
         .appendingPathComponent("MultiWindowLifecycle-\(UUID().uuidString)")
@@ -77,7 +69,7 @@ private func lifecycleAppDelegate(
         model: AppModel(
             sessionURL: sessionURL,
             recentProjectsStore: store,
-            indexService: LifecycleIndexService()
+            indexService: ExactSelfTestIndexService()
         ),
         recentProjectsStore: store,
         windowSessionURL: sessionURL,

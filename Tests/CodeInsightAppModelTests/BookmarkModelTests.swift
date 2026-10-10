@@ -467,7 +467,7 @@ func appModelSingleLanguageOpenSynchronizesBookmarkWorkspaceGeneration() async t
     let model = AppModel(indexService: ProjectIndexService())
 
     let generationBeforeOpen = model.generation
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
 
     #expect(model.generation == generationBeforeOpen + 1)
     #expect(model.bookmarkModel.workspaceGeneration == model.generation)
@@ -501,7 +501,7 @@ func persistedCrossSnapshotBookmarkAttemptSurvivesSingleLanguageOpen() async thr
     )
     #expect(model.bookmarkModel.records.map(\.id) == [record.id])
 
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     #expect(await testWaitUntil("single-language project ready before bookmark open") {
         model.snapshotPhase == .fullReady
     })
@@ -532,7 +532,7 @@ func featureSelectionChangeClearsOlderBookmarkAttempt() async throws {
     let root = try bookmarkModelTemporaryGitProject(source: "fn main() {}\n")
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(indexService: ProjectIndexService())
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     #expect(await testWaitUntil("feature switch project ready") {
         model.snapshotPhase == .fullReady
     })
@@ -570,7 +570,7 @@ func appModelPreflightPublishesOnlyTransientMissingCommitAttempts() async throws
         "commit", "-qm", "initial"
     )
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
 
     let unavailable = bookmarkModelRecord(
         snapshot: .commit(fullOID: String(repeating: "a", count: 40))
@@ -616,7 +616,7 @@ func appModelExplicitBookmarkLineOpenUsesCapturedWorktreeBytesWithoutReanchoring
     defer { try? FileManager.default.removeItem(at: root) }
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     let bookmarkURL = bookmarkModelTestFileURL()
     defer { try? FileManager.default.removeItem(at: bookmarkURL.deletingLastPathComponent()) }
@@ -656,7 +656,7 @@ func appModelCapturesOnlyTheCurrentReaderDocumentMatchingCapturedSource() async 
     defer { try? FileManager.default.removeItem(at: root) }
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     model.navigate(to: file, byteOffset: 3)
     model.tabStrip.setActiveDocument(ReaderDocument(
@@ -719,7 +719,7 @@ func appModelBookmarkMarkersExcludeOffsetInvalidRecordsEvenWhenContentMatches() 
     defer { try? FileManager.default.removeItem(at: root) }
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     let document = ReaderDocument(bytes: captured.bytes)
     model.navigate(to: file, byteOffset: 0)
@@ -747,7 +747,7 @@ func appModelRefusesToCaptureAnOffsetInsideAMultibyteScalar() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     let emojiStart = try #require(captured.bytes.firstIndex(of: 0xf0))
     model.navigate(to: file, byteOffset: UInt32(emojiStart + 1))
@@ -772,7 +772,7 @@ func appModelCapturesTheResolvedFullCommitOIDRatherThanTheRevisionExpression() a
 
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit("HEAD")
     #expect(await testWaitUntil("commit snapshot ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == "HEAD"
@@ -797,7 +797,7 @@ func appModelBookmarkEligibilityNamesUnsupportedSurfaces() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let file = root.appendingPathComponent("src/main.rs")
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     model.navigate(to: file, byteOffset: 3)
     model.tabStrip.setActiveDocument(ReaderDocument(bytes: captured.bytes), for: file)
@@ -831,7 +831,7 @@ func appModelStrictSameSnapshotBookmarkNavigationUsesCapturedBytesExactlyOnce() 
         indexService: ProjectIndexService(),
         navigationSink: { file, offset in sink.values.append((file, offset)) }
     )
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     model.navigate(to: file, byteOffset: 3)
     model.tabStrip.setActiveDocument(ReaderDocument(bytes: captured.bytes), for: file)
@@ -900,7 +900,7 @@ func appModelStrictSameCommitBookmarkNavigationUsesCapturedCommitBytes() async t
         indexService: ProjectIndexService(),
         navigationSink: { file, offset in sink.values.append((file, offset)) }
     )
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit("HEAD")
     #expect(await testWaitUntil("strict commit snapshot ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == "HEAD"
@@ -950,7 +950,7 @@ func appModelStrictSameSnapshotNonExactAndProjectMismatchOnlyPublishAttempts() a
         indexService: ProjectIndexService(),
         navigationSink: { file, offset in sink.values.append((file, offset)) }
     )
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let captured = try #require(model.capturedProjectSource(at: "src/main.rs"))
     model.navigate(to: file, byteOffset: 3)
     model.tabStrip.setActiveDocument(ReaderDocument(bytes: captured.bytes), for: file)
@@ -1147,7 +1147,6 @@ func appModelStrictCrossSnapshotSecondAttemptWinsWhenFirstPrepareCompletesStale(
     let first = TestSnapshot(label: "first", files: ["src/main.rs": "fn first() {}\n"])
     let second = TestSnapshot(label: "second", files: ["src/main.rs": "fn second() {}\n"])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: root),
         worktreeSnapshot: initial,
         snapshots: [:],
         externalSnapshots: [
@@ -1158,7 +1157,7 @@ func appModelStrictCrossSnapshotSecondAttemptWinsWhenFirstPrepareCompletesStale(
         ignoresCachedCancellation: ["first"]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit(commit)
     #expect(await testWaitUntil("controlled commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1243,7 +1242,6 @@ func appModelStrictCrossSnapshotWorktreeMismatchPublishesOnlyDriftedAttempt() as
     let initial = TestSnapshot(label: "initial", files: ["src/main.rs": "fn initial() {}\n"])
     let drifted = TestSnapshot(label: "drifted", files: ["src/main.rs": "fn now() {}\n"])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: root),
         worktreeSnapshot: initial,
         snapshots: [:],
         externalSnapshots: [
@@ -1251,7 +1249,7 @@ func appModelStrictCrossSnapshotWorktreeMismatchPublishesOnlyDriftedAttempt() as
         ]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit(commit)
     #expect(await testWaitUntil("controlled commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1320,7 +1318,6 @@ func appModelStrictCrossSnapshotRejectsInvalidCachedPreparedSessionsWithoutMutat
         "src/foreign.py": "def target():\n    pass\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: root),
         worktreeSnapshot: initial,
         snapshots: [:],
         externalSnapshots: [
@@ -1329,7 +1326,7 @@ func appModelStrictCrossSnapshotRejectsInvalidCachedPreparedSessionsWithoutMutat
         cachedLanguageOverrides: ["target": .python]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit(commit)
     #expect(await testWaitUntil("controlled commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1410,7 +1407,6 @@ func appModelStrictCrossSnapshotCaptureAndPreparationFailuresOnlyPublishAttempts
         let initial = TestSnapshot(label: "initial", files: ["src/main.rs": "fn initial() {}\n"])
         let target = TestSnapshot(label: "target", files: ["src/main.rs": "fn target() {}\n"])
         let service = ControlledSnapshotIndexService(
-            initialSession: try ProjectIndexer().index(root: root),
             worktreeSnapshot: initial,
             snapshots: [:],
             externalSnapshots: [
@@ -1420,7 +1416,7 @@ func appModelStrictCrossSnapshotCaptureAndPreparationFailuresOnlyPublishAttempts
             failedPrepare: failure == "prepare" ? ["target"] : []
         )
         let model = AppModel(indexService: service)
-        try await model.openProject(root: root, languages: [.rust])
+        await model.openProject(root: root).value
         model.switchToCommit(commit)
         #expect(await testWaitUntil("controlled commit ready \(failure)") {
             model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1487,7 +1483,6 @@ func appModelStrictCrossSnapshotFullFailureLeavesCachedExactReadingInstalled() a
     let initial = TestSnapshot(label: "initial", files: ["src/main.rs": "fn initial() {}\n"])
     let target = TestSnapshot(label: "target", files: ["src/main.rs": "fn captured() {}\n"])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: root),
         worktreeSnapshot: initial,
         snapshots: [:],
         externalSnapshots: [
@@ -1496,7 +1491,7 @@ func appModelStrictCrossSnapshotFullFailureLeavesCachedExactReadingInstalled() a
         failedFull: ["target"]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit(commit)
     #expect(await testWaitUntil("controlled commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1555,7 +1550,6 @@ func appModelStrictCrossSnapshotKeepsCachedInstallIndependentFromFullCompletion(
     let initial = TestSnapshot(label: "initial", files: ["src/main.rs": "fn initial() {}\n"])
     let target = TestSnapshot(label: "target", files: ["src/main.rs": "fn captured() {}\n"])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: root),
         worktreeSnapshot: initial,
         snapshots: [:],
         externalSnapshots: [
@@ -1564,7 +1558,7 @@ func appModelStrictCrossSnapshotKeepsCachedInstallIndependentFromFullCompletion(
         blockedFull: ["target"]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     model.switchToCommit(commit)
     #expect(await testWaitUntil("controlled commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == commit
@@ -1659,7 +1653,7 @@ func appModelStrictCrossSnapshotBookmarkStartsWithoutMutatingTheCurrentWorkspace
         encoding: .utf8
     )
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let beforeSnapshot = model.currentSnapshotID
     let beforeGeneration = model.generation
     let record = BookmarkRecord(

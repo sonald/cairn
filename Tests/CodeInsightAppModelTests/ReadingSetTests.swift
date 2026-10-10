@@ -10,7 +10,7 @@ func readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() async 
     let source = "fn before() {}\nfn target() {}\n"
     let root = try readingSetTemporaryProject(source: source)
     defer { try? FileManager.default.removeItem(at: root) }
-    let model = AppModel(indexService: ReadingSetIndexService())
+    let model = AppModel(indexService: SessionRestoreIndexService())
     model.openProject(root: root)
     #expect(await testWaitUntil("Reading Set project ready") {
         if case .ready = model.projectState { return true }
@@ -345,12 +345,6 @@ private func readingSetInspector(
         capturedAt: capturedAt,
         formerCandidateAvailable: false
     )
-}
-
-private struct ReadingSetIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        try ProjectIndexer().index(root: root, language: language)
-    }
 }
 
 private func readingSetTemporaryProject(source: String) throws -> URL {

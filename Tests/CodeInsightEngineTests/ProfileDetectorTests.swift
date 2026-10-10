@@ -829,10 +829,7 @@ func typescriptCommitAndWorktreeProfilesShareRootConfigIdentity() throws {
         "bun.lockb": Data(repeating: UInt8(ascii: "b"), count: 4),
     ]) { root in
         let worktree = ProfileDetector.detect(
-            snapshot: try WorktreeSnapshot(
-                repositoryURL: root,
-                language: .typescript
-            ),
+            snapshot: try WorktreeSnapshot(repositoryURL: root),
             language: .typescript,
             projectRoot: PathID(rawValue: 31)
         )

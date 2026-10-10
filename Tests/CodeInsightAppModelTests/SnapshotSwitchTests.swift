@@ -18,7 +18,7 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": TestSnapshot(label: "C", files: [
             "src/c.rs": "fn c() {}",
             "src/ignored.py": "def ignored(): pass",
@@ -51,15 +51,13 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.coverage.filesIndexed == 1)
     #expect(model.coverage.importsResolved == nil)
-    let languages = await service.receivedLanguages()
-    #expect(languages.index == [.rust])
-    #expect(languages.capture == [.rust])
-    #expect(languages.prepare == [.rust])
+    // The commit keeps the worktree's set: its Python file is not analyzed.
+    #expect(await service.preparedLanguages() == [.rust, .rust])
 }
 
 @MainActor
 @Test
-func mixedWorkspaceOpenCapturesOnceAndInstallsSharedSessions() async throws {
+func mixedWorkspaceOpenDetectsItsLanguagesAndInstallsSharedSessions() async throws {
     let snapshot = TestSnapshot(label: "mixed", files: [
         "main.rs": "fn main() {}\n",
         "lib.py": "def f():\n    pass\n",
@@ -69,23 +67,18 @@ func mixedWorkspaceOpenCapturesOnceAndInstallsSharedSessions() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: snapshot,
         snapshots: [:]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(
-        root: fixture.root,
-        languages: [.typescript, .rust, .python]
-    )
+    await model.openProject(root: fixture.root).value
 
     #expect(model.projectLanguages == [.rust, .python, .typescript])
     #expect(model.querySessions.count == 3)
     #expect(model.querySessions.map { $0.0.analysisProfile.language }
         == [.rust, .python, .typescript])
     #expect(Set(model.querySessions.map { $0.0.snapshotID }).count == 1)
-    let received = await service.receivedLanguages()
-    #expect(received.capture == [.rust, .python, .typescript])
+    #expect(await service.preparedLanguages() == [.rust, .python, .typescript])
 }
 
 @MainActor
@@ -100,17 +93,13 @@ func mixedOpenDoesNotPublishUntilAllFullSessionsComplete() async throws {
         "b.tsx": "export const b = 1\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: snapshot,
         snapshots: [:],
         blockedFull: ["mixed-1"]
     )
     let model = AppModel(indexService: service)
     let task = Task {
-        try await model.openProject(
-            root: fixture.root,
-            languages: [.typescript, .rust, .python]
-        )
+        await model.openProject(root: fixture.root).value
     }
     #expect(await testWaitUntil("python full blocked after rust full") {
         await service.hasStartedFull(label: "mixed", language: .python)
@@ -139,7 +128,6 @@ func mixedCommitToWorktreeKeepsLanguagesSnapshotAndRoute() async throws {
         "lib.py": "def committed():\n    pass\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
@@ -149,7 +137,7 @@ func mixedCommitToWorktreeKeepsLanguagesSnapshotAndRoute() async throws {
             CommitInfo(shortSHA: "C", fullSHA: "C", summary: "c", authorName: "test", date: Date()),
         ])
     )
-    try await model.openProject(root: fixture.root, languages: [.rust, .python])
+    await model.openProject(root: fixture.root).value
 
     model.switchToCommit("C")
     #expect(model.querySessions.isEmpty)
@@ -191,7 +179,6 @@ func mixedZeroSourceRevisionRetainsEmptyTypeScriptSession() async throws {
         "lib.py": "def old():\n    pass\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
@@ -201,7 +188,7 @@ func mixedZeroSourceRevisionRetainsEmptyTypeScriptSession() async throws {
             CommitInfo(shortSHA: "C", fullSHA: "C", summary: "c", authorName: "test", date: Date()),
         ])
     )
-    try await model.openProject(root: fixture.root, languages: [.rust, .python, .typescript])
+    await model.openProject(root: fixture.root).value
     model.switchToCommit("C")
     #expect(await testWaitUntil("zero-source mixed commit ready") {
         model.snapshotPhase == .fullReady && model.currentRevision == "C"
@@ -225,7 +212,6 @@ func staleMixedOpenCompletionIsDiscarded() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: first,
         snapshots: [:],
         blockedCached: ["second"],
@@ -233,7 +219,7 @@ func staleMixedOpenCompletionIsDiscarded() async throws {
     )
     let model = AppModel(indexService: service)
     let firstTask = Task {
-        try await model.openProject(root: fixture.root, languages: [.rust, .python])
+        await model.openProject(root: fixture.root).value
     }
     #expect(await testWaitUntil("first python full started") {
         await service.hasStartedFull(label: "first", language: .python)
@@ -243,7 +229,7 @@ func staleMixedOpenCompletionIsDiscarded() async throws {
     let second = TestSnapshot(label: "second", files: ["main.rs": "fn second() {}"])
     await service.setWorktreeSnapshot(second)
     let secondTask = Task {
-        try await model.openProject(root: secondRoot, languages: [.rust])
+        await model.openProject(root: secondRoot).value
     }
     #expect(await testWaitUntil("second cached started") {
         await service.hasStartedCached("second")
@@ -270,13 +256,12 @@ func wrongLanguageMixedFullFailsAndClearsSessions() async throws {
         "lib.py": "def f():\n    pass\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: snapshot,
         snapshots: [:],
-        completedLanguageOverride: .typescript
+        completedLanguageOverrides: ["wrong": .typescript]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(root: fixture.root, languages: [.rust, .python])
+    await model.openProject(root: fixture.root).value
 
     #expect(model.querySessions.isEmpty)
     guard case .failed = model.projectState else {
@@ -299,17 +284,13 @@ func mixedOpenDoesNotExposeSessionsBeforeCachedArrayIsReady() async throws {
         "b.tsx": "export const b = 1\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: snapshot,
         snapshots: [:],
         blockedCached: ["mixedprep"]
     )
     let model = AppModel(indexService: service)
     let task = Task {
-        try await model.openProject(
-            root: fixture.root,
-            languages: [.typescript, .rust, .python]
-        )
+        await model.openProject(root: fixture.root).value
     }
     #expect(await testWaitUntil("cached prepare started") {
         await service.hasStartedCached("mixedprep")
@@ -328,7 +309,7 @@ func pythonSnapshotFirstPaintKeepsForeignFilesVisibleAndSnapshotReadable() async
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root, language: .python)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": TestSnapshot(label: "C", files: [
             "main.py": "def committed():\n    pass\n",
             "foreign.rs": "fn foreign() {}\n",
@@ -349,7 +330,7 @@ func pythonSnapshotFirstPaintKeepsForeignFilesVisibleAndSnapshotReadable() async
     )
     let foreign = root.appendingPathComponent("foreign.rs")
 
-    try model.openProject(root: root, language: .python)
+    model.openProject(root: root)
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigate(to: foreign)
     #expect(model.selectedFile == foreign.standardizedFileURL)
@@ -372,10 +353,10 @@ func snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() async throw
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": TestSnapshot(label: "C", files: ["main.rs": "fn c() {}"])],
         blockedFull: ["C"],
-        completedLanguageOverride: .python
+        completedLanguageOverrides: ["C": .python]
     )
     let model = AppModel(indexService: service)
 
@@ -398,7 +379,7 @@ func snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() async throw
     #expect(model.snapshotPhase == .cachedReady)
     #expect(model.currentSnapshotID == cachedSnapshotID)
     #expect(model.coverage == cachedCoverage)
-    #expect(model.projectLanguage == .rust)
+    #expect(model.projectLanguages == [.rust])
 }
 
 @MainActor
@@ -421,7 +402,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
     }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: [
             "C": TestSnapshot(label: "C", files: ["main.rs": "fn committed() {}"]),
         ],
@@ -693,7 +674,7 @@ func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: [
             "C": TestSnapshot(label: "C", files: ["c.rs": "fn c() {}"]),
             "D": TestSnapshot(label: "D", files: ["d.rs": "fn d() {}"]),
@@ -739,7 +720,7 @@ func snapshotSwitchInvalidatesAnOlderContextRequest() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": TestSnapshot(label: "C", files: ["main.rs": source])],
         blockedCached: ["C"]
     )
@@ -824,11 +805,11 @@ func passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let model = AppModel(indexService: ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: [:]
     ))
 
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
         model.snapshotPhase == .fullReady
     })
@@ -923,7 +904,7 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
     )
     let commit = TestSnapshot(label: "C", files: files)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
@@ -1039,7 +1020,7 @@ func oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() async throws {
     )
     let commit = TestSnapshot(label: "C", files: files)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         worktreeSnapshot: oldWorktree,
         snapshots: ["C": commit]
     )
@@ -1089,7 +1070,7 @@ func snapshotSwitchDoesNotPushWithoutASelectedFile() async throws {
     let initial = try ProjectIndexer().index(root: root)
     let commit = TestSnapshot(label: "C", files: files)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": commit]
     )
     let model = AppModel(indexService: service)
@@ -1115,7 +1096,7 @@ func snapshotSwitchClearsASelectionMissingFromTheTarget() async throws {
     let initial = try ProjectIndexer().index(root: root)
     let commit = TestSnapshot(label: "C", files: ["b.rs": "fn b() {}\n"])
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": commit]
     )
     let model = AppModel(indexService: service)
@@ -1151,7 +1132,7 @@ func crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() async throws 
         "b.rs": "fn b() {}\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
@@ -1201,7 +1182,7 @@ func crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() async
         "b.rs": "fn b() {}\n",
     ])
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
@@ -1242,7 +1223,7 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
     let root = try snapshotTemporaryProject(files)
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
-    let service = ControlledSnapshotIndexService(initialSession: initial, snapshots: [:])
+    let service = ControlledSnapshotIndexService(initialSnapshotID: initial.snapshotID, snapshots: [:])
     let model = AppModel(indexService: service)
     let a = root.appendingPathComponent("a.rs")
 
@@ -1355,7 +1336,7 @@ func mixedCompareUsesSelectedFileModeAndDiscardsStaleDiffAfterLanguageRoute()
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
-        initialSession: initial,
+        initialSnapshotID: initial.snapshotID,
         snapshots: ["C": TestSnapshot(label: "C", files: [
             "main.rs": "fn target() { next }\n",
             "lib.py": "def target():\n    return 1\n",
@@ -1375,7 +1356,7 @@ func mixedCompareUsesSelectedFileModeAndDiscardsStaleDiffAfterLanguageRoute()
             ),
         ])
     )
-    try await model.openProject(root: root, languages: [.rust, .python])
+    await model.openProject(root: root).value
 
     model.navigate(to: root.appendingPathComponent("main.rs"))
     model.selectCompareCommit("C")
@@ -1402,7 +1383,7 @@ func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn current() {}"])
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root)
-    let service = ControlledSnapshotIndexService(initialSession: initial, snapshots: [:])
+    let service = ControlledSnapshotIndexService(initialSnapshotID: initial.snapshotID, snapshots: [:])
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
@@ -1471,7 +1452,7 @@ final class TestSnapshot: Snapshot, @unchecked Sendable {
 }
 
 actor ControlledSnapshotIndexService: IndexService {
-    private let initialSession: EngineSession
+    private let initialSnapshotID: SnapshotID
     private var worktreeSnapshot: TestSnapshot?
     private let snapshots: [String: TestSnapshot]
     private let externalSnapshots: [String: any Snapshot]
@@ -1487,13 +1468,13 @@ actor ControlledSnapshotIndexService: IndexService {
     private var fullStarted: Set<String> = []
     private var cachedStarted: Set<String> = []
     private var cancelled: Set<String> = []
-    private var indexLanguages: [LanguageID] = []
-    private var captureLanguages: [LanguageID] = []
     private var prepareLanguages: [LanguageID] = []
-    private let completedLanguageOverride: LanguageID?
+    private let completedLanguageOverrides: [String: LanguageID]
 
+    /// Without `worktreeSnapshot`, a worktree capture reads the project
+    /// directory into a snapshot identified by `initialSnapshotID`.
     init(
-        initialSession: EngineSession,
+        initialSnapshotID: SnapshotID = SnapshotID(rawValue: UUID()),
         worktreeSnapshot: TestSnapshot? = nil,
         snapshots: [String: TestSnapshot],
         externalSnapshots: [String: any Snapshot] = [:],
@@ -1504,9 +1485,9 @@ actor ControlledSnapshotIndexService: IndexService {
         failedPrepare: Set<String> = [],
         failedFull: Set<String> = [],
         cachedLanguageOverrides: [String: LanguageID] = [:],
-        completedLanguageOverride: LanguageID? = nil
+        completedLanguageOverrides: [String: LanguageID] = [:]
     ) {
-        self.initialSession = initialSession
+        self.initialSnapshotID = initialSnapshotID
         self.worktreeSnapshot = worktreeSnapshot
         self.snapshots = snapshots
         self.externalSnapshots = externalSnapshots
@@ -1517,48 +1498,14 @@ actor ControlledSnapshotIndexService: IndexService {
         self.failedPrepare = failedPrepare
         self.failedFull = failedFull
         self.cachedLanguageOverrides = cachedLanguageOverrides
-        self.completedLanguageOverride = completedLanguageOverride
+        self.completedLanguageOverrides = completedLanguageOverrides
     }
 
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        indexLanguages.append(language)
-        return initialSession
-    }
-
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        language: LanguageID
-    ) async throws -> any Snapshot {
-        captureLanguages.append(language)
-        let filtered = [language]
-        let snapshot = try await singleSnapshot(
-            root: root,
-            revision: revision,
-            languages: filtered
-        )
-        return snapshot
-    }
-
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        captureLanguages.append(contentsOf: normalized)
-        return try await singleSnapshot(root: root, revision: revision, languages: normalized)
-    }
-
-    private func singleSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
         let snapshot: (any Snapshot)? = if let revision {
             externalSnapshots[revision] ?? snapshots[revision]
         } else {
-            worktreeSnapshot
+            try worktreeSnapshot ?? directorySnapshot(root: root)
         }
         guard let snapshot else { throw SnapshotTestError.missing(revision ?? "worktree") }
         let label = revision
@@ -1569,7 +1516,16 @@ actor ControlledSnapshotIndexService: IndexService {
         return snapshot
     }
 
-    func prepareSnapshot(
+    private func directorySnapshot(root: URL) throws -> TestSnapshot {
+        var files: [String: String] = [:]
+        for file in try ProjectTreeWalk.regularFiles(under: root, rules: ProjectPathRules()).files {
+            files[ProjectTreeWalk.relativePath(of: file, under: root)] =
+                try String(contentsOf: file, encoding: .utf8)
+        }
+        return TestSnapshot(label: "worktree", snapshotID: initialSnapshotID, files: files)
+    }
+
+    private func prepare(
         _ snapshot: any Snapshot,
         language: LanguageID
     ) async throws -> ProjectIndexer.PreparedSnapshot {
@@ -1597,10 +1553,9 @@ actor ControlledSnapshotIndexService: IndexService {
         root: URL,
         languages: [LanguageID]
     ) async throws -> [ProjectIndexer.PreparedSnapshot] {
-        let normalized = try LanguageMode.normalize(languages: languages)
         var result: [ProjectIndexer.PreparedSnapshot] = []
-        for language in normalized {
-            result.append(try await prepareSnapshot(snapshot, language: language))
+        for language in languages {
+            result.append(try await prepare(snapshot, language: language))
         }
         return result
     }
@@ -1619,7 +1574,7 @@ actor ControlledSnapshotIndexService: IndexService {
                 await Task.yield()
             }
             let session = try ProjectIndexer().completeSnapshot(prepared)
-            guard let completedLanguageOverride else { return session }
+            guard let completedLanguageOverride = completedLanguageOverrides[label] else { return session }
             return EngineSession(
                 store: session.store,
                 snapshotView: SnapshotView(
@@ -1652,13 +1607,8 @@ actor ControlledSnapshotIndexService: IndexService {
     func hasStartedCached(_ label: String) -> Bool { cachedStarted.contains(label) }
     func wasCancelled(_ label: String) -> Bool { cancelled.contains(label) }
     func snapshotID(for label: String) -> SnapshotID? { snapshots[label]?.snapshotID }
-    func receivedLanguages() -> (
-        index: [LanguageID],
-        capture: [LanguageID],
-        prepare: [LanguageID]
-    ) {
-        (indexLanguages, captureLanguages, prepareLanguages)
-    }
+    /// Languages of every prepared session, in request order.
+    func preparedLanguages() -> [LanguageID] { prepareLanguages }
 
     private func label(for snapshotID: SnapshotID) throws -> String {
         guard let label = labelsBySnapshotID[snapshotID] else {
@@ -1956,16 +1906,12 @@ func refreshIndexFailureRestoresThePreviousIndexAndAllowsRetry() async throws {
     try fixture.git("add", "main.rs", "lib.py", "a.ts")
     try fixture.commit("initial")
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
         snapshots: [:],
         failedCapture: ["refresh"]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(
-        root: fixture.root,
-        languages: [.typescript, .rust, .python]
-    )
+    await model.openProject(root: fixture.root).value
     #expect(await testWaitUntil("fullReady after open") {
         model.snapshotPhase == .fullReady
     })
@@ -2001,6 +1947,63 @@ func refreshIndexFailureRestoresThePreviousIndexAndAllowsRetry() async throws {
 
 @MainActor
 @Test
+func refreshRedetectsLanguagesAndAFailedRefreshKeepsThePreviousSet() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let service = ControlledSnapshotIndexService(
+        worktreeSnapshot: TestSnapshot(label: "open", files: ["main.rs": "fn main() {}\n"]),
+        snapshots: [:],
+        failedPrepare: ["broken"]
+    )
+    let model = AppModel(indexService: service)
+    await model.openProject(root: fixture.root).value
+    #expect(model.projectLanguages == [.rust])
+
+    // A Python file appears; a refresh that fails after capture restores
+    // the previous set together with the previous sessions.
+    let withPython = ["main.rs": "fn main() {}\n", "tool.py": "def tool():\n    pass\n"]
+    await service.setWorktreeSnapshot(TestSnapshot(label: "broken", files: withPython))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("failed refresh restored") {
+        model.indexRefreshNotice != nil && !model.isRefreshingIndex
+    })
+    #expect(model.projectLanguages == [.rust])
+    #expect(model.querySessions.map { $0.0.analysisProfile.language } == [.rust])
+
+    await service.setWorktreeSnapshot(TestSnapshot(label: "refreshed", files: withPython))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh installed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+            && model.indexRefreshNotice == nil
+    })
+    #expect(model.projectLanguages == [.rust, .python])
+    #expect(model.querySessions.map { $0.0.analysisProfile.language } == [.rust, .python])
+}
+
+@MainActor
+@Test
+func openingAFolderWithoutSupportedSourcesFailsWithItsReason() async throws {
+    let root = try snapshotTemporaryProject([
+        "README.md": "# notes\n",
+        "app.js": "const app = 1\n",
+        "types.d.ts": "export declare const x: number\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+
+    await model.openProject(root: root).value
+
+    guard case .failed = model.projectState else {
+        Issue.record("expected the open to fail")
+        return
+    }
+    #expect(model.projectLanguages.isEmpty)
+    #expect(model.projectFailureReason
+        == "No supported source files found (Rust, Python, TypeScript)")
+}
+
+@MainActor
+@Test
 func refreshInProgressSuppressesSessionCheckpoints() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
@@ -2028,7 +2031,6 @@ func refreshInProgressSuppressesSessionCheckpoints() async throws {
         )
     }
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
         snapshots: [:],
         blockedFull: ["refresh"]
@@ -2037,10 +2039,7 @@ func refreshInProgressSuppressesSessionCheckpoints() async throws {
         sessionURL: sessionURL,
         indexService: service
     )
-    try await model.openProject(
-        root: fixture.root,
-        languages: [.typescript, .rust, .python]
-    )
+    await model.openProject(root: fixture.root).value
     #expect(await testWaitUntil("fullReady after open") {
         model.snapshotPhase == .fullReady
     })
@@ -2122,16 +2121,12 @@ func refreshYieldsToAProjectSwitchMidFlight() async throws {
     try second.git("add", "solo.rs")
     try second.commit("initial")
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: first.root),
         worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
         snapshots: [:],
         blockedFull: ["refresh"]
     )
     let model = AppModel(indexService: service)
-    try await model.openProject(
-        root: first.root,
-        languages: [.typescript, .rust, .python]
-    )
+    await model.openProject(root: first.root).value
     #expect(await testWaitUntil("fullReady after open") {
         model.snapshotPhase == .fullReady
     })
@@ -2147,8 +2142,12 @@ func refreshYieldsToAProjectSwitchMidFlight() async throws {
 
     // Opening another project mid-refresh must take over; the in-flight
     // refresh may not publish anything into the new workspace afterwards.
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "second",
+        files: ["solo.rs": "fn solo() {}\n"]
+    ))
     let secondModelTask = Task { @MainActor in
-        _ = try? await model.openProject(root: second.root, language: .rust)
+        await model.openProject(root: second.root).value
     }
     await service.releaseFull("refresh")
     _ = await secondModelTask.value
@@ -2193,17 +2192,13 @@ func openingASecondProjectCancelsTheInFlightMultiLanguageOpen() async throws {
     try second.git("add", "main.rs", "lib.py", "a.ts")
     try second.commit("initial")
     let service = ControlledSnapshotIndexService(
-        initialSession: try ProjectIndexer().index(root: first.root),
         worktreeSnapshot: TestSnapshot(label: "first", files: firstFiles),
         snapshots: [:],
         blockedFull: ["first"]
     )
     let model = AppModel(indexService: service)
     let firstOpen = Task { @MainActor in
-        try? await model.openProject(
-            root: first.root,
-            languages: [.typescript, .rust, .python]
-        )
+        await model.openProject(root: first.root).value
     }
     #expect(await testWaitUntil("first open blocked at full") {
         await service.hasStartedFull("first")
@@ -2214,10 +2209,7 @@ func openingASecondProjectCancelsTheInFlightMultiLanguageOpen() async throws {
         files: secondFiles
     ))
     let secondOpen = Task { @MainActor in
-        try? await model.openProject(
-            root: second.root,
-            languages: [.typescript, .rust, .python]
-        )
+        await model.openProject(root: second.root).value
     }
     _ = await secondOpen.value
     #expect(await testWaitUntil("second project published") {

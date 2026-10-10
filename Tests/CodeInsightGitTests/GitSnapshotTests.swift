@@ -269,51 +269,7 @@ func worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() throw
 }
 
 @Test
-func explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() throws {
-    let fixture = try GitFixture()
-    defer { fixture.remove() }
-    let files: [String: String] = [
-        "src/lib.rs": "pub fn rust_only() {}\n",
-        "src/ignored.py": "def python_only(): pass\n",
-        "src/ignored.ts": "export const typescriptOnly = 1\n",
-        "Cargo.toml": "[package]\nname = \"fixture\"\n",
-        "Cargo.lock": "# lock\n",
-    ]
-    for (path, contents) in files {
-        let url = fixture.root.appendingPathComponent(path)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data(contents.utf8).write(to: url)
-    }
-
-    let compatibility = try WorktreeSnapshot(repositoryURL: fixture.root)
-    let explicit = try WorktreeSnapshot(
-        repositoryURL: fixture.root,
-        language: .rust
-    )
-    let compatibilityFiles = compatibility.listFiles()
-    let explicitFiles = explicit.listFiles()
-
-    #expect(compatibilityFiles.map(\.path) == [
-        "Cargo.lock", "Cargo.toml", "src/ignored.py", "src/ignored.ts", "src/lib.rs",
-    ])
-    #expect(explicitFiles.map(\.path) == compatibilityFiles.map(\.path))
-    for (left, right) in zip(compatibilityFiles, explicitFiles) {
-        #expect(left.contentID == right.contentID)
-        #expect(left.fileMode == right.fileMode)
-        #expect(try compatibility.readBytes(path: left.path)
-            == explicit.readBytes(path: right.path))
-    }
-    #expect(try compatibility.readBytes(path: "Cargo.toml")
-        == explicit.readBytes(path: "Cargo.toml"))
-    #expect(try compatibility.readBytes(path: "Cargo.lock")
-        == explicit.readBytes(path: "Cargo.lock"))
-}
-
-@Test
-func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws {
+func worktreeSnapshotCapturesEveryFileAndNestedConfigInventory() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
     let files: [String: String] = [
@@ -367,10 +323,7 @@ func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws
         withDestinationPath: "../../tsconfig.json"
     )
 
-    let snapshot = try WorktreeSnapshot(
-        repositoryURL: fixture.root,
-        languages: [.rust, .python, .typescript]
-    )
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
 
     #expect(Set(snapshot.listFiles().map(\.path)) == Set([
         "Cargo.lock", "Cargo.toml", "nested/Cargo.lock", "nested/Cargo.toml",
@@ -402,67 +355,6 @@ func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws
         == projectBytes)
     #expect(try Data(contentsOf: fixture.root.appendingPathComponent("node_modules/pkg.ts"))
         == skippedBytes)
-}
-
-@Test
-func worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() {
-    let nonexistent = FileManager.default.temporaryDirectory
-        .appendingPathComponent("CodeInsightUnionRejects-\(UUID().uuidString)")
-
-    let invalid: [[LanguageID]] = [
-        [],
-        [.rust, .rust],
-        [.python, .python, .rust],
-        [.javascript],
-        [.rust, .javascript],
-    ]
-    for languages in invalid {
-        do {
-            _ = try WorktreeSnapshot(
-                repositoryURL: nonexistent,
-                languages: languages
-            )
-            Issue.record("Invalid union languages unexpectedly succeeded: \(languages)")
-        } catch let error as CocoaError {
-            #expect(error.code == .featureUnsupported)
-        } catch {
-            Issue.record("Invalid union preflight happened after repository access: \(error)")
-        }
-    }
-}
-
-@Test
-func worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() throws {
-    let fixture = try GitFixture()
-    defer { fixture.remove() }
-    let files: [String: String] = [
-        "src/main.rs": "fn main() {}\n",
-        "src/ignored.py": "def ignored(): pass\n",
-        "Cargo.toml": "[package]\nname = \"fixture\"\n",
-        "Cargo.lock": "# version = 4\n",
-    ]
-    for (path, contents) in files {
-        let url = fixture.root.appendingPathComponent(path)
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try Data(contents.utf8).write(to: url)
-    }
-
-    let singleton = try WorktreeSnapshot(repositoryURL: fixture.root, language: .rust)
-    let union = try WorktreeSnapshot(
-        repositoryURL: fixture.root,
-        languages: [.rust]
-    )
-
-    #expect(union.listFiles().map(\.path) == singleton.listFiles().map(\.path))
-    #expect(union.configurationPaths == singleton.configurationPaths)
-    for (path, file) in zip(singleton.listFiles(), union.listFiles()) {
-        #expect(path.contentID == file.contentID)
-        #expect(path.fileMode == file.fileMode)
-        #expect(try singleton.readBytes(path: file.path) == union.readBytes(path: file.path))
-    }
 }
 
 @Test
@@ -535,24 +427,6 @@ func commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMark
 }
 
 @Test
-func unsupportedWorktreeLanguagesFailBeforeOpeningARepository() {
-    let nonexistent = FileManager.default.temporaryDirectory
-        .appendingPathComponent("CodeInsightUnsupported-\(UUID().uuidString)")
-
-    do {
-        _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: .javascript)
-        Issue.record("Unsupported language unexpectedly succeeded: \(LanguageID.javascript)")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains(
-            String(describing: LanguageID.javascript)
-        ) == true)
-    } catch {
-        Issue.record("Unsupported preflight happened after repository access: \(error)")
-    }
-}
-
-@Test
 func pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
@@ -580,10 +454,7 @@ func pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
         try Data(contents.utf8).write(to: url)
     }
 
-    let snapshot = try WorktreeSnapshot(
-        repositoryURL: fixture.root,
-        language: .python
-    )
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
 
     #expect(Set(snapshot.listFiles().map(\.path)) == Set([
         "main.py", "pyrightconfig.json", "pyproject.toml", "src/ignored.js",
@@ -712,7 +583,7 @@ func typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
         withDestinationPath: "b.tsx"
     )
 
-    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root, language: .typescript)
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
 
     #expect(Set(snapshot.listFiles().map(\.path)) == Set([
         ".gitignore", "nested/tsconfig.json", "package.json", "src/a.ts",
@@ -746,7 +617,7 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
     try fixture.commit("fixture")
     let rules = ProjectPathRules(lines: ["vendor/", "*.pb.rs", "!build/"])
 
-    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, languages: [.rust], pathRules: rules)
+    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, pathRules: rules)
     #expect(Set(worktree.listFiles().map(\.path)) == ["src/lib.rs", "build/gen/schema.rs"])
     #expect(worktree.ruleExcludedPaths == ["src/api.pb.rs", "vendor"],
             "a pruned directory is reported once; built-in skips are not listed")
@@ -757,7 +628,7 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
         "tracked files under built-in skipped directories stay visible in commits")
     #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "vendor"], "counted like the worktree walk")
 
-    let unruled = try WorktreeSnapshot(repositoryURL: fixture.root, languages: [.rust])
+    let unruled = try WorktreeSnapshot(repositoryURL: fixture.root)
     #expect(Set(unruled.listFiles().map(\.path))
         == ["src/lib.rs", "src/api.pb.rs", "vendor/dep/lib.rs"], "no rules keeps the built-in behavior")
 }

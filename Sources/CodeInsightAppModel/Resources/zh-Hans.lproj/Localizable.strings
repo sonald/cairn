@@ -28,6 +28,7 @@
 "model.app.newerSession" = "保存的阅读会话需要更新版本的 Cairn（格式 %lld）；原文件已保留";
 "model.app.noContentID" = "缺少内容标识";
 "model.app.noEvidence" = "没有冻结的证据";
+"model.app.noSupportedSources" = "没有找到受支持的源码（Rust、Python、TypeScript）";
 "model.app.nodeUnavailable" = "所选节点不可用";
 "model.app.projectUnavailable" = "保存的阅读会话所属项目当前不可用";
 "model.app.refreshDetail" = "索引刷新失败，已恢复先前索引（%@）";
@@ -43,7 +44,6 @@
 "model.app.trail" = "阅读轨迹";
 "model.app.trailTarget" = "轨迹目标";
 "model.app.unreadableSession" = "无法读取保存的阅读会话，原文件已保留。请重新打开项目";
-"model.app.unsupportedLanguage" = "CodeInsight 应用不支持 %@";
 "model.app.versionUnavailable" = "保存的版本不可用；已保留当前视图";
 "model.app.worktreeUnavailable" = "记录的工作区快照不可用";
 "model.binding.assignment" = "赋值";

@@ -2531,10 +2531,30 @@ struct ExactSelfTestTarget {
     let traitObjectReceiverRootOffset: UInt32?
 }
 
+/// Indexes without the persistent cache so every self-test run starts cold.
 struct ExactSelfTestIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
         try await Task.detached(priority: .userInitiated) {
-            try ProjectIndexer().index(root: root, language: language)
+            if let revision {
+                return try CommitSnapshot(repositoryURL: root, revision: revision) as any Snapshot
+            }
+            return try WorktreeSnapshot(repositoryURL: root) as any Snapshot
+        }.value
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        try await Task.detached(priority: .userInitiated) {
+            try ProjectIndexer().prepareSnapshots(snapshot, into: ProjectIndexStore(), languages: languages)
+        }.value
+    }
+
+    func completeSnapshot(_ prepared: ProjectIndexer.PreparedSnapshot) async throws -> EngineSession {
+        try await Task.detached(priority: .userInitiated) {
+            try ProjectIndexer().completeSnapshot(prepared)
         }.value
     }
 }

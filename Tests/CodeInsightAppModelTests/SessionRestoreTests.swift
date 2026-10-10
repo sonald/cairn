@@ -8,62 +8,32 @@ import Testing
 
 @MainActor
 @Test
-func unsupportedSavedJavaScriptDoesNotMutateProjectState() async throws {
-    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let snapshot = SessionCodec.Snapshot(
-        projectRoot: root.path,
-        language: .javascript,
-        revision: nil,
-        activeTabOrdinal: nil,
-        panelPreset: PanelPresetModel.reading.rawValue,
-        tabs: []
-    )
-    let model = AppModel(indexService: SessionRestoreIndexService())
-    let originalGeneration = model.generation
-
-    #expect(await model.restoreSession(snapshot) == false)
-    guard case .empty = model.projectState else {
-        Issue.record("unsupported restore changed project state")
-        return
-    }
-    #expect(model.projectRoot == nil)
-    #expect(model.projectLanguage == nil)
-    #expect(model.generation == originalGeneration)
-}
-
-@MainActor
-@Test
-func savedPythonSessionRestoresWithPythonLanguageAndTree() async throws {
+func restoreDetectsLanguagesFromTheWorktreeInsteadOfTheSavedSet() async throws {
+    // Saved while the project was Python-only; Rust has appeared since.
     let root = try sessionRestoreProject([
         "main.py": "def hello():\n    return 1\n",
-        "ignored.rs": "fn main() {}",
+        "main.rs": "fn main() {}",
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
         language: .python,
         revision: nil,
-        activeTabOrdinal: nil,
+        activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.reading.rawValue,
-        tabs: []
+        tabs: [
+            .file(.init(path: "main.py", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)),
+        ]
     )
     let model = AppModel(indexService: SessionRestoreIndexService())
 
     #expect(await model.restoreSession(snapshot))
 
     #expect(model.snapshotPhase == .fullReady)
-    #expect(model.projectLanguage == .python)
-    #expect(model.fileTree?.children.map(\.name) == ["ignored.rs", "main.py"])
-    #expect(model.fileTree?.fileCount == 2)
-    guard case let .ready(session, _) = model.projectState else {
-        Issue.record("expected ready Python session after restore")
-        return
-    }
-    #expect(session.analysisProfile.language == .python)
-    #expect(session.manifest.files.map {
-        session.paths.resolve($0.pathID)
-    } == ["main.py"])
+    #expect(model.projectLanguages == [.rust, .python])
+    #expect(model.querySessions.map { $0.0.analysisProfile.language } == [.rust, .python])
+    #expect(model.tabStrip.tabs.compactMap { $0.fileURL?.lastPathComponent } == ["main.py"])
+    #expect(model.languageMode(for: root.appendingPathComponent("main.py"))?.language == .python)
 }
 
 @MainActor
@@ -119,14 +89,14 @@ func savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() async th
     #expect(await model.restoreSession(snapshot))
 
     #expect(model.snapshotPhase == .fullReady)
-    #expect(model.projectLanguage == .typescript)
+    #expect(model.projectLanguages == [.typescript])
     #expect(model.fileTree?.fileCount == 3)
     guard case let .ready(session, _) = model.projectState else {
         Issue.record("expected ready TypeScript session after restore")
         return
     }
     #expect(session.analysisProfile.language == .typescript)
-    #expect(session.manifest.files.map {
+    #expect(session.manifest.files.filter { $0.detectedLanguage == .typescript }.map {
         session.paths.resolve($0.pathID)
     }.sorted() == ["src/a.ts", "src/b.tsx"])
 }
@@ -397,7 +367,7 @@ func missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() async throws {
     #expect(await model.restoreSession(snapshot))
 
     #expect(model.currentRevision == nil)
-    #expect(model.projectLanguage == .rust)
+    #expect(model.projectLanguages == [.rust])
     #expect(model.tabStrip.tabs.count == 1)
     #expect(model.replayNotice?.contains("saved revision unavailable") == true)
     #expect(model.replayNotice?.contains("unverified byte offset") == true)
@@ -479,10 +449,7 @@ func mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() 
         sessionURL: sessionURL,
         indexService: SessionRestoreIndexService()
     )
-    try await model.openProject(
-        root: root,
-        languages: [.typescript, .rust, .python]
-    )
+    await model.openProject(root: root).value
     try #require(await testWaitUntil("mixed fullReady") {
         model.snapshotPhase == .fullReady
             && model.querySessions.count == 3
@@ -840,7 +807,7 @@ func sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() async throw
         sessionURL: sessionURL,
         indexService: SessionRestoreIndexService()
     )
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -877,7 +844,7 @@ func continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() async throws 
         sessionURL: sessionURL,
         indexService: SessionRestoreIndexService()
     )
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -933,7 +900,7 @@ func perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() async throws
     }
 
     // Project A: open two tabs and save.
-    try model.openProject(root: rootA, language: .rust)
+    model.openProject(root: rootA)
     try #require(await testWaitUntil("A installed") {
         model.snapshotPhase == .fullReady
     })
@@ -1069,7 +1036,7 @@ func futureVersionPerProjectSnapshotIsPreservedAndNotOverwritten() async throws 
     #expect(blocked.problem == .unsupportedSchemaVersion(99))
 
     // Opening and saving the project must not touch the newer file.
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -1108,7 +1075,7 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
     // §7.3: the model reports checkpoint writes; the app layer owns the
     // launch pointer. Tests wire the same rule the AppDelegate applies.
     model.onSessionCheckpointWritten = { store.lastSessionProjectPath = $0 }
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -1277,7 +1244,7 @@ func sessionCheckpointPersistsAndRestoresNavigationHistoryAndTrail() async throw
         sessionURL: sessionURL,
         indexService: SessionRestoreIndexService()
     )
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -1373,7 +1340,7 @@ func failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() async throws {
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(indexService: SessionRestoreIndexService())
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
@@ -1449,29 +1416,15 @@ private func encodeJSONString(_ value: String) -> String {
     return String(array.dropFirst().dropLast())
 }
 
+/// Real snapshots and indexing without the persistent cache; plain
+/// directories capture as non-Git snapshots.
 struct SessionRestoreIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        try await Task.detached {
-            try ProjectIndexer().index(root: root, language: language)
-        }.value
-    }
-
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
         try await Task.detached {
             if let revision {
-                return try CommitSnapshot(
-                    repositoryURL: root,
-                    revision: revision
-                ) as any Snapshot
+                return try CommitSnapshot(repositoryURL: root, revision: revision) as any Snapshot
             }
-            return try WorktreeSnapshot(
-                repositoryURL: root,
-                languages: LanguageMode.normalize(languages: languages)
-            ) as any Snapshot
+            return try WorktreeSnapshot(repositoryURL: root) as any Snapshot
         }.value
     }
 
@@ -1484,7 +1437,7 @@ struct SessionRestoreIndexService: IndexService {
             try ProjectIndexer().prepareSnapshots(
                 snapshot,
                 into: ProjectIndexStore(),
-                languages: LanguageMode.normalize(languages: languages)
+                languages: languages
             )
         }.value
     }
@@ -1501,12 +1454,13 @@ struct SessionRestoreIndexService: IndexService {
 private actor GatedSessionRestoreIndexService: IndexService {
     private let blockedRoot: URL
     private var blockedIndexStarted = false
+    private let indexing = SessionRestoreIndexService()
 
     init(blockedRoot: URL) {
         self.blockedRoot = blockedRoot.standardizedFileURL
     }
 
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
         if root.standardizedFileURL == blockedRoot {
             blockedIndexStarted = true
             while true {
@@ -1514,9 +1468,21 @@ private actor GatedSessionRestoreIndexService: IndexService {
                 await Task.yield()
             }
         }
-        return try await Task.detached {
-            try ProjectIndexer().index(root: root, language: language)
-        }.value
+        return try await indexing.captureSnapshot(root: root, revision: revision)
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        try await indexing.prepareSnapshots(snapshot, root: root, languages: languages)
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> EngineSession {
+        try await indexing.completeSnapshot(prepared)
     }
 
     func hasStartedBlockedIndex() -> Bool { blockedIndexStarted }
@@ -1637,7 +1603,7 @@ func sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() async throws {
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1)
     model.sessionFileResolutionWillBegin = nil
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("fresh open") { model.snapshotPhase == .fullReady })
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
@@ -1650,7 +1616,7 @@ func sessionReadFailurePreservesFileAndCanRetry() async throws {
     let state = try sessionRestoreProject([:])
     defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
     let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("fresh open") { model.snapshotPhase == .fullReady })
     model.openInNewTab(root.appendingPathComponent("a.rs"))
     try model.writeSessionCheckpoint(panelPreset: .reading)
@@ -1696,7 +1662,7 @@ func sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() async throws 
     try FileManager.default.moveItem(at: a, to: offline)
     let model = AppModel(sessionURL: legacy, indexService: SessionRestoreIndexService())
     #expect(model.loadLegacySessionSnapshot().problem == .projectUnavailable)
-    try model.openProject(root: b, language: .rust)
+    model.openProject(root: b)
     try #require(await testWaitUntil("B open") { model.snapshotPhase == .fullReady })
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(FileManager.default.fileExists(atPath: legacy.path))
@@ -1725,7 +1691,7 @@ func sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema: Bool
     let model = AppModel(sessionURL: legacy, indexService: SessionRestoreIndexService())
     let result = model.loadSessionSnapshot(forProject: root)
     #expect(result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed))
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await testWaitUntil("open with protected legacy") { model.snapshotPhase == .fullReady })
     try model.writeSessionCheckpoint(panelPreset: .reading)
     let disk = state.appendingPathComponent("sessions/" + AppModel.sessionProjectKey(for: root) + ".json")

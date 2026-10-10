@@ -267,7 +267,7 @@ func exactCoordinatorPreparesNestedProfilesAcrossLanguageNavigation() async thro
             )
         )
     )
-    try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+    await model.openProject(root: root).value
     #expect(await testWaitUntil("initial exact prepare count=1") {
         state.prepareCount == 1
     })

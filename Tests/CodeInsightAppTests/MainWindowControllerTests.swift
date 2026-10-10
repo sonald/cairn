@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -21,7 +22,7 @@ private final class MainWindowIdentityFixture {
         self.suiteName = suiteName
         defaults = UserDefaults(suiteName: suiteName)!
         store = RecentProjectsStore(defaults: defaults)
-        model = AppModel(indexService: MainWindowFailingIndexService(session: nil))
+        model = AppModel(indexService: MainWindowFailingIndexService())
         controller = MainWindowController(
             model: model,
             settings: ReaderSettings(),
@@ -38,15 +39,21 @@ private final class MainWindowIdentityFixture {
 }
 
 private struct MainWindowFailingIndexService: IndexService {
-    let session: EngineSession?
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+        throw CocoaError(.featureUnsupported)
+    }
 
-    func index(
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
         root: URL,
-        language: LanguageID
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession {
-        if let session {
-            return session
-        }
         throw CocoaError(.featureUnsupported)
     }
 }
@@ -208,7 +215,7 @@ func bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() 
     let sessionURL = root.appendingPathComponent("session.json")
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(sessionURL: sessionURL)
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     let record = BookmarkRecord(
         id: UUID(), projectPath: root.standardizedFileURL.path, snapshot: .worktree,
         path: "src/main.rs",
@@ -255,7 +262,7 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
     let root = try mainWindowTemporaryGitProject([path: "fn main() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel()
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady && model.querySessions.count == 1
     ))
@@ -409,7 +416,7 @@ func projectSearchQueriesAllWorkspaceSessions() async throws {
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+    await model.openProject(root: root).value
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady
     ))
@@ -501,7 +508,7 @@ func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws
     let model = AppModel(
         sessionURL: stateRoot.appendingPathComponent("session.json"),
         recentProjectsStore: store,
-        indexService: MainWindowWorkingIndexService()
+        indexService: ExactSelfTestIndexService()
     )
     // §7.3: the model reports checkpoint writes; the app layer owns the
     // launch pointer. Tests wire the same rule the AppDelegate applies.
@@ -554,7 +561,7 @@ func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
     }
     let model = AppModel(
         sessionURL: stateRoot.appendingPathComponent("session.json"),
-        indexService: MainWindowWorkingIndexService()
+        indexService: ExactSelfTestIndexService()
     )
     let controller = MainWindowController(
         model: model,
@@ -579,14 +586,6 @@ func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
     controller.openRecentProject(root)
     #expect(model.generation == generationBefore)
     #expect(model.tabStrip.tabs.count == 2)
-}
-
-private struct MainWindowWorkingIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        try await Task.detached {
-            try ProjectIndexer().index(root: root, language: language)
-        }.value
-    }
 }
 
 private func mainWindowTemporaryProject(

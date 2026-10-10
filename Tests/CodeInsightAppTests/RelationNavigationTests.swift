@@ -787,7 +787,7 @@ func mixedProjectReaderDisplaysFourModesWithTsxVariant() async throws {
         controller.close()
         try? FileManager.default.removeItem(at: root)
     }
-    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+    await model.openProject(root: root).value
     try #require(await relationTestWaitUntil(
         "mixed project ready"
     ) {
@@ -1553,7 +1553,7 @@ private func makeRelationNavigationFixture(
         )
         try Data(source.utf8).write(to: file)
     }
-    let indexService = RelationTestIndexService()
+    let indexService = ExactSelfTestIndexService()
     let exactCoordinator = ExactCoordinator(
         providerFactory: { _ in throw CocoaError(.featureUnsupported) },
         sandboxAvailable: { false }
@@ -1756,14 +1756,6 @@ private func waitUntil(
         try? await Task.sleep(for: .milliseconds(10))
     }
     return await MainActor.run { condition() }
-}
-
-private struct RelationTestIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        try await Task.detached {
-            try ProjectIndexer().index(root: root, language: language)
-        }.value
-    }
 }
 
 @MainActor
@@ -2351,7 +2343,7 @@ func projectSearchRefreshKeepsReaderSelectionSeparateFromViewport() async throws
     // Pinned size: the default follows the screen, and the geometry decides
     // whether a same-content redisplay keeps its full document height.
     controller.window?.setContentSize(NSSize(width: 1440, height: 900))
-    try await model.openProject(root: root, language: .rust)
+    await model.openProject(root: root).value
     try #require(await relationTestWaitUntil("query fixture ready") { model.snapshotPhase == .fullReady })
     controller.showProjectSearch()
     controller.selfTestSetProjectSearchQuery("needle")

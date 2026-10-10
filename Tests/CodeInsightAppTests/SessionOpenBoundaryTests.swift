@@ -17,7 +17,7 @@ func sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() async throw
     try "def main(): pass".write(to: root.appendingPathComponent("main.py"), atomically: true, encoding: .utf8)
     defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
     let model = AppModel(sessionURL: state.appendingPathComponent("session.json"))
-    try model.openProject(root: root, language: .rust)
+    model.openProject(root: root)
     try #require(await sessionBoundaryWait { model.snapshotPhase == .fullReady })
     model.openInNewTab(root.appendingPathComponent("main.rs"))
     try model.writeSessionCheckpoint(panelPreset: .reading)
@@ -53,7 +53,7 @@ func sessionReopenRetriesAfterSavedFileBecomesReadable() async throws {
     try "fn main() {}".write(to: file, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: root) }
     let writer = AppModel(sessionURL: state.appendingPathComponent("session.json"))
-    try writer.openProject(root: root, language: .rust)
+    writer.openProject(root: root)
     try #require(await sessionBoundaryWait { writer.snapshotPhase == .fullReady })
     writer.openInNewTab(file)
     try writer.writeSessionCheckpoint(panelPreset: .reading)

@@ -42,21 +42,10 @@ public struct SnapshotCoverage: Equatable, Sendable {
 }
 
 public protocol IndexService: Sendable {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        language: LanguageID
-    ) async throws -> any Snapshot
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot
-    func prepareSnapshot(
-        _ snapshot: any Snapshot,
-        language: LanguageID
-    ) async throws -> ProjectIndexer.PreparedSnapshot
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot
+    /// `languages` is the project's current set: a worktree open passes the
+    /// snapshot's own languages, a commit switch keeps the existing set and
+    /// gets an empty session for a language the commit lacks.
     func prepareSnapshots(
         _ snapshot: any Snapshot,
         root: URL,
@@ -72,76 +61,6 @@ public protocol IndexService: Sendable {
 
 public extension IndexService {
     func setPathRules(_ rules: ProjectPathRules) {}
-
-    func index(root: URL) async throws -> EngineSession {
-        try await index(root: root, language: .rust)
-    }
-
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        language: LanguageID
-    ) async throws -> any Snapshot {
-        throw CocoaError(.featureUnsupported)
-    }
-
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        guard normalized.count == 1 else {
-            throw CocoaError(.featureUnsupported)
-        }
-        return try await captureSnapshot(
-            root: root,
-            revision: revision,
-            language: normalized[0]
-        )
-    }
-
-    func prepareSnapshot(
-        _ snapshot: any Snapshot,
-        language: LanguageID
-    ) async throws -> ProjectIndexer.PreparedSnapshot {
-        throw CocoaError(.featureUnsupported)
-    }
-
-    func prepareSnapshots(
-        _ snapshot: any Snapshot,
-        root: URL,
-        languages: [LanguageID]
-    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        guard normalized.count == 1 else {
-            throw CocoaError(.featureUnsupported)
-        }
-        return [
-            try await prepareSnapshot(snapshot, language: normalized[0]),
-        ]
-    }
-
-    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
-        try await captureSnapshot(
-            root: root,
-            revision: revision,
-            language: .rust
-        )
-    }
-
-    func prepareSnapshot(
-        _ snapshot: any Snapshot
-    ) async throws -> ProjectIndexer.PreparedSnapshot {
-        try await prepareSnapshot(snapshot, language: .rust)
-    }
-
-    func completeSnapshot(
-        _ prepared: ProjectIndexer.PreparedSnapshot
-    ) async throws -> EngineSession {
-        throw CocoaError(.featureUnsupported)
-    }
-
     func flushPersistentIndexCache() {}
 }
 
@@ -178,41 +97,10 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         }
     }
 
-    public func index(
-        root: URL,
-        language: LanguageID
-    ) async throws -> EngineSession {
-        try validateProductSupport(language)
-        beginSnapshotScope()
-        let store = lock.withLock { self.store }
-        let indexer = ProjectIndexer(persistingProjectAt: root)
-        lock.withLock { self.indexer = indexer }
-        let rules = lock.withLock { pathRules }
-        return try await detachedValue {
-            let snapshot: WorktreeSnapshot
-            do {
-                snapshot = try WorktreeSnapshot(
-                    repositoryURL: root,
-                    languages: [language],
-                    pathRules: rules
-                )
-            } catch {
-                return try indexer.index(root: root, language: language, pathRules: rules)
-            }
-            return try indexer.indexSnapshot(
-                snapshot,
-                into: store,
-                language: language
-            )
-        }
-    }
-
     public func captureSnapshot(
         root: URL,
-        revision: String?,
-        language: LanguageID
+        revision: String?
     ) async throws -> any Snapshot {
-        try validateProductSupport(language)
         beginSnapshotScope()
         let rules = lock.withLock { pathRules }
         return try await detachedValue {
@@ -220,42 +108,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
             let snapshot: any Snapshot = if let revision {
                 try CommitSnapshot(repositoryURL: root, revision: revision, pathRules: rules)
             } else {
-                try WorktreeSnapshot(repositoryURL: root, languages: [language], pathRules: rules)
-            }
-            try Task.checkCancellation()
-            return snapshot
-        }
-    }
-
-    public func prepareSnapshot(
-        _ snapshot: any Snapshot,
-        language: LanguageID
-    ) async throws -> ProjectIndexer.PreparedSnapshot {
-        let store = lock.withLock { self.store }
-        let indexer: ProjectIndexer = lock.withLock { self.indexer }
-        return try await detachedValue {
-            try indexer.prepareSnapshot(
-                snapshot,
-                into: store,
-                language: language
-            )
-        }
-    }
-
-    public func captureSnapshot(
-        root: URL,
-        revision: String?,
-        languages: [LanguageID]
-    ) async throws -> any Snapshot {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        beginSnapshotScope()
-        let rules = lock.withLock { pathRules }
-        return try await detachedValue {
-            try Task.checkCancellation()
-            let snapshot: any Snapshot = if let revision {
-                try CommitSnapshot(repositoryURL: root, revision: revision, pathRules: rules)
-            } else {
-                try WorktreeSnapshot(repositoryURL: root, languages: normalized, pathRules: rules)
+                try WorktreeSnapshot(repositoryURL: root, pathRules: rules)
             }
             try Task.checkCancellation()
             return snapshot
@@ -267,20 +120,11 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         root: URL,
         languages: [LanguageID]
     ) async throws -> [ProjectIndexer.PreparedSnapshot] {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        if normalized.count == 1 {
-            return [
-                try await prepareSnapshot(
-                    snapshot,
-                    language: normalized[0]
-                ),
-            ]
-        }
         let store = lock.withLock { self.store }
         let persistent = ProjectIndexer(persistingProjectAt: root)
         lock.withLock { self.indexer = persistent }
         return try await detachedValue {
-            try persistent.prepareSnapshots(snapshot, into: store, languages: normalized)
+            try persistent.prepareSnapshots(snapshot, into: store, languages: languages)
         }
     }
 
@@ -435,10 +279,9 @@ public final class AppModel {
 
     public private(set) var projectState: ProjectState = .empty
     public private(set) var generation: UInt64 = 0
+    /// Detected from the worktree when it is captured (open, Refresh Index);
+    /// a commit switch keeps the current set.
     package private(set) var projectLanguages: [LanguageID] = []
-    package var projectLanguage: LanguageID? {
-        projectLanguages.count == 1 ? projectLanguages.first : nil
-    }
     private var workspaceSessions: [AnalysisProfileID: EngineSession] = [:]
     public private(set) var snapshotPhase: SnapshotPhase?
     public private(set) var coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
@@ -1079,10 +922,7 @@ public final class AppModel {
         await exactCoordinator.shutdownAndWait()
     }
 
-    private func beginWorkspaceOpen(
-        root: URL,
-        languages: [LanguageID]
-    ) -> UInt64 {
+    private func beginWorkspaceOpen(root: URL) -> UInt64 {
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
@@ -1094,7 +934,7 @@ public final class AppModel {
         exactCoordinator.invalidate(generation: openGeneration)
         if projectRoot != root { projectSearch.clearSession() }
         projectRoot = root
-        projectLanguages = languages
+        projectLanguages = []
         pathRules = pathRulesStore?.load(forProject: root) ?? ProjectPathRules()
         indexService.setPathRules(pathRules)
         workspaceSessions.removeAll(keepingCapacity: true)
@@ -1122,42 +962,35 @@ public final class AppModel {
         return openGeneration
     }
 
-    public func openProject(root: URL, languages: [LanguageID]) async throws {
-        let normalized = try LanguageMode.normalize(languages: languages)
+    /// Opens `root` with the languages its worktree contains. The returned
+    /// task finishes when the open is published (ready or failed) or
+    /// superseded; callers that only start an open can ignore it.
+    @discardableResult
+    public func openProject(root: URL) -> Task<Void, Never> {
         let root = root.standardizedFileURL
-        let openGeneration = beginWorkspaceOpen(
-            root: root,
-            languages: normalized
-        )
+        let openGeneration = beginWorkspaceOpen(root: root)
         // The staged capture/prepare/complete chain is shared with snapshot
         // switches and index refreshes; storing it in snapshotTask lets a
         // newer open cancel an in-flight one instead of abandoning it.
-        snapshotTask = snapshotLoadTask(
+        let task = snapshotLoadTask(
             revision: nil,
             generation: openGeneration,
-            root: root,
-            languages: normalized
-        ) { [weak self] generation, root, languages, error in
-            self?.failWorkspace(
-                generation: generation,
-                root: root,
-                languages: languages,
-                error: error
-            )
+            root: root
+        ) { [weak self] generation, root, error in
+            self?.failWorkspace(generation: generation, root: root, error: error)
         }
-        await snapshotTask?.value
+        snapshotTask = task
+        return task
     }
 
     private func failWorkspace(
         generation expectedGeneration: UInt64,
         root expectedRoot: URL,
-        languages expectedLanguages: [LanguageID],
         error: Error? = nil
     ) {
         guard canPublishWorkspaceResult(
             generation: expectedGeneration,
-            root: expectedRoot,
-            languages: expectedLanguages
+            root: expectedRoot
         ) else { return }
         pendingReplay = nil
         workspaceSessions.removeAll(keepingCapacity: true)
@@ -1175,14 +1008,11 @@ public final class AppModel {
         return String(text.prefix(280)) + "…"
     }
 
-    /// Restores a saved session. `overridingLanguages` lets an explicit
-    /// language choice (Choose Languages, single-language menu) win over
-    /// the saved combination; tabs the chosen languages cannot support
-    /// are skipped by the same rules as any other restore.
-    package func restoreSession(
-        _ snapshot: SessionCodec.Snapshot,
-        overridingLanguages: [LanguageID]? = nil
-    ) async -> Bool {
+    /// Restores a saved session. The language set is detected from the
+    /// worktree again; the saved `languages` field is not consulted, and
+    /// tabs the detected set cannot analyze restore as previews or are
+    /// skipped by the same rules as any other restore.
+    package func restoreSession(_ snapshot: SessionCodec.Snapshot) async -> Bool {
         cancelPendingSessionCheckpoint()
         let owner = UUID()
         sessionRestoreOwner = owner
@@ -1194,39 +1024,15 @@ public final class AppModel {
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
         ).standardizedFileURL
-        let languages: [LanguageID]
-        do {
-            languages = try LanguageMode.normalize(
-                languages: overridingLanguages ?? snapshot.languages
-            )
-        } catch {
-            return false
-        }
         // Bind protection to the workspace being opened. Failure keeps its
         // partial state protected; a later fresh open advances the generation.
         sessionRestoreWriteSuspension = generation &+ 1
-        let worktreeGeneration: UInt64
-        if languages.count == 1 {
-            do {
-                try openProject(root: root, language: languages[0])
-            } catch {
-                return false
-            }
-            worktreeGeneration = generation
-            let worktreeTask = snapshotTask
-            await worktreeTask?.value
-        } else {
-            worktreeGeneration = generation &+ 1
-            do {
-                try await openProject(root: root, languages: languages)
-            } catch {
-                return false
-            }
-        }
+        let worktreeTask = openProject(root: root)
+        let worktreeGeneration = generation
+        await worktreeTask.value
         guard canPublishWorkspaceResult(
                   generation: worktreeGeneration,
-                  root: root,
-                  languages: languages
+                  root: root
               ),
               snapshotPhase == .fullReady
         else { return false }
@@ -1251,8 +1057,7 @@ public final class AppModel {
             }.value
             guard canPublishWorkspaceResult(
                 generation: worktreeGeneration,
-                root: root,
-                languages: languages
+                root: root
             )
             else { return false }
             if revisionExists {
@@ -1263,36 +1068,18 @@ public final class AppModel {
                 await revisionTask?.value
                 guard canPublishWorkspaceResult(
                     generation: revisionGeneration,
-                    root: root,
-                    languages: languages
+                    root: root
                 )
                 else { return false }
                 if snapshotPhase != .fullReady {
                     revisionUnavailable = true
-                    let fallbackGeneration: UInt64
                     sessionRestoreWriteSuspension = generation &+ 1
-                    do {
-                        if languages.count == 1 {
-                            try openProject(root: root, language: languages[0])
-                            fallbackGeneration = generation
-                        } else {
-                            fallbackGeneration = generation &+ 1
-                            try await openProject(
-                                root: root,
-                                languages: languages
-                            )
-                        }
-                    } catch {
-                        return false
-                    }
-                    if languages.count == 1 {
-                        let fallbackTask = snapshotTask
-                        await fallbackTask?.value
-                    }
+                    let fallbackTask = openProject(root: root)
+                    let fallbackGeneration = generation
+                    await fallbackTask.value
                     guard canPublishWorkspaceResult(
                               generation: fallbackGeneration,
-                              root: root,
-                              languages: languages
+                              root: root
                           ),
                           snapshotPhase == .fullReady
                     else { return false }
@@ -1323,9 +1110,7 @@ public final class AppModel {
         for (oldOrdinal, entry) in snapshot.tabs.enumerated() {
             guard canPublishWorkspaceResult(
                 generation: restoreGeneration,
-                root: root,
-                languages: languages
-            )
+                root: root)
             else { return false }
             switch entry {
             case .file(let saved):
@@ -1368,9 +1153,7 @@ public final class AppModel {
                 )
                 let canPublish = canPublishWorkspaceResult(
                     generation: restoreGeneration,
-                    root: root,
-                    languages: languages
-                )
+                    root: root)
                 guard canPublish,
                       self.languageMode(for: file) == languageMode,
                       let resolved
@@ -1406,9 +1189,7 @@ public final class AppModel {
         }
         guard canPublishWorkspaceResult(
             generation: restoreGeneration,
-            root: root,
-            languages: languages
-        )
+            root: root)
         else { return false }
 
         let selected = snapshot.activeTabOrdinal.flatMap { oldToNew[$0] }
@@ -1530,78 +1311,6 @@ public final class AppModel {
         }
     }
 
-    public func openProject(root: URL) {
-        do {
-            try openProject(root: root, language: .rust)
-        } catch {
-            assertionFailure("Rust product support unexpectedly failed: \(error)")
-        }
-    }
-
-    public func openProject(root: URL, language: LanguageID) throws {
-        try validateProductSupport(language)
-        let root = root.standardizedFileURL
-        // Shares the open lifecycle with the multi-language entry; plain
-        // non-Git directories keep the index() fallback below, whose errors
-        // propagate into .failed unchanged (never reclassified as "not a
-        // Git repository").
-        let openGeneration = beginWorkspaceOpen(root: root, languages: [language])
-        let rules = pathRules
-
-        snapshotTask = Task { [weak self, indexService] in
-            do {
-                let fileTree = try await detachedValue {
-                    try FileTreeModel(root: root, pathRules: rules)
-                }
-                try Task.checkCancellation()
-                guard let self,
-                      canPublishProjectResult(
-                          generation: openGeneration,
-                          root: root,
-                          language: language
-                      )
-                else { return }
-                self.fileTree = fileTree
-                coverage = SnapshotCoverage(
-                    filesIndexed: 0,
-                    filesTotal: sourceFileCount(
-                        in: fileTree.children,
-                        under: fileTree.root,
-                        languages: [language]
-                    )
-                )
-                let session = try await indexService.index(
-                    root: root,
-                    language: language
-                )
-                try Task.checkCancellation()
-                finishIndexing(
-                    session,
-                    generation: openGeneration,
-                    root: root,
-                    language: language
-                )
-            } catch is CancellationError {
-                return
-            } catch {
-                guard let self,
-                      canPublishProjectResult(
-                          generation: openGeneration,
-                          root: root,
-                          language: language
-                      )
-                else { return }
-                workspaceSessions.removeAll(keepingCapacity: true)
-                failIndexing(
-                    generation: openGeneration,
-                    root: root,
-                    language: language,
-                    error: error
-                )
-            }
-        }
-    }
-
     public func flushPersistentIndexCache() {
         indexService.flushPersistentIndexCache()
     }
@@ -1703,6 +1412,7 @@ public final class AppModel {
     /// State captured before a refresh so a failed refresh can restore the
     /// previous index instead of failing the workspace.
     @ObservationIgnored private var refreshRestoreState: (
+        languages: [LanguageID],
         sessions: [AnalysisProfileID: EngineSession],
         phase: SnapshotPhase?,
         coverage: SnapshotCoverage,
@@ -1733,7 +1443,6 @@ public final class AppModel {
 
     public func refreshIndex(leaving current: JumpRecord?) {
         guard let root = projectRoot,
-              !projectLanguages.isEmpty,
               case .ready = projectState
         else { return }
         snapshotTask?.cancel()
@@ -1753,6 +1462,7 @@ public final class AppModel {
                 readySession = nil
             }
             refreshRestoreState = (
+                projectLanguages,
                 workspaceSessions,
                 snapshotPhase,
                 coverage,
@@ -1782,100 +1492,14 @@ public final class AppModel {
                 false
             )
         }
-        let languages = projectLanguages
-        if languages.count == 1 {
-            let language = languages[0]
-            let rules = pathRules
-            snapshotTask = Task { [weak self, indexService] in
-                do {
-                    let session = try await indexService.index(
-                        root: root,
-                        language: language
-                    )
-                    try Task.checkCancellation()
-                    let tree = try await detachedValue {
-                        try FileTreeModel(root: root, pathRules: rules)
-                    }
-                    try Task.checkCancellation()
-                    guard let self,
-                          self.canPublishWorkspaceResult(
-                              generation: refreshGeneration,
-                              root: root,
-                              languages: languages
-                          )
-                    else { return }
-                    self.fileTree = tree
-                    if let selected = self.selectedFile,
-                       self.fileTree?.selectionPath(for: selected)?
-                           .last?.isDirectory != false
-                    {
-                        self.selectedFile = nil
-                        self.selectedByteOffset = nil
-                    }
-                    self.finishIndexing(
-                        session,
-                        generation: refreshGeneration,
-                        root: root,
-                        language: language
-                    )
-                    guard case .ready = self.projectState else {
-                        self.refreshIndexDidFail(
-                            generation: refreshGeneration,
-                            root: root,
-                            languages: languages
-                        )
-                        return
-                    }
-                    self.refreshIndexDidSucceed(
-                        generation: refreshGeneration,
-                        root: root,
-                        languages: languages
-                    )
-                    if let pending = self.pendingReplay {
-                        self.pendingReplay = nil
-                        self.replayWithinCurrentSnapshot(
-                            pending.record,
-                            replayedAgainstCurrentWorktree: false,
-                            opensInNewTab: false
-                        )
-                    }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard let self,
-                          self.canPublishWorkspaceResult(
-                              generation: refreshGeneration,
-                              root: root,
-                              languages: languages
-                          )
-                    else { return }
-                    self.refreshIndexDidFail(
-                        generation: refreshGeneration,
-                        root: root,
-                        languages: languages
-                    )
-                }
-            }
-        } else {
-            snapshotTask = snapshotLoadTask(
-                revision: currentRevision,
-                generation: refreshGeneration,
-                root: root,
-                languages: languages
-            ) { [weak self] generation, root, languages, error in
-                self?.refreshIndexDidFail(
-                    generation: generation,
-                    root: root,
-                    languages: languages,
-                    error: error
-                )
-            } onSuccess: { [weak self] in
-                self?.refreshIndexDidSucceed(
-                    generation: refreshGeneration,
-                    root: root,
-                    languages: languages
-                )
-            }
+        snapshotTask = snapshotLoadTask(
+            revision: currentRevision,
+            generation: refreshGeneration,
+            root: root
+        ) { [weak self] generation, root, error in
+            self?.refreshIndexDidFail(generation: generation, root: root, error: error)
+        } onSuccess: { [weak self] in
+            self?.refreshIndexDidSucceed(generation: refreshGeneration, root: root)
         }
     }
 
@@ -1887,16 +1511,10 @@ public final class AppModel {
         refreshRestoreState = nil
     }
 
-    private func refreshIndexDidSucceed(
-        generation: UInt64,
-        root: URL,
-        languages: [LanguageID]
-    ) {
+    private func refreshIndexDidSucceed(generation: UInt64, root: URL) {
         guard canPublishWorkspaceResult(
             generation: generation,
-            root: root,
-            languages: languages
-        ) else { return }
+            root: root) else { return }
         isRefreshingIndex = false
         indexRefreshNotice = nil
         refreshRestoreState = nil
@@ -1907,14 +1525,11 @@ public final class AppModel {
     private func refreshIndexDidFail(
         generation: UInt64,
         root: URL,
-        languages: [LanguageID],
         error: Error? = nil
     ) {
         guard canPublishWorkspaceResult(
             generation: generation,
-            root: root,
-            languages: languages
-        ) else { return }
+            root: root) else { return }
         isRefreshingIndex = false
         let reason = error.map(Self.failureSummary)
         indexRefreshNotice = reason.map {
@@ -1923,6 +1538,7 @@ public final class AppModel {
         pendingReplay = nil
         guard let restore = refreshRestoreState else { return }
         refreshRestoreState = nil
+        projectLanguages = restore.languages
         workspaceSessions = restore.sessions
         snapshotPhase = restore.phase
         coverage = restore.coverage
@@ -1955,16 +1571,12 @@ public final class AppModel {
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
-                    revision: revision,
-                    languages: languages
-                )
+                    revision: revision)
                 try Task.checkCancellation()
                 guard let self,
                       canPublishWorkspaceResult(
                           generation: mainGeneration,
-                          root: root,
-                          languages: languages
-                      )
+                          root: root)
                 else { return }
                 guard compare.install(
                     snapshot: snapshot,
@@ -1979,9 +1591,7 @@ public final class AppModel {
                 guard let self,
                       canPublishWorkspaceResult(
                           generation: mainGeneration,
-                          root: root,
-                          languages: languages
-                      )
+                          root: root)
                 else { return }
                 compare.fail(generation: compareGeneration, error: error)
             }
@@ -2066,9 +1676,7 @@ public final class AppModel {
                   !Task.isCancelled,
                   self.canPublishWorkspaceResult(
                       generation: workspaceGeneration,
-                      root: root,
-                      languages: expectedLanguages
-                  ),
+                      root: root),
                   self.navigationToken == navigationTokenAtRequest
             else { return }
             if verified {
@@ -2444,9 +2052,7 @@ public final class AppModel {
             guard let self,
                   self.canPublishWorkspaceResult(
                       generation: workspaceGeneration,
-                      root: root,
-                      languages: languages
-                  ),
+                      root: root),
                   self.bookmarkModel.isCurrentJump(
                       attemptGeneration,
                       workspaceGeneration: workspaceGeneration
@@ -2457,9 +2063,7 @@ public final class AppModel {
             do {
                 snapshot = try await indexService.captureSnapshot(
                     root: root,
-                    revision: revision,
-                    languages: languages
-                )
+                    revision: revision)
             } catch is CancellationError {
                 return nil
             } catch {
@@ -2470,9 +2074,7 @@ public final class AppModel {
             }
             guard self.canPublishWorkspaceResult(
                       generation: workspaceGeneration,
-                      root: root,
-                      languages: languages
-                  ),
+                      root: root),
                   self.bookmarkModel.isCurrentJump(
                       attemptGeneration,
                       workspaceGeneration: workspaceGeneration
@@ -2532,16 +2134,13 @@ public final class AppModel {
             }
             guard self.canPublishWorkspaceResult(
                       generation: workspaceGeneration,
-                      root: root,
-                      languages: languages
-                  ),
+                      root: root),
                   self.bookmarkModel.isCurrentJump(
                       attemptGeneration,
                       workspaceGeneration: workspaceGeneration
                   ),
                   let cached = self.validatedWorkspaceSessions(
                       prepared.map(\.cachedSession),
-                      languages: languages,
                       snapshotID: snapshot.snapshotID
                   )
             else { return localized("model.app.bookmarkInstallFailed") }
@@ -2604,9 +2203,7 @@ public final class AppModel {
                         guard let self,
                               self.canPublishWorkspaceResult(
                                   generation: installedGeneration,
-                                  root: root,
-                                  languages: languages
-                              )
+                                  root: root)
                         else { return }
                     }
                 } catch {
@@ -2615,14 +2212,11 @@ public final class AppModel {
                 guard let self,
                       self.canPublishWorkspaceResult(
                           generation: installedGeneration,
-                          root: root,
-                          languages: languages
-                      ),
+                          root: root),
                       self.installWorkspaceSessions(
                           completed,
                           generation: installedGeneration,
                           root: root,
-                          languages: languages,
                           expectedSnapshotID: snapshot.snapshotID,
                           phase: .fullReady
                       )
@@ -2653,9 +2247,7 @@ public final class AppModel {
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
-                    revision: fullOID,
-                    languages: languages
-                )
+                    revision: fullOID)
                 guard let file = snapshot.listFiles().first(where: {
                     $0.path == record.path
                 }) else {
@@ -3067,68 +2659,6 @@ public final class AppModel {
         }
     }
 
-    private func finishIndexing(
-        _ session: EngineSession,
-        generation: UInt64,
-        root: URL,
-        language: LanguageID
-    ) {
-        guard canPublishProjectResult(
-            generation: generation,
-            root: root,
-            language: language
-        ) else { return }
-        guard session.analysisProfile.language == language else {
-            failIndexing(
-                generation: generation,
-                root: root,
-                language: language
-            )
-            return
-        }
-        workspaceSessions = [session.analysisProfile.id: session]
-        currentSnapshotID = session.snapshotID
-        snapshotDestinations[session.snapshotID] = .worktree
-        snapshotPhase = .fullReady
-        projectFailureReason = nil
-        coverage = Self.sessionCoverage(for: session)
-        guard transition(to: .ready(
-            session,
-            QueryContext(
-                snapshotID: session.snapshotID,
-                analysisProfileID: session.analysisProfile.id,
-                generation: generation
-            )
-        )) else {
-            assertionFailure("Illegal project state transition to ready")
-            return
-        }
-        lastInstalledRevision = nil
-        lastInstalledProjectRoot = projectRoot
-        lastInstalledGeneration = generation
-        prepareExact(generation: generation)
-    }
-
-    private func failIndexing(
-        generation: UInt64,
-        root: URL,
-        language: LanguageID,
-        error: Error? = nil
-    ) {
-        guard canPublishProjectResult(
-            generation: generation,
-            root: root,
-            language: language
-        ) else { return }
-        workspaceSessions.removeAll(keepingCapacity: true)
-        pendingReplay = nil
-        projectFailureReason = error.map(Self.failureSummary)
-        guard transition(to: .failed) else {
-            assertionFailure("Illegal project state transition to failed")
-            return
-        }
-    }
-
     private func switchSnapshot(revision: String?) {
         guard let root = projectRoot,
               !projectLanguages.isEmpty
@@ -3151,56 +2681,52 @@ public final class AppModel {
         snapshotTask = snapshotLoadTask(
             revision: revision,
             generation: switchGeneration,
-            root: root,
-            languages: projectLanguages
-        ) { [weak self] generation, root, languages, error in
-            self?.failWorkspace(
-                generation: generation,
-                root: root,
-                languages: languages,
-                error: error
-            )
+            root: root
+        ) { [weak self] generation, root, error in
+            self?.failWorkspace(generation: generation, root: root, error: error)
         }
     }
 
     /// The staged capture/prepare/complete publication chain shared by
-    /// destination switches and index refreshes.
+    /// opens, destination switches and index refreshes. A worktree capture
+    /// (`revision == nil`) sets the project's language set; a commit keeps
+    /// the current one.
     private func snapshotLoadTask(
         revision: String?,
         generation: UInt64,
         root: URL,
-        languages: [LanguageID],
-        onFailure: @escaping @MainActor (UInt64, URL, [LanguageID], Error?) -> Void,
+        onFailure: @escaping @MainActor (UInt64, URL, Error?) -> Void,
         onSuccess: (@MainActor () -> Void)? = nil
     ) -> Task<Void, Never> {
         Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
-                    revision: revision,
-                    languages: languages
-                )
+                    revision: revision)
                 try Task.checkCancellation()
                 guard let self,
                       self.canPublishWorkspaceResult(
                           generation: generation,
-                          root: root,
-                          languages: languages
-                      )
+                          root: root)
                 else { return }
+                if revision == nil {
+                    self.projectLanguages = snapshot.languages
+                }
+                let languages = self.projectLanguages
+                guard !languages.isEmpty else {
+                    onFailure(generation, root, NoSupportedSourcesError())
+                    return
+                }
                 self.publishFirstPaint(
                     snapshot,
                     root: root,
                     revision: revision,
-                    generation: generation,
-                    languages: languages
+                    generation: generation
                 )
                 await Task.yield()
                 guard self.canPublishWorkspaceResult(
                     generation: generation,
-                    root: root,
-                    languages: languages
-                ) else { return }
+                    root: root) else { return }
 
                 let prepared = try await indexService.prepareSnapshots(
                     snapshot,
@@ -3210,26 +2736,21 @@ public final class AppModel {
                 try Task.checkCancellation()
                 guard self.canPublishWorkspaceResult(
                     generation: generation,
-                    root: root,
-                    languages: languages
-                ) else { return }
+                    root: root) else { return }
                 guard self.installWorkspaceSessions(
                     prepared.map(\.cachedSession),
                     generation: generation,
                     root: root,
-                    languages: languages,
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .cachedReady
                 ) else {
-                    onFailure(generation, root, languages, nil)
+                    onFailure(generation, root, nil)
                     return
                 }
                 await Task.yield()
                 guard self.canPublishWorkspaceResult(
                     generation: generation,
-                    root: root,
-                    languages: languages
-                ) else { return }
+                    root: root) else { return }
 
                 var completed: [EngineSession] = []
                 for item in prepared {
@@ -3238,19 +2759,16 @@ public final class AppModel {
                     try Task.checkCancellation()
                     guard self.canPublishWorkspaceResult(
                         generation: generation,
-                        root: root,
-                        languages: languages
-                    ) else { return }
+                        root: root) else { return }
                 }
                 guard self.installWorkspaceSessions(
                     completed,
                     generation: generation,
                     root: root,
-                    languages: languages,
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .fullReady
                 ) else {
-                    onFailure(generation, root, languages, nil)
+                    onFailure(generation, root, nil)
                     return
                 }
                 self.lastInstalledRevision = self.currentRevision
@@ -3264,11 +2782,9 @@ public final class AppModel {
                 guard let self,
                       self.canPublishWorkspaceResult(
                           generation: generation,
-                          root: root,
-                          languages: languages
-                      )
+                          root: root)
                 else { return }
-                onFailure(generation, root, languages, error)
+                onFailure(generation, root, error)
             }
         }
     }
@@ -3277,14 +2793,11 @@ public final class AppModel {
         _ snapshot: any Snapshot,
         root: URL,
         revision: String?,
-        generation: UInt64,
-        languages: [LanguageID]
+        generation: UInt64
     ) {
         guard canPublishWorkspaceResult(
             generation: generation,
-            root: root,
-            languages: languages
-        ) else { return }
+            root: root) else { return }
         let files = snapshot.listFiles().filter {
             switch $0.fileMode {
             case .symlink, .gitlink:
@@ -3334,7 +2847,7 @@ public final class AppModel {
         coverage = SnapshotCoverage(
             filesIndexed: 0,
             filesTotal: paths.filter {
-                LanguageMode.classify(path: $0, languages: languages) != nil
+                LanguageMode.classify(path: $0, languages: projectLanguages) != nil
             }.count
         )
         if pendingReplay == nil { navigationGeneration &+= 1 }
@@ -3352,27 +2865,16 @@ public final class AppModel {
         }
     }
 
-    private func canPublishProjectResult(
-        generation expectedGeneration: UInt64,
-        root expectedRoot: URL,
-        language expectedLanguage: LanguageID
-    ) -> Bool {
-        canPublishWorkspaceResult(
-            generation: expectedGeneration,
-            root: expectedRoot,
-            languages: [expectedLanguage]
-        )
-    }
-
+    /// Every open, refresh and switch advances `generation`, and the
+    /// language set is only written inside the task that owns it, so the
+    /// generation and root identify the workspace a result belongs to.
     private func canPublishWorkspaceResult(
         generation expectedGeneration: UInt64,
-        root expectedRoot: URL,
-        languages expectedLanguages: [LanguageID]
+        root expectedRoot: URL
     ) -> Bool {
         !Task.isCancelled
             && generation == expectedGeneration
             && projectRoot?.standardizedFileURL == expectedRoot.standardizedFileURL
-            && projectLanguages == expectedLanguages
     }
 
     private func prepareExact(generation: UInt64) {
@@ -3380,9 +2882,7 @@ public final class AppModel {
               case let .ready(session, _) = projectState,
               canPublishWorkspaceResult(
                   generation: generation,
-                  root: projectRoot,
-                  languages: projectLanguages
-              )
+                  root: projectRoot)
         else { return }
         do {
             try exactCoordinator.prepare(
@@ -3533,18 +3033,14 @@ public final class AppModel {
         _ candidates: [EngineSession],
         generation expectedGeneration: UInt64,
         root expectedRoot: URL,
-        languages expectedLanguages: [LanguageID],
         expectedSnapshotID: SnapshotID,
         phase: SnapshotPhase
     ) -> Bool {
         guard canPublishWorkspaceResult(
             generation: expectedGeneration,
-            root: expectedRoot,
-            languages: expectedLanguages
-        ) else { return false }
+            root: expectedRoot) else { return false }
         guard let byProfile = validatedWorkspaceSessions(
             candidates,
-            languages: expectedLanguages,
             snapshotID: expectedSnapshotID
         ) else { return false }
         workspaceSessions = byProfile
@@ -3565,9 +3061,9 @@ public final class AppModel {
 
     private func validatedWorkspaceSessions(
         _ candidates: [EngineSession],
-        languages: [LanguageID],
         snapshotID: SnapshotID
     ) -> [AnalysisProfileID: EngineSession]? {
+        let languages = projectLanguages
         var byProfile: [AnalysisProfileID: EngineSession] = [:]
         for session in candidates { byProfile[session.analysisProfile.id] = session }
         guard byProfile.count == languages.count,
@@ -3753,8 +3249,7 @@ public final class AppModel {
         replayTask = Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
-                    root: root, revision: revision, languages: languages
-                )
+                    root: root, revision: revision)
                 guard snapshot.listFiles().contains(where: { entry in
                     guard entry.path == record.jump.path else { return false }
                     switch entry.fileMode {
@@ -3790,10 +3285,10 @@ public final class AppModel {
                 }
                 guard let self,
                       canPublishWorkspaceResult(generation: replayGeneration,
-                                                root: root, languages: languages),
+                                                root: root),
                       navigationToken == replayNavigationToken
                 else { return }
-                guard validatedWorkspaceSessions(completed, languages: languages,
+                guard validatedWorkspaceSessions(completed,
                                                  snapshotID: snapshot.snapshotID) != nil
                 else { throw CocoaError(.fileReadCorruptFile) }
                 snapshotTask?.cancel()
@@ -3806,9 +3301,9 @@ public final class AppModel {
                 commitPicker.setCurrentRevision(revision)
                 pendingReplay = nil
                 publishFirstPaint(snapshot, root: root, revision: revision,
-                                  generation: generation, languages: languages)
+                                  generation: generation)
                 _ = installWorkspaceSessions(completed, generation: generation,
-                                             root: root, languages: languages,
+                                             root: root,
                                              expectedSnapshotID: snapshot.snapshotID,
                                              phase: .fullReady)
                 lastInstalledRevision = currentRevision
@@ -3829,7 +3324,7 @@ public final class AppModel {
             } catch {
                 guard let self, !Task.isCancelled,
                       canPublishWorkspaceResult(generation: replayGeneration,
-                                                root: root, languages: languages),
+                                                root: root),
                       navigationToken == replayNavigationToken
                 else { return }
                 pendingHistoryNavigation = nil
@@ -3885,9 +3380,7 @@ public final class AppModel {
             guard let self,
                   canPublishWorkspaceResult(
                       generation: replayGeneration,
-                      root: root,
-                      languages: projectLanguages
-                  ),
+                      root: root),
                   navigationToken == replayNavigationToken,
                   currentSnapshotID == replaySnapshotID,
                   self.languageMode(for: file) == languageMode
@@ -4015,38 +3508,7 @@ public final class AppModel {
     }
 }
 
-private func sourceFileCount(
-    in nodes: [FileTreeNode],
-    under root: URL,
-    languages: [LanguageID]
-) -> Int {
-    nodes.reduce(0) { count, node in
-        if node.isDirectory {
-            return count + sourceFileCount(
-                in: node.children,
-                under: root,
-                languages: languages
-            )
-        }
-        let rootComponents = root.standardizedFileURL.pathComponents
-        let fileComponents = node.url.standardizedFileURL.pathComponents
-        guard fileComponents.starts(with: rootComponents),
-              fileComponents.count > rootComponents.count
-        else { return count }
-        let path = fileComponents.dropFirst(rootComponents.count)
-            .joined(separator: "/")
-        return count + (LanguageMode.classify(path: path, languages: languages) != nil ? 1 : 0)
-    }
-}
-
-private func validateProductSupport(_ language: LanguageID) throws {
-    switch language {
-    case .rust, .python, .typescript:
-        return
-    case .javascript:
-        throw CocoaError(.featureUnsupported, userInfo: [
-            NSLocalizedFailureReasonErrorKey:
-                localizedFormat("model.app.unsupportedLanguage", String(describing: language)),
-        ])
-    }
+/// An open whose worktree has no Rust, Python or TypeScript source.
+private struct NoSupportedSourcesError: LocalizedError {
+    var errorDescription: String? { localized("model.app.noSupportedSources") }
 }

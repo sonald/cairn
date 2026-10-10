@@ -335,19 +335,6 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     // captured worktree files retain the existing .untracked convention.
     public let sourceKind: SourceKind = .untracked
 
-    public convenience init(repositoryURL: URL, language: LanguageID) throws {
-        try self.init(repositoryURL: repositoryURL, languages: [language])
-    }
-
-    public convenience init(
-        repositoryURL: URL,
-        languages: [LanguageID],
-        pathRules: ProjectPathRules = ProjectPathRules()
-    ) throws {
-        _ = try LanguageMode.normalize(languages: languages)
-        try self.init(repositoryURL: repositoryURL, pathRules: pathRules)
-    }
-
     /// A directory that is not itself a Git repository (including a
     /// repository subdirectory: `git_repository_open` does not search
     /// upward) is captured as a plain directory; other Git errors throw.

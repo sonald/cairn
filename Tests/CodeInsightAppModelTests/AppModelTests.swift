@@ -1010,37 +1010,6 @@ func projectOpenPublishesFileTreeAsynchronously() async throws {
 
 @MainActor
 @Test
-func unsupportedJavaScriptOpenIsSynchronousAndAtomic() async {
-    let service = ControlledIndexService()
-    let model = AppModel(indexService: service)
-    let root = URL(fileURLWithPath: "/tmp/javascript-project", isDirectory: true)
-    let originalGeneration = model.generation
-
-    do {
-        try model.openProject(root: root, language: .javascript)
-        Issue.record("expected unsupported language")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect(
-            (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("javascript") == true
-        )
-    } catch {
-        Issue.record("unexpected error: \(error)")
-    }
-
-    guard case .empty = model.projectState else {
-        Issue.record("unsupported open changed project state")
-        return
-    }
-    #expect(model.projectLanguage == nil)
-    #expect(model.projectRoot == nil)
-    #expect(model.generation == originalGeneration)
-    #expect(await service.requestedLanguages().isEmpty)
-}
-
-@MainActor
-@Test
 func openingAnotherProjectDiscardsLateSession() async throws {
     let rootA = try temporaryProject(["a.rs": "fn a() {}"])
     let rootB = try temporaryProject(["b.rs": "fn b() {}"])
@@ -1048,18 +1017,13 @@ func openingAnotherProjectDiscardsLateSession() async throws {
         try? FileManager.default.removeItem(at: rootA)
         try? FileManager.default.removeItem(at: rootB)
     }
-    let sessionA = try ProjectIndexer().index(root: rootA)
-    let sessionB = try ProjectIndexer().index(root: rootB)
     let service = ControlledIndexService()
     let model = AppModel(indexService: service)
 
     model.openProject(root: rootA)
     #expect(model.fileTree == nil)
-    #expect(await testWaitUntil("model.fileTree?.root == rootA.standardizedFileURL") {
-        model.fileTree?.root == rootA.standardizedFileURL
-    })
     #expect(await service.waitUntilRequested(root: rootA))
-    try model.openProject(root: rootB, language: .rust)
+    model.openProject(root: rootB)
 
     #expect(model.generation == 2)
     #expect(model.fileTree == nil)
@@ -1068,17 +1032,15 @@ func openingAnotherProjectDiscardsLateSession() async throws {
         return
     }
     #expect(root == rootB.standardizedFileURL)
-    #expect(await testWaitUntil("model.fileTree?.root == rootB.standardizedFileURL") {
-        model.fileTree?.root == rootB.standardizedFileURL
-    })
 
-    await service.complete(root: rootB, result: .success(sessionB))
+    await service.complete(root: rootB)
     #expect(await testWaitUntil("if case .ready = model.projectState { return true } return false") {
         if case .ready = model.projectState { return true }
         return false
     })
+    let readySnapshotID = model.currentSnapshotID
 
-    await service.complete(root: rootA, result: .success(sessionA))
+    await service.complete(root: rootA)
     #expect(await service.waitUntilDelivered(root: rootA))
     for _ in 0..<10 { await Task.yield() }
 
@@ -1086,12 +1048,11 @@ func openingAnotherProjectDiscardsLateSession() async throws {
         Issue.record("expected ready")
         return
     }
-    #expect(session.snapshotID == sessionB.snapshotID)
-    #expect(context.snapshotID == sessionB.snapshotID)
-    #expect(context.analysisProfileID == sessionB.analysisProfile.id)
+    #expect(model.fileTree?.root == rootB.standardizedFileURL)
+    #expect(model.fileTree?.children.map(\.name) == ["b.rs"])
+    #expect(session.snapshotID == readySnapshotID)
+    #expect(context.snapshotID == readySnapshotID)
     #expect(context.generation == 2)
-    #expect(await service.requestedLanguage(root: rootA) == .rust)
-    #expect(await service.requestedLanguage(root: rootB) == .rust)
 }
 
 @MainActor
@@ -1110,7 +1071,7 @@ func indexingFailureMovesProjectToFailed() async throws {
         if case .failed = model.projectState { return true }
         return false
     })
-    #expect(model.projectLanguage == .rust)
+    #expect(model.projectLanguages == [.rust])
     #expect(model.projectRoot == root.standardizedFileURL)
 }
 
@@ -1119,31 +1080,21 @@ func indexingFailureMovesProjectToFailed() async throws {
 func mismatchedSessionLanguageFailsWithoutPublishingSessionState() async throws {
     let root = try temporaryProject(["main.rs": "fn main() {}"])
     defer { try? FileManager.default.removeItem(at: root) }
-    let base = try ProjectIndexer().index(root: root)
-    let mismatched = EngineSession(
-        store: base.store,
-        snapshotView: SnapshotView(
-            reprofiling: base.snapshotView,
-            analysisProfile: .placeholder(
-                language: .python,
-                root: base.analysisProfile.projectRoot
-            )
-        )
-    )
-    let service = ControlledIndexService()
+    // The service prepares Python sessions for a Rust worktree.
+    let service = ControlledIndexService(preparing: [.python])
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
     #expect(await service.waitUntilRequested(root: root))
-    await service.complete(root: root, result: .success(mismatched))
+    await service.complete(root: root)
     #expect(await testWaitUntil("mismatched session rejected") {
         if case .failed = model.projectState { return true }
         return false
     })
 
-    #expect(model.projectLanguage == .rust)
-    #expect(model.currentSnapshotID == nil)
-    #expect(model.snapshotPhase == nil)
+    #expect(model.projectLanguages == [.rust])
+    #expect(model.querySessions.isEmpty)
+    #expect(model.snapshotPhase == .firstPaint)
     #expect(model.coverage.filesIndexed == 0)
     #expect(model.coverage.filesTotal == 1)
 }
@@ -1166,7 +1117,7 @@ func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async thr
         for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
     }
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+    await model.openProject(root: root).value
 
     #expect(model.projectLanguages == [.rust, .python, .typescript])
     #expect(model.querySessions.map { $0.0.analysisProfile.language }
@@ -1247,7 +1198,7 @@ func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
         indexService: ProjectIndexService(),
         contextWindow: ContextWindowModel(gate.resolve)
     )
-    try await model.openProject(root: root, languages: [.rust, .python])
+    await model.openProject(root: root).value
 
     let rustURL = root.appendingPathComponent("main.rs")
     let pythonURL = root.appendingPathComponent("lib.py")
@@ -1325,7 +1276,7 @@ func crossLanguageSameNameContextStaysInActivePythonSession() async throws {
         for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
     }
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust, .python])
+    await model.openProject(root: root).value
 
     model.navigate(to: root.appendingPathComponent("lib.py"))
     let offset = byteOffset(of: "shared()\n", in: pySource)
@@ -1370,7 +1321,7 @@ func rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() async throws {
         for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
     }
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust, .python])
+    await model.openProject(root: root).value
 
     let pythonBefore = model.querySessions.filter {
         $0.0.analysisProfile.language == .python
@@ -1423,7 +1374,7 @@ func restartExactAnalysisRetriesFailedProviderWithoutChangingReadingState() asyn
     )
     let model = AppModel(indexService: ProjectIndexService(), exactCoordinator: coordinator)
     defer { coordinator.shutdown() }
-    try await model.openProject(root: root, languages: [.rust])
+    await model.openProject(root: root).value
     try #require(model.snapshotPhase == .fullReady, "\(String(describing: model.projectFailureReason))")
     model.navigate(to: root.appendingPathComponent("main.rs"))
     #expect(await testWaitUntil("initial provider fails") {
@@ -1474,7 +1425,7 @@ func sameProfileNavigationDoesNotResetContextOrRelationIdentity() async throws {
             )
         )
     )
-    try await model.openProject(root: root, languages: [.rust, .python])
+    await model.openProject(root: root).value
 
     let firstURL = root.appendingPathComponent("main.rs")
     model.navigate(to: firstURL)
@@ -1500,40 +1451,6 @@ func sameProfileNavigationDoesNotResetContextOrRelationIdentity() async throws {
 }
 
 @Test
-func projectIndexServiceRejectsJavaScriptBeforeIO() async throws {
-    let root = FileManager.default.temporaryDirectory
-        .appendingPathComponent("CodeInsightUnsupportedService-\(UUID().uuidString)")
-    let cachePaths = try indexCachePaths(for: root)
-    defer {
-        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
-    }
-    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
-
-    let service = ProjectIndexService()
-    for operation in [
-        { try await service.index(root: root, language: .javascript) as Any },
-        {
-            try await service.captureSnapshot(
-                root: root,
-                revision: "HEAD",
-                language: .javascript
-            ) as Any
-        },
-    ] {
-        do {
-            _ = try await operation()
-            Issue.record("unsupported JavaScript service operation unexpectedly succeeded")
-        } catch let error as CocoaError {
-            #expect(error.code == .featureUnsupported)
-        } catch {
-            Issue.record("unsupported JavaScript service operation reached I/O: \(error)")
-        }
-    }
-    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
-    #expect(!FileManager.default.fileExists(atPath: root.path))
-}
-
-@Test
 func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() async throws {
     let root = try temporaryGitProject([
         "crates/r/src/lib.rs": "pub fn f() {}\n",
@@ -1551,11 +1468,8 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
     }
 
     let service = ProjectIndexService()
-    let snapshot = try await service.captureSnapshot(
-        root: root,
-        revision: nil,
-        languages: [.typescript, .rust, .python]
-    )
+    let snapshot = try await service.captureSnapshot(root: root, revision: nil)
+    #expect(snapshot.languages == [.rust, .python, .typescript])
     let paths = snapshot.listFiles().map(\.path)
     #expect(Set(paths) == Set([
         "crates/r/Cargo.toml",
@@ -1570,7 +1484,7 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
     let prepared = try await service.prepareSnapshots(
         snapshot,
         root: root,
-        languages: [.typescript, .rust, .python]
+        languages: snapshot.languages
     )
     #expect(prepared.map { $0.cachedSession.analysisProfile.language }
         == [.rust, .python, .typescript])
@@ -1597,107 +1511,6 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
     #expect(full.map { $0.stats.extractedCount } == [1, 1, 2])
 
     service.flushPersistentIndexCache()
-}
-
-@Test
-func singletonCollectionPreparePreservesLegacyRootWithoutUnitDiscovery() async throws {
-    let root = try temporaryGitProject([
-        "a/src/main.rs": "fn a() {}\n",
-        "b/src/main.rs": "fn b() {}\n",
-        "a/Cargo.toml": "[package]\nname = \"a\"\n",
-        "b/Cargo.toml": "[package]\nname = \"b\"\n",
-    ])
-    let cachePaths = try indexCachePaths(for: root)
-    defer {
-        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
-        try? FileManager.default.removeItem(at: root)
-    }
-    let service = ProjectIndexService()
-    let snapshot = try await service.captureSnapshot(
-        root: root,
-        revision: nil,
-        languages: [.rust]
-    )
-    let prepared = try await service.prepareSnapshots(
-        snapshot,
-        root: root,
-        languages: [.rust]
-    )
-
-    #expect(prepared.count == 1)
-    #expect(prepared[0].cachedSession.analysisProfile.language == .rust)
-    #expect(prepared[0].cachedSession.paths.resolve(
-        prepared[0].cachedSession.analysisProfile.projectRoot
-    ) == ".")
-}
-
-@Test
-func indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets() async throws {
-    let service = CountingIndexService()
-    let root = try temporaryProject([:])
-    defer { try? FileManager.default.removeItem(at: root) }
-
-    do {
-        _ = try await service.captureSnapshot(
-            root: root,
-            revision: nil,
-            languages: [.rust]
-        )
-    } catch {
-        Issue.record("singleton capture forward failed: \(String(describing: error))")
-    }
-    #expect(await service.capturedLanguages == [.rust])
-
-    do {
-        _ = try await service.prepareSnapshots(
-            CountingIndexSnapshot(files: [:], configurationPaths: []),
-            root: root,
-            languages: [.python]
-        )
-    } catch Failure.expected {
-        // CountingIndexService intentionally throws after recording scalar call.
-    } catch {
-        Issue.record("singleton prepare forward failed: \(error)")
-    }
-    #expect(await service.preparedLanguages == [.python])
-
-    let invalid: [[LanguageID]] = [
-        [],
-        [.rust, .rust],
-        [.javascript],
-        [.rust, .python],
-    ]
-    for languages in invalid {
-        do {
-            _ = try await service.captureSnapshot(
-                root: root,
-                revision: nil,
-                languages: languages
-            )
-            Issue.record("invalid/mixed capture unexpectedly succeeded: \(languages)")
-        } catch let error as CocoaError {
-            #expect(error.code == .featureUnsupported)
-        } catch {
-            Issue.record("unexpected invalid capture error: \(error)")
-        }
-    }
-    #expect(await service.capturedLanguages == [.rust])
-
-    for languages in invalid {
-        do {
-            _ = try await service.prepareSnapshots(
-                CountingIndexSnapshot(files: [:], configurationPaths: []),
-                root: root,
-                languages: languages
-            )
-            Issue.record("invalid/mixed prepare unexpectedly succeeded: \(languages)")
-        } catch let error as CocoaError {
-            #expect(error.code == .featureUnsupported)
-        } catch {
-            Issue.record("unexpected invalid prepare error: \(error)")
-        }
-    }
-    #expect(await service.preparedLanguages == [.python])
 }
 
 @MainActor
@@ -1750,7 +1563,7 @@ private func makeMixedSymbolWorkspace() async throws -> (
     ])
     let cachePaths = try indexCachePaths(for: root)
     let model = AppModel(indexService: ProjectIndexService())
-    try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+    await model.openProject(root: root).value
     let sessions = model.querySessions
     guard sessions.count == 3 else {
         for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
@@ -2173,32 +1986,57 @@ func contextPendingTokenResolvesWhenIndexBecomesReady() async throws {
     #expect(resolveCount == 1)
 }
 
+/// Holds each worktree capture until the test completes it, then captures
+/// and indexes for real (no persistent cache).
 private actor ControlledIndexService: IndexService {
-    typealias Outcome = Result<EngineSession, any Error>
-    private var pending: [String: CheckedContinuation<Outcome, Never>] = [:]
-    private var completed: [String: Outcome] = [:]
+    private var pending: [String: CheckedContinuation<(any Error)?, Never>] = [:]
+    private var completed: [String: (any Error)?] = [:]
     private var delivered: Set<String> = []
-    private var languagesByRoot: [String: LanguageID] = [:]
+    private let preparedLanguages: [LanguageID]?
 
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        let key = root.standardizedFileURL.path
-        languagesByRoot[key] = language
-        let result: Outcome
-        if let completed = completed.removeValue(forKey: key) {
-            result = completed
-        } else {
-            result = await withCheckedContinuation { pending[key] = $0 }
-        }
-        delivered.insert(key)
-        return try result.get()
+    /// `preparing` replaces the requested languages, to feed the model
+    /// sessions that do not match its set.
+    init(preparing preparedLanguages: [LanguageID]? = nil) {
+        self.preparedLanguages = preparedLanguages
     }
 
-    func complete(root: URL, result: Outcome) {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+        let key = root.standardizedFileURL.path
+        let failure: (any Error)?
+        if let completed = completed.removeValue(forKey: key) {
+            failure = completed
+        } else {
+            failure = await withCheckedContinuation { pending[key] = $0 }
+        }
+        delivered.insert(key)
+        if let failure { throw failure }
+        return try WorktreeSnapshot(repositoryURL: root)
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        try ProjectIndexer().prepareSnapshots(
+            snapshot,
+            into: ProjectIndexStore(),
+            languages: preparedLanguages ?? languages
+        )
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> EngineSession {
+        try ProjectIndexer().completeSnapshot(prepared)
+    }
+
+    func complete(root: URL, failure: (any Error)? = nil) {
         let key = root.standardizedFileURL.path
         if let continuation = pending.removeValue(forKey: key) {
-            continuation.resume(returning: result)
+            continuation.resume(returning: failure)
         } else {
-            completed[key] = result
+            completed[key] = failure
         }
     }
 
@@ -2214,14 +2052,6 @@ private actor ControlledIndexService: IndexService {
         return await waitUntil("index request received for \(key)") {
             pending[key] != nil
         }
-    }
-
-    func requestedLanguage(root: URL) -> LanguageID? {
-        languagesByRoot[root.standardizedFileURL.path]
-    }
-
-    func requestedLanguages() -> [LanguageID] {
-        Array(languagesByRoot.values)
     }
 
     private func waitUntil(
@@ -2293,34 +2123,18 @@ private actor CountingContextLoader {
     }
 }
 
+/// Captures the real worktree (so the file tree and coverage publish) and
+/// fails indexing.
 private struct FailingIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        throw Failure.expected
-    }
-}
-
-private actor CountingIndexService: IndexService {
-    private(set) var capturedLanguages: [LanguageID] = []
-    private(set) var preparedLanguages: [LanguageID] = []
-
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
-        throw Failure.expected
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+        CurrentTestSnapshot(wrapped: try WorktreeSnapshot(repositoryURL: root))
     }
 
-    func captureSnapshot(
-        root: URL,
-        revision: String?,
-        language: LanguageID
-    ) async throws -> any Snapshot {
-        capturedLanguages.append(language)
-        return CountingIndexSnapshot(files: [:], configurationPaths: [])
-    }
-
-    func prepareSnapshot(
+    func prepareSnapshots(
         _ snapshot: any Snapshot,
-        language: LanguageID
-    ) async throws -> ProjectIndexer.PreparedSnapshot {
-        preparedLanguages.append(language)
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
         throw Failure.expected
     }
 
@@ -2328,32 +2142,6 @@ private actor CountingIndexService: IndexService {
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession {
         throw Failure.expected
-    }
-
-    nonisolated func flushPersistentIndexCache() {}
-}
-
-private struct CountingIndexSnapshot: Snapshot {
-    let snapshotID = SnapshotID(rawValue: UUID())
-    let objectFormat = GitObjectFormat.sha1
-    let sourceKind = SourceKind.tracked
-    let configurationPaths: [String]
-    private let files: [String: [UInt8]]
-
-    init(files: [String: [UInt8]], configurationPaths: [String]) {
-        self.files = files
-        self.configurationPaths = configurationPaths
-    }
-
-    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
-        files.map {
-            ($0.key, ContentID.sha256(of: $0.value), .regular)
-        }.sorted { $0.path < $1.path }
-    }
-
-    func readBytes(path: String) throws -> [UInt8] {
-        guard let bytes = files[path] else { throw Failure.expected }
-        return bytes
     }
 }
 
@@ -2436,6 +2224,31 @@ private func byteOffset(of needle: String, in source: String) -> UInt32 {
     return UInt32(source[..<range.lowerBound].utf8.count)
 }
 
+private let currentTestSnapshotID = SnapshotID(
+    rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
+)
+
+/// A worktree under the identity `jumpRecord` stamps by default, so records
+/// a test makes belong to the snapshot the model shows.
+private struct CurrentTestSnapshot: Snapshot {
+    let wrapped: WorktreeSnapshot
+    var snapshotID: SnapshotID { currentTestSnapshotID }
+    var objectFormat: GitObjectFormat { wrapped.objectFormat }
+    var sourceKind: SourceKind { wrapped.sourceKind }
+    var projectRootName: String { wrapped.projectRootName }
+    var configurationPaths: [String] { wrapped.configurationPaths }
+    var ruleExcludedPaths: [String] { wrapped.ruleExcludedPaths }
+    var languages: [LanguageID] { wrapped.languages }
+
+    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+        wrapped.listFiles()
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        try wrapped.readBytes(path: path)
+    }
+}
+
 private func jumpRecord(
     _ path: String,
     contentID: ContentID? = nil,
@@ -2443,9 +2256,7 @@ private func jumpRecord(
     line: UInt32 = 1,
     column: UInt32? = nil,
     symbolAnchor: String? = nil,
-    snapshotID: SnapshotID? = SnapshotID(
-        rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
-    )
+    snapshotID: SnapshotID? = currentTestSnapshotID
 ) -> JumpRecord {
     JumpRecord(
         path: path,
@@ -2475,9 +2286,7 @@ func openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() async throws
 
     // The first open is still awaiting its session when the user opens the
     // second project; only the second one may publish.
-    await service.complete(root: second, result: .success(
-        try ProjectIndexer().index(root: second)
-    ))
+    await service.complete(root: second)
     model.openProject(root: second)
     #expect(await testWaitUntil("second project published") {
         model.snapshotPhase == .fullReady
@@ -2486,9 +2295,7 @@ func openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() async throws
     })
     #expect(model.fileTree?.children.map(\.name) == ["b.rs"])
 
-    await service.complete(root: first, result: .success(
-        try ProjectIndexer().index(root: first)
-    ))
+    await service.complete(root: first)
     try await Task.sleep(for: .milliseconds(200))
     #expect(model.projectRoot?.standardizedFileURL
         == second.standardizedFileURL)
@@ -2518,9 +2325,7 @@ func openAndSwitchFailuresSurfaceTheirUnderlyingReasons() async throws {
     let deniedModel = AppModel(indexService: deniedService)
     deniedModel.openProject(root: deniedRoot)
     #expect(await deniedService.waitUntilRequested(root: deniedRoot))
-    await deniedService.complete(root: deniedRoot, result: .failure(
-        CocoaError(.fileReadNoPermission)
-    ))
+    await deniedService.complete(root: deniedRoot, failure: CocoaError(.fileReadNoPermission))
     #expect(await testWaitUntil("permission failure surfaced") {
         if case .failed = deniedModel.projectState { return true }
         return false
@@ -2559,6 +2364,13 @@ func openAndSwitchFailuresSurfaceTheirUnderlyingReasons() async throws {
     #expect(summary.hasSuffix("…"))
 }
 
+/// Captures and fully indexes the worktree; returns its first language's session.
+private func indexWorktree(_ service: ProjectIndexService, root: URL) async throws -> EngineSession {
+    let snapshot = try await service.captureSnapshot(root: root, revision: nil)
+    let prepared = try await service.prepareSnapshots(snapshot, root: root, languages: snapshot.languages)
+    return try await service.completeSnapshot(prepared[0])
+}
+
 @MainActor
 @Test
 func projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() async throws {
@@ -2573,7 +2385,7 @@ func projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() async thr
         try? FileManager.default.removeItem(at: second)
     }
     let service = ProjectIndexService()
-    let firstSession = try await service.index(root: first)
+    let firstSession = try await indexWorktree(service, root: first)
     let firstIdentity = ContentID.sha256(
         of: Array("pub fn first_only() {}\n".utf8)
     )
@@ -2584,7 +2396,7 @@ func projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() async thr
 
     // Crossing the project boundary replaces the service store; the old
     // project's bytes must not stay retained by the service.
-    let secondSession = try await service.index(root: second)
+    let secondSession = try await indexWorktree(service, root: second)
     #expect(
         !service.retainedContentIDsForDiagnostics.contains(firstIdentity),
         "a closed project's content must leave the service store"
@@ -2621,7 +2433,7 @@ func projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() async thr
     #expect(!secondHits.isEmpty)
 
     // Reopening the first project rebuilds through cache/capture as before.
-    _ = try await service.index(root: first)
+    _ = try await indexWorktree(service, root: first)
     #expect(service.retainedContentIDsForDiagnostics.contains(firstIdentity))
 }
 
@@ -2642,14 +2454,14 @@ func multiLanguageProjectBoundaryAlsoReplacesTheServiceStore() async throws {
     }
     let service = ProjectIndexService()
     let model = AppModel(indexService: service)
-    try await model.openProject(root: first, languages: [.rust, .python])
+    await model.openProject(root: first).value
     #expect(await testWaitUntil("first multi ready") {
         model.snapshotPhase == .fullReady
     })
     let firstIdentity = ContentID.sha256(of: Array("fn m1() {}\n".utf8))
     #expect(service.retainedContentIDsForDiagnostics.contains(firstIdentity))
 
-    try await model.openProject(root: second, languages: [.rust, .python])
+    await model.openProject(root: second).value
     #expect(await testWaitUntil("second multi ready") {
         model.snapshotPhase == .fullReady
             && model.projectRoot?.standardizedFileURL
@@ -2667,14 +2479,14 @@ func sameProjectRevisionsDoNotAccumulateInServiceStore() async throws {
     let root = try temporaryGitProject(["src/lib.rs": "pub fn revision_0() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
     let service = ProjectIndexService()
-    let original = try await service.index(root: root)
+    let original = try await indexWorktree(service, root: root)
     let originalID = ContentID.sha256(of: Array("pub fn revision_0() {}\n".utf8))
     for revision in 1...20 {
         let source = "pub fn revision_\(revision)() {}\n"
         try source.write(to: root.appendingPathComponent("src/lib.rs"), atomically: true, encoding: .utf8)
         let snapshot = try await service.captureSnapshot(root: root, revision: nil)
-        let prepared = try await service.prepareSnapshot(snapshot)
-        _ = try await service.completeSnapshot(prepared)
+        let prepared = try await service.prepareSnapshots(snapshot, root: root, languages: [.rust])
+        _ = try await service.completeSnapshot(prepared[0])
         #expect(!service.retainedContentIDsForDiagnostics.contains(originalID))
         #expect(service.retainedContentIDsForDiagnostics.count == 1)
     }

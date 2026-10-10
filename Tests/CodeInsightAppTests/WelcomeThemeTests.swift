@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Foundation
@@ -15,7 +16,21 @@ private func mirrored<T>(_ name: String, of object: Any, as type: T.Type) -> T? 
 }
 
 private struct WelcomeIndexService: IndexService {
-    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> EngineSession {
         throw CocoaError(.featureUnsupported)
     }
 }

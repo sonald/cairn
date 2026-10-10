@@ -295,7 +295,7 @@ struct PaletteTests {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let model = AppModel(indexService: ProjectIndexService())
-        try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+        await model.openProject(root: root).value
         #expect(await waitUntil {
             model.querySessions.count == 3
         })

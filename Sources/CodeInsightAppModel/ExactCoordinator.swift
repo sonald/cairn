@@ -595,11 +595,7 @@ public final class ExactCoordinator {
                     let snapshot: any Snapshot = if let snapshotFactory {
                         try snapshotFactory(root, revision)
                     } else {
-                        try makeSnapshot(
-                            root: root,
-                            revision: revision,
-                            language: language
-                        )
+                        try makeSnapshot(root: root, revision: revision)
                     }
                     let profile: ExactProfileKey
                     let providerRoot: URL
@@ -1652,18 +1648,11 @@ private func profileRootURL(
     }
 }
 
-private func makeSnapshot(
-    root: URL,
-    revision: String?,
-    language: LanguageID
-) throws -> any Snapshot {
+private func makeSnapshot(root: URL, revision: String?) throws -> any Snapshot {
     if let revision {
         return try CommitSnapshot(repositoryURL: root, revision: revision)
     }
-    return try WorktreeSnapshot(
-        repositoryURL: root,
-        language: language
-    )
+    return try WorktreeSnapshot(repositoryURL: root)
 }
 
 private func supportedTarget(

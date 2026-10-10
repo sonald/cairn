@@ -418,10 +418,7 @@ func suspendedPrepareIsRefusedUntilTheSuspensionLifts() async throws {
     let coordinator = ExactCoordinator(
         providerFactory: { _ in ExactTestProvider(state: state) },
         snapshotFactory: { root, _ in
-            try WorktreeSnapshot(
-                repositoryURL: root,
-                languages: [.rust]
-            )
+            try WorktreeSnapshot(repositoryURL: root)
         },
         sandboxAvailable: { true },
         trustRegistry: TrustRegistry(
@@ -530,10 +527,7 @@ func cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() async throws {
         ExactCoordinator(
             providerFactory: { _ in ExactTestProvider(state: state) },
             snapshotFactory: { root, _ in
-                try WorktreeSnapshot(
-                    repositoryURL: root,
-                    languages: [.rust]
-                )
+                try WorktreeSnapshot(repositoryURL: root)
             },
             sandboxAvailable: { true },
             trustRegistry: TrustRegistry(

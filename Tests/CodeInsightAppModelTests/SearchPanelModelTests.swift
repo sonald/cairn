@@ -662,7 +662,7 @@ private struct SearchPanelFixture {
         b = bPath
         if workspace {
             let model = AppModel(indexService: ProjectIndexService())
-            try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+            await model.openProject(root: root).value
             let querySessions = model.querySessions
             guard querySessions.count == 3 else {
                 throw CocoaError(.featureUnsupported)

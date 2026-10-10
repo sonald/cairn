@@ -532,7 +532,7 @@ func typescriptCommitAndWorktreeIndexAreContentEquivalent() throws {
     let root = fixture.root
 
     let worktree = try ProjectIndexer(parallelism: 1).indexSnapshot(
-        WorktreeSnapshot(repositoryURL: root, language: .typescript),
+        WorktreeSnapshot(repositoryURL: root),
         into: ProjectIndexStore(),
         language: .typescript
     )

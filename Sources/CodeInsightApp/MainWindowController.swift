@@ -905,14 +905,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         lastOpenedProjectLanguages = languages
         pendingRecentProjectRoot = root
         pendingRecentProjectLanguages = languages
-        guard languages.count > 1 else {
-            try? model.openProject(root: root, language: languages[0])
-            render()
-            return
-        }
-        Task {
-            try? await model.openProject(root: root, languages: languages)
-        }
+        model.openProject(root: root)
         render()
     }
 
@@ -966,10 +959,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         referenceForward = []
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let restored = await model.restoreSession(
-                snapshot,
-                overridingLanguages: overridingLanguages
-            )
+            let restored = await model.restoreSession(snapshot)
             guard restored, !Task.isCancelled else { return }
             pendingTabRestore = model.tabStrip.activeTab
             render()
