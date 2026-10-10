@@ -490,7 +490,7 @@ extension CodeInsight {
 
     struct Index: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Index a Rust project in memory."
+            abstract: "Index one language of a project in memory."
         )
 
         @Argument(help: "Project root to index.")
@@ -502,16 +502,23 @@ extension CodeInsight {
         @Flag(name: .long, help: "Persist extracted content indexes.")
         var persist = false
 
+        @Option(
+            name: .long,
+            help: "Language: rust, python, or typescript (default: the one with the most source files)."
+        )
+        var language: String?
+
         @OptionGroup var global: GlobalOptions
 
         func run() throws {
-            let session = try indexProject(path, persist: persist)
+            let language = try resolvedLanguage(language, project: path)
+            let session = try indexProject(path, persist: persist, language: language)
             if global.json {
                 try printJSON(IndexStatsJSON(session.stats))
             } else if stats {
                 printStats(session.stats)
             } else {
-                print("indexed \(session.stats.fileCount) Rust files (\(session.stats.uniqueContentCount) unique contents)")
+                print("indexed \(session.stats.fileCount) \(language) files (\(session.stats.uniqueContentCount) unique contents)")
             }
         }
     }
