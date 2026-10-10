@@ -763,6 +763,71 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
 }
 
 @Test
+func worktreeAndCommitDetectTheSameLanguagesFromSourcesOnly() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    // TypeScript appears only as a declaration file, plain JavaScript, a
+    // rule-excluded source and a symlink; none of them make it a language.
+    let files = [
+        "src/main.rs": "fn main() {}\n",
+        "tools/run.py": "print('run')\n",
+        "web/types.d.ts": "export declare const x: number\n",
+        "web/app.js": "const app = 1\n",
+        "gen/only.ts": "export const generated = 1\n",
+        "tsconfig.json": "{}\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(contents.utf8).write(to: url)
+    }
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("alias.ts").path,
+        withDestinationPath: "web/types.d.ts"
+    )
+    try fixture.git("add", "-A")
+    try fixture.commit("mixed")
+    let rules = ProjectPathRules(lines: ["gen/"])
+
+    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, pathRules: rules)
+    let commit = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD", pathRules: rules)
+
+    #expect(worktree.languages == [.rust, .python])
+    #expect(commit.languages == worktree.languages)
+    #expect(commit.listFiles().contains { $0.path == "alias.ts" && $0.fileMode == .symlink })
+    #expect(try WorktreeSnapshot(repositoryURL: fixture.root).languages == [.rust, .python, .typescript])
+}
+
+@Test
+func directoriesOutsideAGitRepositoryCaptureAsPlainSnapshots() throws {
+    let plain = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightPlainDirectory-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: plain) }
+    try FileManager.default.createDirectory(at: plain.appendingPathComponent("pkg"), withIntermediateDirectories: true)
+    try Data("def f(): pass\n".utf8).write(to: plain.appendingPathComponent("pkg/a.py"))
+    try Data("fn main() {}\n".utf8).write(to: plain.appendingPathComponent("main.rs"))
+
+    let snapshot = try WorktreeSnapshot(repositoryURL: plain)
+    #expect(snapshot.objectFormat == .sha1)
+    #expect(snapshot.projectRootName == plain.lastPathComponent)
+    #expect(snapshot.listFiles().map(\.path) == ["main.rs", "pkg/a.py"])
+    #expect(snapshot.languages == [.rust, .python])
+
+    // A repository subdirectory is not a repository: it is captured on its
+    // own rather than as the enclosing worktree.
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let sub = fixture.root.appendingPathComponent("web", isDirectory: true)
+    try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+    try Data("export const a = 1\n".utf8).write(to: sub.appendingPathComponent("a.ts"))
+    try Data("fn root() {}\n".utf8).write(to: fixture.root.appendingPathComponent("root.rs"))
+
+    let subdirectory = try WorktreeSnapshot(repositoryURL: sub)
+    #expect(subdirectory.listFiles().map(\.path) == ["a.ts"])
+    #expect(subdirectory.languages == [.typescript])
+}
+
+@Test
 func treeWalkKeepsExactlyFilesWhoseAncestorsAndSelfAreIncluded() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightTreeWalk-\(UUID().uuidString)", isDirectory: true)

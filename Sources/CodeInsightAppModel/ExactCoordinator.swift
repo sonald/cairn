@@ -199,6 +199,7 @@ public final class ExactCoordinator {
         let sourceKind: SourceKind
         let projectRootName: String
         let configurationPaths: [String]
+        let languages: [LanguageID]
         private let wrapped: any Snapshot
         private let prefix: String
 
@@ -210,6 +211,7 @@ public final class ExactCoordinator {
             objectFormat = wrapped.objectFormat
             sourceKind = wrapped.sourceKind
             projectRootName = wrapped.projectRootName
+            languages = wrapped.languages
             configurationPaths = wrapped.configurationPaths.filter {
                 $0.hasPrefix("\(prefix)/")
             }.map { String($0.dropFirst(prefix.count + 1)) }

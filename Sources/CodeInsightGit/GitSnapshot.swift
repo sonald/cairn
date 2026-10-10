@@ -84,12 +84,30 @@ public protocol Snapshot: Sendable {
     /// directory or file of each pruned branch, sorted. Built-in skips are
     /// not listed.
     var ruleExcludedPaths: [String] { get }
+    /// Supported languages with at least one source file in this snapshot,
+    /// sorted by `rawValue`.
+    var languages: [LanguageID] { get }
 }
 
 public extension Snapshot {
     var projectRootName: String { "." }
     var configurationPaths: [String] { [] }
     var ruleExcludedPaths: [String] { [] }
+    var languages: [LanguageID] { detectedLanguages(in: listFiles()) }
+}
+
+/// Symlinks and gitlinks are not sources: the worktree walk never captures
+/// them, so a commit must not count them either.
+func detectedLanguages(
+    in files: [(path: String, contentID: ContentID, fileMode: FileMode)]
+) -> [LanguageID] {
+    var found = Set<LanguageID>()
+    for file in files where file.fileMode == .regular || file.fileMode == .lfsPointer {
+        if let mode = LanguageMode.classify(path: file.path) {
+            found.insert(mode.language)
+        }
+    }
+    return LanguageMode.supported.filter(found.contains)
 }
 
 public final class GitRepository {
@@ -163,6 +181,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let commitOID: GitOID
     public let projectRootName: String
     public let configurationPaths: [String]
+    public let languages: [LanguageID]
 
     /// Built-in skipped directories never hide tracked files here; only the
     /// user's rules do, and excluded blobs are never read.
@@ -265,6 +284,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
                 return true
             }
             .sorted()
+        languages = detectedLanguages(in: capturedFiles.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
     }
 
     public func listFiles() -> [(
@@ -310,26 +330,40 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     public let objectFormat: GitObjectFormat
     public let projectRootName: String
     public let configurationPaths: [String]
+    public let languages: [LanguageID]
     // A directory import has no per-file Git status in the M1 model, so all
     // captured worktree files retain the existing .untracked convention.
     public let sourceKind: SourceKind = .untracked
-
-    public convenience init(repositoryURL: URL) throws {
-        try self.init(repositoryURL: repositoryURL, language: .rust)
-    }
 
     public convenience init(repositoryURL: URL, language: LanguageID) throws {
         try self.init(repositoryURL: repositoryURL, languages: [language])
     }
 
-    public init(
+    public convenience init(
         repositoryURL: URL,
         languages: [LanguageID],
         pathRules: ProjectPathRules = ProjectPathRules()
     ) throws {
-        let selectedLanguages = try LanguageMode.normalize(languages: languages)
+        _ = try LanguageMode.normalize(languages: languages)
+        try self.init(repositoryURL: repositoryURL, pathRules: pathRules)
+    }
+
+    /// A directory that is not itself a Git repository (including a
+    /// repository subdirectory: `git_repository_open` does not search
+    /// upward) is captured as a plain directory; other Git errors throw.
+    public init(
+        repositoryURL: URL,
+        pathRules: ProjectPathRules = ProjectPathRules()
+    ) throws {
         let repositoryInfo: (URL, GitObjectFormat) = try LibGit2Executor.sync {
-            let repository = try GitRepository(url: repositoryURL)
+            let repository: GitRepository
+            do {
+                repository = try GitRepository(url: repositoryURL)
+            } catch let GitError.git(operation, code, _)
+                where operation == "git_repository_open" && code == GIT_ENOTFOUND.rawValue
+            {
+                return (repositoryURL.standardizedFileURL, .sha1)
+            }
             guard let workdir = git_repository_workdir(repository.raw) else {
                 throw GitError.notAWorktree(repositoryURL.path)
             }
@@ -365,8 +399,9 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         configurationPaths = captured.keys.filter { entry in
             configurationLanguage(
                 for: URL(fileURLWithPath: entry).lastPathComponent
-            ).map(selectedLanguages.contains) == true
+            ) != nil
         }.sorted()
+        languages = detectedLanguages(in: captured.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
     }
 
     public func listFiles() -> [(

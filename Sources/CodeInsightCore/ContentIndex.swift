@@ -48,6 +48,17 @@ public struct LanguageMode: Codable, Hashable, Sendable {
         }
     }
 
+    /// Languages a project can be analyzed in, in `rawValue` order.
+    public static let supported: [LanguageID] = [.rust, .python, .typescript]
+
+    /// Classifies against every supported language. Only snapshot language
+    /// detection uses this; everything else classifies against the
+    /// project's current set so a language it does not analyze stays a
+    /// plain preview.
+    public static func classify(path: String) -> LanguageMode? {
+        classify(path: path, languages: supported)
+    }
+
     package static func classify(
         path: String,
         languages: [LanguageID]
