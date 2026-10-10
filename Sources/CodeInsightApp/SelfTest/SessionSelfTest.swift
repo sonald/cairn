@@ -197,12 +197,12 @@ extension AppDelegate {
         windowController.openProject(root: root)
         guard waitUntil(timeout: 30, condition: {
             if case .failed = self.model.projectState { return true }
-            if case .ready = self.model.projectState {
+            if self.model.isFullyReadyForSelfTest {
                 return !self.model.commitPicker.isLoading
             }
             return false
         }),
-        case .ready = model.projectState,
+        model.isFullyReadyForSelfTest,
         model.commitPicker.errorMessage == nil
         else {
             Self.finishHistorySelfTest(
@@ -347,9 +347,8 @@ extension AppDelegate {
         windowController.openProject(root: root)
         guard waitUntil(timeout: 30, condition: {
             if case .failed = self.model.projectState { return true }
-            if case .ready = self.model.projectState { return true }
-            return false
-        }), case .ready = model.projectState
+            return self.model.isFullyReadyForSelfTest
+        }), model.isFullyReadyForSelfTest
         else {
             finishPinSelfTest(
                 controller: windowController,
@@ -659,8 +658,7 @@ extension AppDelegate {
         window.orderFrontRegardless()
         controller.openProject(root: root)
         guard waitUntil(timeout: 90, condition: {
-            if case .ready = self.model.projectState { return true }
-            return false
+            self.model.isFullyReadyForSelfTest
         }), model.projectRoot?.standardizedFileURL == root.standardizedFileURL
         else {
             Self.writeJSON(["channel": channel, "passed": false, "error": "project not ready"])
@@ -855,7 +853,7 @@ extension AppDelegate {
 
         enqueueOpenRequest(root: projectA, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
-            self.projectWindows.first?.model.isReadyForMultiWindowSelfTest == true
+            self.projectWindows.first?.model.isFullyReadyForSelfTest == true
         }) else { return fail("project A never became ready") }
 
         // A second request plus an alias of the first, submitted together:
@@ -868,7 +866,7 @@ extension AppDelegate {
         enqueueOpenRequest(root: projectB, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
             self.projectWindows.count == 2
-                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.model.isFullyReadyForSelfTest == true
         }) else { return fail("project B never became ready in a new window") }
 
         guard projectWindows.count == 2 else {
@@ -922,7 +920,7 @@ extension AppDelegate {
         guard waitUntil(timeout: 30, condition: {
             self.projectWindows.count == 2
                 && self.projectWindows.last?.isClosing == false
-                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.model.isFullyReadyForSelfTest == true
                 && self.projectWindows.last?.projectURL?.standardizedFileURL
                     == projectB.standardizedFileURL
                 && self.projectWindows.first === windowA
@@ -935,7 +933,7 @@ extension AppDelegate {
             self.projectWindows.count == 2
         }) else { return fail("closing B did not retire its window") }
         guard projectWindows.first === windowA,
-              windowA.model.isReadyForMultiWindowSelfTest,
+              windowA.model.isFullyReadyForSelfTest,
               windowA.model.tabStrip.tabs.count == 1,
               projectWindows[1].isClosing == false
         else { return fail("A disturbed by B's close") }
@@ -948,7 +946,7 @@ extension AppDelegate {
         enqueueOpenRequest(root: projectC, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
             self.projectWindows.count == 3
-                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.model.isFullyReadyForSelfTest == true
         }) else { return fail("first open of C did not load directly") }
         guard projectWindows.last?.model.projectLanguages == [.rust]
         else { return fail("C did not detect Rust") }
@@ -1124,8 +1122,7 @@ extension AppDelegate {
         NSApplication.shared.activate(ignoringOtherApps: true)
         controller.openProject(root: root)
         guard waitUntil(timeout: 60, condition: {
-            if case .ready = self.model.projectState { return true }
-            return false
+            self.model.isFullyReadyForSelfTest
         }) else {
             Self.writeJSON(["channel": channel, "passed": false, "error": "project not ready"])
             Self.exitSelfTest(channel: channel, status: 1)
@@ -1825,9 +1822,10 @@ private final class OpenSelfTestState {
 }
 
 extension AppModel {
-    /// Ready check shared by the multi-window self-test: fully indexed, so
-    /// a session checkpoint can be written.
-    var isReadyForMultiWindowSelfTest: Bool {
+    /// Ready check shared by the session self-tests: fully indexed. `.ready`
+    /// alone arrives with the cached session, before the full index, so
+    /// clicks, checks of index content and session checkpoints wait for this.
+    var isFullyReadyForSelfTest: Bool {
         guard case .ready = projectState else { return false }
         return snapshotPhase == .fullReady
     }
