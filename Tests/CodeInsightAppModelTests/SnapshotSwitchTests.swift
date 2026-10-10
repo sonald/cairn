@@ -714,6 +714,31 @@ func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
 
 @MainActor
 @Test
+func contextClickBeforeTheFullIndexResolvesWhenItLands() async throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    let root = try snapshotTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    // Nothing is cached, so the cached session has no content for main.rs
+    // until the full index completes.
+    let service = ControlledSnapshotIndexService(snapshots: [:], blockedFull: ["worktree"])
+    let model = AppModel(indexService: service)
+    let offset = UInt32(source[..<source.range(of: "target();")!.lowerBound].utf8.count)
+
+    model.openProject(root: root)
+    #expect(await testWaitUntil("cached session published") {
+        model.snapshotPhase == .cachedReady
+    })
+    model.contextWindow.tokenClicked(file: "main.rs", offset: offset)
+    for _ in 0..<20 { await Task.yield() }
+    await service.releaseFull("worktree")
+
+    #expect(await testWaitUntil("the click resolves against the full index") {
+        model.snapshotPhase == .fullReady && model.contextWindow.candidateCount > 0
+    })
+}
+
+@MainActor
+@Test
 func snapshotSwitchInvalidatesAnOlderContextRequest() async throws {
     let source = "fn target() {}\nfn main() { target(); }"
     let root = try snapshotTemporaryProject(["main.rs": source])

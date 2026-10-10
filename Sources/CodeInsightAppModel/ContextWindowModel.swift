@@ -301,6 +301,10 @@ public final class ContextWindowModel {
     private var root: URL?
     private var contentSource: DocumentLoader.ContentSource?
     private var pendingToken: Token?
+    /// The last lookup that showed nothing. The workspace publishes a
+    /// cached session before the full one; a click the partial index could
+    /// not answer is looked up again when the fuller session arrives.
+    private var unansweredToken: (token: Token, trigger: Trigger)?
     private var locatedToken: LocatedToken?
     private var displayedToken: Token?
     private var documents: [DocumentKey: ReaderDocument] = [:]
@@ -654,6 +658,11 @@ public final class ContextWindowModel {
                 generation: UInt64
             )?
         }
+        let previousSession = if case let .ready(session, _) = projectState {
+            session
+        } else {
+            nil as EngineSession?
+        }
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
             requestID &+= 1
@@ -672,8 +681,9 @@ public final class ContextWindowModel {
             cancelExactUpgrade()
             locatedToken = nil
             displayedToken = nil
+            unansweredToken = nil
             stage = .indexBuilding
-        case let .ready(_, context):
+        case let .ready(session, context):
             if let previousIdentity,
                previousIdentity.snapshotID != context.snapshotID
                 || previousIdentity.analysisProfileID != context.analysisProfileID
@@ -682,6 +692,7 @@ public final class ContextWindowModel {
                 cancelExactUpgrade()
                 locatedToken = nil
                 displayedToken = nil
+                unansweredToken = nil
                 stage = .idle
             } else if let previousIdentity,
                       previousIdentity.generation != context.generation
@@ -689,6 +700,18 @@ public final class ContextWindowModel {
                 requestID &+= 1
                 cancelExactUpgrade()
                 locatedToken = nil
+                unansweredToken = nil
+            } else if let previousSession, previousSession !== session,
+                      let unanswered = unansweredToken,
+                      mode == .follow, tracking == .symbol
+            {
+                // Same snapshot and profile, more of the index (cached →
+                // full): ask again instead of keeping the empty answer.
+                unansweredToken = nil
+                locatedToken = nil
+                Task { [weak self] in
+                    _ = await self?.lookup(unanswered.token, trigger: unanswered.trigger)
+                }
             }
             if let pendingToken {
                 self.pendingToken = nil
@@ -702,6 +725,7 @@ public final class ContextWindowModel {
             requestID &+= 1
             cancelExactUpgrade()
             pendingToken = nil
+            unansweredToken = nil
             locatedToken = nil
             displayedToken = nil
             stage = .idle
@@ -941,6 +965,7 @@ public final class ContextWindowModel {
             pendingDwellTask?.cancel()
             pendingDwellTask = nil
             dwellArmedToken = nil
+            unansweredToken = nil
             locatedToken = nil
             stage = .idle
             isShowingPreviousToken = false
@@ -958,6 +983,7 @@ public final class ContextWindowModel {
             pendingDwellTask = nil
             dwellArmedToken = nil
             isShowingPreviousToken = true
+            unansweredToken = (token, trigger)
             return nil
         }
         if let locatedToken,
@@ -985,10 +1011,12 @@ public final class ContextWindowModel {
             guard !candidates.isEmpty else {
                 stage = .idle
                 isShowingPreviousToken = false
+                unansweredToken = (token, trigger)
                 return nil
             }
             stage = .candidates(candidates, selected: 0)
             displayedToken = token
+            unansweredToken = nil
             isShowingPreviousToken = false
             var wantsTypeDefinition = await applyTypeHop(
                 firstCandidate: candidates[0],
@@ -1036,6 +1064,7 @@ public final class ContextWindowModel {
             locatedToken = nil
             stage = .idle
             isShowingPreviousToken = false
+            unansweredToken = (token, trigger)
             return nil
         }
     }
