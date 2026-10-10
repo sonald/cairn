@@ -54,7 +54,7 @@ func welcomeMarksTrustedRecentsAndShowsWhenEachWasLastRead() async throws {
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = RecentProjectsStore(defaults: defaults)
-    for url in [fresh, read, trusted] { store.record(url, language: .rust) }
+    for url in [fresh, read, trusted] { store.record(url) }
 
     let registry = TrustRegistry(fileURL: temp.appendingPathComponent("trust.json"))
     try await registry.grant(trusted, mode: .trusted)

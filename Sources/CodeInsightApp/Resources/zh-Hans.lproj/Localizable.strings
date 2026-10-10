@@ -39,10 +39,8 @@
 "app.menu.next.tab" = "下一个标签页";
 "app.menu.open.in.new.tab" = "在新标签页中打开";
 "app.menu.open.project" = "打开项目…";
-"app.menu.open.python.project" = "打开 Python 项目…";
 "app.menu.open.recent" = "最近打开";
 "app.menu.open.symbol" = "打开符号…";
-"app.menu.open.typescript.project" = "打开 TypeScript 项目…";
 "app.menu.overview" = "概览";
 "app.menu.paste" = "粘贴";
 "app.menu.preset" = "布局预设";
@@ -78,8 +76,6 @@
 "app.open.action" = "打开";
 "app.open.failed" = "无法打开项目";
 "app.open.failureDetail" = "%@：%@";
-"app.open.languageDetail" = "为 %@ 选择 1 至 3 种编程语言。";
-"app.open.languages" = "选择语言";
 "app.open.notFolder" = "不存在或不是文件夹";
 "app.open.notLocal" = "不是本地文件夹";
 "app.recent.clear" = "清除菜单";
@@ -212,6 +208,7 @@
 "main.previous.hunk" = "上一处差异";
 "main.previous.match" = "上一个匹配";
 "main.profile" = "分析配置";
+"main.profile.detected" = "%1$@ · %2$lld 个源码文件 · 单元 %3$@";
 "main.project" = "项目";
 "main.provider" = "分析服务：%@";
 "main.provider.information.is.not.available.yet" = "分析服务信息尚不可用。";

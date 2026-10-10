@@ -352,8 +352,9 @@ package enum SessionCodec {
               !snapshot.projectRoot.isEmpty,
               snapshot.projectRoot.hasPrefix("/"),
               byteCount(snapshot.projectRoot) <= 4_096,
-              (try? LanguageMode.normalize(languages: snapshot.languages))
-                  == snapshot.languages,
+              !snapshot.languages.isEmpty,
+              // Sorted, unique and supported: what detection produces.
+              LanguageMode.supported.filter(snapshot.languages.contains) == snapshot.languages,
               snapshot.tabs.count <= maximumTabCount,
               snapshot.activeTabOrdinal.map({ $0 >= 0 }) ?? true,
               PanelPresetModel(rawValue: snapshot.panelPreset) != nil,

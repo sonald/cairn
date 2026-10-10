@@ -133,8 +133,6 @@ extension CommandID {
     public static let fileOpenProject = CommandID(rawValue: "file.openProject")
     public static let fileNewWindow = CommandID(rawValue: "file.newWindow")
     public static let fileQuickOpen = CommandID(rawValue: "file.quickOpen")
-    public static let fileOpenPythonProject = CommandID(rawValue: "file.openPythonProject")
-    public static let fileOpenTypeScriptProject = CommandID(rawValue: "file.openTypeScriptProject")
     public static let fileOpenInNewTab = CommandID(rawValue: "file.openInNewTab")
     public static let fileCloseTab = CommandID(rawValue: "file.closeTab")
     public static let fileCloseWindow = CommandID(rawValue: "file.closeWindow")
@@ -295,8 +293,6 @@ public extension KeyBindingScheme {
                 [keyboard([.command], .character("n"))]),
             def(.fileQuickOpen, .file, "app.menu.quick.open",
                 [keyboard([.command], .character("p"))]),
-            def(.fileOpenPythonProject, .file, "app.menu.open.python.project", []),
-            def(.fileOpenTypeScriptProject, .file, "app.menu.open.typescript.project", []),
             def(.fileOpenInNewTab, .file, "app.menu.open.in.new.tab", [
                 keyboard([.command, .shift], .special(.return)),
             ]),

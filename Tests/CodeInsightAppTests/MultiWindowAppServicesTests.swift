@@ -242,7 +242,7 @@ func closedWindowIgnoresLateTrustSheetConfirmation() async throws {
     let controller = try #require(delegate.selfTestProjectWindow(0))
     let window = try #require(controller.window)
     defer { controller.close(); coordinator.shutdown() }
-    delegate.selfTestEnqueueOpenRequest(root: project, languages: [.rust])
+    delegate.selfTestEnqueueOpenRequest(root: project)
     try #require(await appServicesEventually {
         if case .ready = model.projectState { return !delegate.selfTestIsDrainingOpenRequests }
         return false

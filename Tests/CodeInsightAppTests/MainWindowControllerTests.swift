@@ -385,24 +385,19 @@ func commitPickerMarksOnlyCompletelyMaterializedCommits() async throws {
 
 @MainActor
 @Test
-func mixedOpenFailureDoesNotRecordRecentPath() async throws {
+func openFailureDoesNotRecordRecentPath() async throws {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }
     let root = URL(
-        fileURLWithPath: "/projects/mixed-failure",
+        fileURLWithPath: "/projects/open-failure",
         isDirectory: true
     )
 
-    fixture.controller.openProject(
-        root: root,
-        languages: [.typescript, .rust, .python]
-    )
+    fixture.controller.openProject(root: root)
     try #require(await mainWindowWaitUntil(
         mainWindowProjectStateFailed(fixture.model)
     ))
     #expect(fixture.store.paths == [])
-    #expect(fixture.controller.pendingRecentProjectLanguage == .rust)
-    #expect(fixture.model.projectLanguages == [.rust, .python, .typescript])
 }
 
 @MainActor
@@ -523,7 +518,7 @@ func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws
     defer { controller.close() }
 
     // Open, build up a tab strip, and save the reading session.
-    controller.openProject(root: root, language: .rust)
+    controller.openProject(root: root)
     try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
     controller.openFileInNewTabForSelfTest(root.appendingPathComponent("main.rs"))
     controller.openFileInNewTabForSelfTest(root.appendingPathComponent("other.rs"))
@@ -533,7 +528,7 @@ func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws
 
     // Reopening the project with a saved snapshot restores the tabs
     // instead of opening a fresh empty workspace.
-    controller.openRecentProject(root, forcingReopen: true)
+    controller.openProject(root: root, forcingReopen: true)
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady
             && model.tabStrip.tabs.count == 2
@@ -574,7 +569,7 @@ func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
     )
     defer { controller.close() }
 
-    controller.openProject(root: root, language: .rust)
+    controller.openProject(root: root)
     try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
     controller.openFileInNewTabForSelfTest(root.appendingPathComponent("main.rs"))
     controller.openFileInNewTabForSelfTest(root.appendingPathComponent("other.rs"))
@@ -583,7 +578,7 @@ func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
 
     // Re-selecting the project that is already being read neither resets
     // the workspace nor disturbs the tab strip.
-    controller.openRecentProject(root)
+    controller.openProject(root: root)
     #expect(model.generation == generationBefore)
     #expect(model.tabStrip.tabs.count == 2)
 }
@@ -1064,108 +1059,6 @@ func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws
         #expect(scroll.contentView.bounds.contains(sourceRect(clicked)),
                 "Changing Context must keep the clicked source character visible")
     }
-}
-
-@MainActor
-@Test
-func languagePreselectionMatchesContentAndStoredPreference() throws {
-    var roots: [URL] = []
-    defer {
-        for root in roots { try? FileManager.default.removeItem(at: root) }
-    }
-    func makeProject(_ files: [String: String]) throws -> URL {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CodeInsightPreselect-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(
-            at: root,
-            withIntermediateDirectories: true
-        )
-        for (path, contents) in files {
-            let file = root.appendingPathComponent(path)
-            try FileManager.default.createDirectory(
-                at: file.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try contents.write(to: file, atomically: true, encoding: .utf8)
-        }
-        return root
-    }
-
-    let rust = try makeProject(["src/lib.rs": "fn a() {}\n"])
-    roots.append(rust)
-    #expect(
-        AppDelegate.preselectedLanguages(for: rust, storedLanguage: nil)
-            .languages == [.rust]
-    )
-    let python = try makeProject(["app/main.py": "def f():\n    pass\n"])
-    roots.append(python)
-    #expect(
-        AppDelegate.preselectedLanguages(for: python, storedLanguage: nil)
-            .languages == [.python]
-    )
-    let tsx = try makeProject(["ui/row.tsx": "export const A = 1\n"])
-    roots.append(tsx)
-    #expect(
-        AppDelegate.preselectedLanguages(for: tsx, storedLanguage: nil)
-            .languages == [.typescript]
-    )
-    let mixed = try makeProject([
-        "src/lib.rs": "fn a() {}\n",
-        "app/main.py": "pass\n",
-        "ui/row.tsx": "export const A = 1\n",
-    ])
-    roots.append(mixed)
-    #expect(
-        AppDelegate.preselectedLanguages(for: mixed, storedLanguage: nil)
-            .languages == [.rust, .python, .typescript]
-    )
-    // Plain JS/JSX does not select TypeScript.
-    let jsOnly = try makeProject(["app.js": "console.log(1)\n"])
-    roots.append(jsOnly)
-    #expect(
-        AppDelegate.preselectedLanguages(for: jsOnly, storedLanguage: nil)
-            .languages == []
-    )
-    // Skipped directories are not probed.
-    let vendored = try makeProject([
-        "node_modules/pkg/index.js": "x\n",
-        "dist/bundle.js": "x\n",
-    ])
-    roots.append(vendored)
-    #expect(
-        AppDelegate.preselectedLanguages(for: vendored, storedLanguage: nil)
-            .languages == []
-    )
-    // A stored preference wins over content, and the fallback never
-    // masquerades as one.
-    #expect(
-        AppDelegate.preselectedLanguages(
-            for: rust,
-            storedLanguage: .python
-        ).languages == [.python]
-    )
-    // Huge trees terminate deterministically.
-    var many: [String: String] = [:]
-    for index in 0..<6000 {
-        many["deep/dir\(index)/file\(index).txt"] = "x"
-    }
-    let huge = try makeProject(many)
-    roots.append(huge)
-    let result = AppDelegate.preselectedLanguages(
-        for: huge,
-        storedLanguage: nil
-    )
-    #expect(result.probeCapped)
-    #expect(result.languages.isEmpty)
-}
-
-@MainActor
-@Test
-func recentsRecordOnlyLookupNeverFallsBackToRust() {
-    let store = RecentProjectsStore()
-    let path = "/tmp/codeinsight-unrecorded-\(UUID().uuidString)"
-    #expect(store.storedLanguagesIfRecorded(for: path) == nil)
-    #expect(store.languages(for: path) == [.rust])
 }
 
 @MainActor

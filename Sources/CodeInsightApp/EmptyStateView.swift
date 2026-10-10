@@ -19,7 +19,6 @@ final class EmptyStateView: NSView {
     private let columns = NSStackView()
     private var recentPaths: [String] = []
     /// Short language labels (RS, PY, TS…) per recent path; empty when unknown.
-    private var recentLanguages: [String: String] = [:]
     private var recentTrusted: Set<String> = []
     private var recentLastRead: [String: Date] = [:]
     private var isFailure = false
@@ -144,18 +143,9 @@ final class EmptyStateView: NSView {
 
     var selfTestTaglineColor: NSColor? { taglineLabel.textColor }
     var selfTestColumnsAreSideBySide: Bool { columns.orientation == .horizontal }
-    var selfTestRecentLanguageLabels: [String] {
-        recentStack.arrangedSubviews.compactMap { ($0 as? HoverButton)?.languageLabel }
-    }
     var selfTestRecentFrames: (actions: NSRect, recents: NSRect) {
         (columns.arrangedSubviews.first.map { $0.convert($0.bounds, to: nil) } ?? .zero,
          recentStack.convert(recentStack.bounds, to: nil))
-    }
-
-    func updateRecentLanguages(_ languages: [String: String]) {
-        guard languages != recentLanguages else { return }
-        recentLanguages = languages
-        rebuildRecents()
     }
 
     /// Trusted repositories and each project's last reading time, when known.
@@ -328,21 +318,16 @@ final class EmptyStateView: NSView {
                 theme: theme
             )
             button.hoverColor = theme.mossSoftColor
-            button.languageLabel = recentLanguages[path]
             button.toolTip = path
             button.setAccessibilityLabel(localizedFormat("welcome.openRecent", URL(fileURLWithPath: path).lastPathComponent))
             recentStack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: recentStack.widthAnchor).isActive = true
             button.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
-            if let label = recentLanguages[path] {
-                button.image = Self.languageBadge(label, theme: theme)
-            } else {
-                Task { @MainActor [weak button] in
-                    let image = NSWorkspace.shared.icon(forFile: path)
-                    image.size = NSSize(width: 28, height: 28)
-                    button?.image = image
-                }
+            Task { @MainActor [weak button] in
+                let image = NSWorkspace.shared.icon(forFile: path)
+                image.size = NSSize(width: 28, height: 28)
+                button?.image = image
             }
         }
     }
@@ -367,25 +352,6 @@ final class EmptyStateView: NSView {
         layer?.borderWidth = highlighted ? 2 : 0
         layer?.borderColor = highlighted ? theme.accentColor.cgColor : nil
         layer?.cornerRadius = 14
-    }
-
-    /// A 28pt rounded block with the language's short label, like a file tag.
-    private static func languageBadge(_ label: String, theme: ReaderTheme) -> NSImage {
-        let size = NSSize(width: 28, height: 28)
-        let fill = theme.chipBackgroundColor
-        let ink = theme.warningColor
-        return NSImage(size: size, flipped: false) { rect in
-            fill.setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
-            let text = NSAttributedString(string: label, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
-                .foregroundColor: ink,
-            ])
-            let textSize = text.size()
-            text.draw(at: NSPoint(x: (rect.width - textSize.width) / 2,
-                                  y: (rect.height - textSize.height) / 2))
-            return true
-        }
     }
 
     private static func recentTitle(
@@ -439,7 +405,6 @@ final class EmptyStateView: NSView {
 private final class HoverButton: NSButton {
     private var hoverTrackingArea: NSTrackingArea?
     var hoverColor: NSColor = .clear
-    var languageLabel: String?
 
     override func updateTrackingAreas() {
         if let hoverTrackingArea {

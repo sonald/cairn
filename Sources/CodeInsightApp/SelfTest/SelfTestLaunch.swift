@@ -565,37 +565,6 @@ extension AppDelegate {
         windowController.applyReaderSettings(themeSettings)
         let autoChromeFollowsSystem = windowController.window?.appearance == nil
 
-        let languageAlert = makeLanguageSelectionAlert(for: URL(
-            fileURLWithPath: "/tmp/codeinsight-language-picker-self-test",
-            isDirectory: true
-        ))
-        languageAlert.window.contentView?.layoutSubtreeIfNeeded()
-        languageAlert.window.displayIfNeeded()
-        let languageStack = languageAlert.accessoryView as? NSStackView
-        let languageCheckboxes = languageStack?.arrangedSubviews
-            .compactMap { $0 as? NSButton } ?? []
-        let languageFrames = languageCheckboxes.map(\.frame)
-        let languageLabelsFit = languageCheckboxes.count == 3
-            && languageCheckboxes.allSatisfy {
-                $0.frame.width >= $0.fittingSize.width - 1
-                    && $0.frame.height >= $0.fittingSize.height - 1
-            }
-        let languageFramesDoNotOverlap = languageFrames.count == 3
-            && languageFrames.allSatisfy { !$0.isEmpty }
-            && zip(languageFrames, languageFrames.dropFirst()).allSatisfy {
-                left, right in !left.intersects(right)
-            }
-        let languageOrderMatches = languageCheckboxes.map(\.title)
-            == ["Rust", "Python", "TypeScript"]
-        let languageOpenButton = languageAlert.buttons.first
-        let languageOpenDisabledAtZero = languageOpenButton?.isEnabled == false
-        languageCheckboxes.first?.performClick(nil)
-        let languageOpenEnabledAtOne = languageOpenButton?.isEnabled == true
-        languageCheckboxes.dropFirst().forEach { $0.performClick(nil) }
-        let languageOpenEnabledAtThree = languageOpenButton?.isEnabled == true
-        languageCheckboxes.forEach { $0.performClick(nil) }
-        let languageOpenDisabledAfterClearing = languageOpenButton?.isEnabled == false
-
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
@@ -652,37 +621,17 @@ extension AppDelegate {
             "lightChromeMatchesTheme": lightChromeMatchesTheme,
             "siClassicChromeStaysLight": siClassicChromeStaysLight,
             "autoChromeFollowsSystem": autoChromeFollowsSystem,
-            "languagePickerLabelsFit": languageLabelsFit,
-            "languagePickerFramesDoNotOverlap": languageFramesDoNotOverlap,
-            "languagePickerOrderMatches": languageOrderMatches,
-            "languagePickerOpenGate": languageOpenDisabledAtZero
-                && languageOpenEnabledAtOne
-                && languageOpenEnabledAtThree
-                && languageOpenDisabledAfterClearing,
             "quickOpenUsesCommandP":
                 fileMenu?.item(withTitle: "Quick Open…")?.keyEquivalent == "p"
                 && fileMenu?.item(withTitle: "Quick Open…")?
                     .keyEquivalentModifierMask == .command,
-            "fileMenuHasRustPythonAndTypeScriptOpen":
-                fileMenu?.item(withTitle: "Open Project…") != nil
-                && fileMenu?.item(withTitle: "Open Python Project…") != nil
-                && fileMenu?.item(withTitle: "Open TypeScript Project…") != nil,
-            "fileMenuKeepsOpenFirstAndMixedAfterTypeScript":
+            "fileMenuHasOneOpenProjectFirst":
                 fileMenu?.item(withTitle: "Open Project…") == fileMenu?.items.first
-                && fileMenu?.items.compactMap(\.title).firstIndex(
-                    of: "Open TypeScript Project…"
-                ) == fileMenu?.items.compactMap(\.title).firstIndex(
-                    of: "Open Python Project…"
-                ).map { $0 + 1 },
-            "paletteCollectsRustPythonAndTypeScriptOpen":
+                && fileMenu?.items.contains { $0.title.hasPrefix("Open Python") } == false
+                && fileMenu?.items.contains { $0.title.hasPrefix("Open TypeScript") } == false,
+            "paletteCollectsOpenProject":
                 paletteCommands.contains {
                     $0.title == "File ▸ Open Project…"
-                }
-                && paletteCommands.contains {
-                    $0.title == "File ▸ Open Python Project…"
-                }
-                && paletteCommands.contains {
-                    $0.title == "File ▸ Open TypeScript Project…"
                 },
             "commandPaletteUsesShiftCommandP":
                 goMenu?.item(withTitle: "Command Palette…")?

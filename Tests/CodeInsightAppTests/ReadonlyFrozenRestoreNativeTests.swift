@@ -45,7 +45,7 @@ func readonlyFrozenReadingSetRestoresAndDrawsCapturedSourceAfterWindowClose() as
     let original = MainWindowController(model: originalModel, settings: ReaderSettings(), offscreen: true,
         recentProjectsStore: recents, layoutDefaults: defaults)
     defer { original.close() }
-    original.openProject(root: project, language: .rust)
+    original.openProject(root: project)
     try #require(await readonlyHostWait { originalModel.snapshotPhase == .fullReady })
     originalModel.tabStrip.openReadingSet(title: "Frozen native restore", excerpts: [excerpt])
     original.renderForSelfTest()
@@ -66,7 +66,7 @@ func readonlyFrozenReadingSetRestoresAndDrawsCapturedSourceAfterWindowClose() as
     let restored = MainWindowController(model: restoredModel, settings: ReaderSettings(), offscreen: true,
         recentProjectsStore: recents, layoutDefaults: defaults)
     defer { restored.close() }
-    restored.openProject(root: project, language: .rust)
+    restored.openProject(root: project)
     try #require(await readonlyHostWait {
         guard restoredModel.snapshotPhase == .fullReady, !restoredModel.isRestoringSession,
               case .readingSet = restoredModel.tabStrip.activeTab?.content else { return false }

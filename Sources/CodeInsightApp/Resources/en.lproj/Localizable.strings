@@ -39,10 +39,8 @@
 "app.menu.next.tab" = "Next Tab";
 "app.menu.open.in.new.tab" = "Open in New Tab";
 "app.menu.open.project" = "Open Project…";
-"app.menu.open.python.project" = "Open Python Project…";
 "app.menu.open.recent" = "Open Recent";
 "app.menu.open.symbol" = "Open Symbol…";
-"app.menu.open.typescript.project" = "Open TypeScript Project…";
 "app.menu.overview" = "Overview";
 "app.menu.paste" = "Paste";
 "app.menu.preset" = "Preset";
@@ -78,8 +76,6 @@
 "app.open.action" = "Open";
 "app.open.failed" = "Cannot Open Project";
 "app.open.failureDetail" = "%@ %@";
-"app.open.languageDetail" = "Choose 1 to 3 languages for %@.";
-"app.open.languages" = "Choose Languages";
 "app.open.notFolder" = "does not exist or is not a folder";
 "app.open.notLocal" = "not a local folder";
 "app.recent.clear" = "Clear Menu";
@@ -212,6 +208,7 @@
 "main.previous.hunk" = "Previous hunk";
 "main.previous.match" = "Previous match";
 "main.profile" = "Profile";
+"main.profile.detected" = "%1$@ · %2$lld source files · unit %3$@";
 "main.project" = "Project";
 "main.provider" = "Provider: %@";
 "main.provider.information.is.not.available.yet" = "Provider information is not available yet.";

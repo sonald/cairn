@@ -186,6 +186,7 @@ func keyBindingStoreDropsUnknownCommandsAndKeepsTheRest() throws {
         """
         {"file.quickOpen":["command+b"],
          "unknown.command":["command+z"],
+         "file.openPythonProject":["command+shift+y"],
          "view.wrapLines":["not a chord","option+z"],
          "reader.gesture.definition":["command+shift+click"]}
         """,
@@ -193,8 +194,10 @@ func keyBindingStoreDropsUnknownCommandsAndKeepsTheRest() throws {
     )
 
     let loaded = store.load()
-    // Unknown command IDs are dropped entirely.
+    // Unknown command IDs, including ones a release removed, are dropped
+    // entirely.
     #expect(loaded[CommandID(rawValue: "unknown.command")] == nil)
+    #expect(loaded[CommandID(rawValue: "file.openPythonProject")] == nil)
     // Unparseable strings are dropped; the rest of the command's bindings
     // survive.
     #expect(

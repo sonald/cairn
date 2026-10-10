@@ -265,7 +265,7 @@ extension AppDelegate {
         }
 
         let projectStartedAt = ContinuousClock.now
-        controller.openProject(root: root, language: .rust)
+        controller.openProject(root: root)
         let projectIsReady: () -> Bool = {
             if case .ready = self.model.projectState { return true }
             return false
@@ -978,7 +978,7 @@ extension AppDelegate {
             finish("HEAD~1 unavailable")
         }
 
-        controller.openProject(root: root, language: .python)
+        controller.openProject(root: root)
         guard await pythonWait(timeout: 120, {
             if case .failed = pythonModel.projectState { return true }
             if case .ready = pythonModel.projectState {
@@ -1421,8 +1421,7 @@ extension AppDelegate {
         else {
             finish("session checkpoint language not Python")
         }
-        pythonRecentStore.record(root, language: .python)
-        controller.openRecentProject(root, forcingReopen: true)
+        controller.openProject(root: root, forcingReopen: true)
         guard await pythonWait(timeout: 120, {
             pythonModel.snapshotPhase == .fullReady
                 && pythonReady()
@@ -1541,7 +1540,7 @@ extension AppDelegate {
             finish("HEAD~1 unavailable")
         }
 
-        controller.openProject(root: root, language: .typescript)
+        controller.openProject(root: root)
         guard await tsWait(timeout: 180, {
             if case .failed = tsModel.projectState { return true }
             if case .ready = tsModel.projectState {
@@ -2000,9 +1999,8 @@ extension AppDelegate {
         else {
             finish("session checkpoint language not TypeScript")
         }
-        tsRecentStore.record(root, language: .typescript)
         var recentReopenTypeScript = false
-        controller.openRecentProject(root, forcingReopen: true)
+        controller.openProject(root: root, forcingReopen: true)
         guard await tsWait(timeout: 180, {
             tsModel.snapshotPhase == .fullReady
                 && tsModel.exactCoordinator.readiness == .ready
@@ -2204,10 +2202,7 @@ extension AppDelegate {
         guard let controller = windowController else {
             finish("window unavailable")
         }
-        controller.openProject(
-            root: root,
-            languages: [.rust, .python, .typescript]
-        )
+        controller.openProject(root: root)
 
         var sawFirstPaint = false
         let deadline = Date(timeIntervalSinceNow: 30)
@@ -2882,11 +2877,9 @@ extension AppDelegate {
         else {
             finish("checkpoint languages/revision mismatch")
         }
-        let savedLangs = savedSnapshot.languages
         let recentStore = recentProjectsStore
-        recentStore.record(root, languages: savedLangs)
         model.exactCoordinator.shutdown()
-        controller.openRecentProject(root, forcingReopen: true)
+        controller.openProject(root: root, forcingReopen: true)
         let reopenDeadline = Date(timeIntervalSinceNow: 30)
         var reopenOK = false
         while Date() < reopenDeadline {

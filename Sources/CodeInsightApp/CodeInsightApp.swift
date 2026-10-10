@@ -269,14 +269,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     func selfTestEnqueueOpenRequest(
         root: URL,
-        languages: [LanguageID]?,
         sourceWindow: MainWindowController? = nil
     ) {
-        enqueueOpenRequest(
-            root: root,
-            languages: languages,
-            sourceWindow: sourceWindow
-        )
+        enqueueOpenRequest(root: root, sourceWindow: sourceWindow)
     }
 
     /// Decision offered for a failed final save during quit.
@@ -439,10 +434,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             recordsRecentProjects: !offscreen,
             frameAutosaveName: frameAutosaveName,
             onChooseProject: { [weak self] in
-                self?.chooseLanguagesProject(nil)
+                self?.openProject(nil)
             },
-            onChooseProjectLanguage: { [weak self] root, source in
-                self?.chooseLanguagesProject(root, from: source)
+            onOpenProject: { [weak self] root, source in
+                self?.enqueueOpenRequest(root: root, sourceWindow: source)
             },
             onShowSettings: { [weak self] in self?.showSettings(nil) }
         )
@@ -660,67 +655,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     @objc private func openProject(_ sender: Any?) {
-        chooseLanguagesProject(nil)
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = localized("app.open.action")
+        guard panel.runModal() == .OK, let root = panel.url else { return }
+        enqueueOpenRequest(root: root, sourceWindow: projectCommandTarget())
     }
 
     @objc private func clearReadingSession(_ sender: Any?) {
         projectCommandTarget()?.confirmClearReadingSession()
     }
 
-    @objc private func openPythonProject(_ sender: Any?) {
-        chooseProject(language: .python)
-    }
-
-    @objc private func openTypeScriptProject(_ sender: Any?) {
-        chooseProject(language: .typescript)
-    }
-
-    private func chooseProject(language: LanguageID) {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = localized("app.open.action")
-        if panel.runModal() == .OK, let root = panel.url {
-            enqueueOpenRequest(
-                root: root,
-                languages: [language],
-                sourceWindow: projectCommandTarget()
-            )
-        }
-    }
-
     @objc private func openRecentProject(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
         enqueueOpenRequest(
             root: URL(fileURLWithPath: path, isDirectory: true),
-            languages: nil,
             sourceWindow: projectCommandTarget()
-        )
-    }
-
-    private func chooseLanguagesProject(
-        _ root: URL?,
-        from sourceWindow: MainWindowController? = nil
-    ) {
-        let selectedRoot: URL
-        if let root {
-            selectedRoot = root
-        } else {
-            let panel = NSOpenPanel()
-            panel.canChooseDirectories = true
-            panel.canChooseFiles = false
-            panel.allowsMultipleSelection = false
-            panel.prompt = localized("app.open.action")
-            guard panel.runModal() == .OK, let panelRoot = panel.url else {
-                return
-            }
-            selectedRoot = panelRoot
-        }
-        enqueueOpenRequest(
-            root: selectedRoot,
-            languages: nil,
-            sourceWindow: sourceWindow ?? projectCommandTarget()
         )
     }
 
@@ -728,25 +680,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     private struct PendingOpenRequest {
         let root: URL
-        /// Explicit language choice (Open Python / Open TypeScript); nil
-        /// means saved session / Recents / picker decide.
-        let languages: [LanguageID]?
         let sourceWindow: MainWindowController?
     }
 
-    func enqueueOpenRequest(
-        root: URL,
-        languages: [LanguageID]?,
-        sourceWindow: MainWindowController?
-    ) {
+    func enqueueOpenRequest(root: URL, sourceWindow: MainWindowController?) {
         pendingOpenURLs.append(root)
-        requestContexts.append(
-            PendingOpenRequest(
-                root: root,
-                languages: languages,
-                sourceWindow: sourceWindow
-            )
-        )
+        requestContexts.append(PendingOpenRequest(root: root, sourceWindow: sourceWindow))
         drainOpenRequests()
     }
 
@@ -761,11 +700,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }) {
             return requestContexts.remove(at: index)
         }
-        return PendingOpenRequest(root: root, languages: nil, sourceWindow: nil)
+        return PendingOpenRequest(root: root, sourceWindow: nil)
     }
 
     /// Serial open pipeline: validates, dedupes, and routes one request at
-    /// a time so language pickers queue instead of interleaving (§3.3).
+    /// a time (§3.3).
     private func drainOpenRequests() {
         guard !isDrainingOpenRequests else { return }
         guard !pendingOpenURLs.isEmpty else {
@@ -890,14 +829,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 await existing.waitForCloseCompletion()
             } else {
                 activateWindow(existing)
-                // An explicit language choice on an already-open project
-                // runs the existing confirm-and-reload flow in its window.
-                if let languages = context.languages,
-                   existing.model.projectRoot != nil,
-                   existing.model.projectLanguages != languages
-                {
-                    existing.openProject(root: identity, languages: languages)
-                }
                 return
             }
         }
@@ -905,22 +836,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         // Pick the destination window: source window when blank, then the
         // active blank window, then any blank window, then a new window.
         let destination: MainWindowController
-        let autoCreated: Bool
         if let source = context.sourceWindow, source.isUnclaimedForReuse {
             destination = source
-            autoCreated = false
         } else if let active = lastActiveProjectWindow,
                   active.isUnclaimedForReuse,
                   active !== context.sourceWindow
         {
             destination = active
-            autoCreated = false
         } else if let blank = projectWindows.first(where: \.isUnclaimedForReuse) {
             destination = blank
-            autoCreated = false
         } else if let created = createBlankWindow() {
             destination = created
-            autoCreated = true
         } else {
             return
         }
@@ -930,42 +856,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         destination.adoptProjectFrameAutosave(for: identity)
         refreshWindowTitles()
 
-        // Language resolution order (§3.3): an explicit menu choice wins
-        // over everything; then the saved session; then a Recents record;
-        // the picker only runs for first opens.
-        if let explicit = context.languages {
-            destination.openProject(root: identity, languages: explicit)
-            activateWindow(destination)
-            return
-        }
-        let windowModel = destination.model
-        let load = windowModel.loadSessionSnapshot(forProject: identity)
-        if let snapshot = load.snapshot {
-            destination.restoreSession(snapshot)
-            activateWindow(destination)
-            return
-        }
-        if recentProjectsStore.storedLanguagesIfRecorded(
-            for: identity.path
-        ) != nil {
-            destination.openRecentProject(identity)
-            activateWindow(destination)
-            return
-        }
-        let picked = await presentLanguageSelection(for: identity)
-        guard !isTerminating, let picked else {
-            // Cancelled (or terminating): this request's claim is released
-            // first so a repeat request starts over. Only the window this
-            // request created goes away; a user-created blank window stays
-            // (§3.3).
-            destination.releaseProjectClaim()
-            refreshWindowTitles()
-            if autoCreated, destination.isUnclaimedForReuse {
-                destination.window?.performClose(nil)
-            }
-            return
-        }
-        destination.openProject(root: identity, languages: picked)
+        // Restores a saved reading session, otherwise opens the project
+        // with the languages its worktree contains.
+        destination.openProject(root: identity)
         activateWindow(destination)
     }
 
@@ -977,179 +870,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         window.makeKeyAndOrderFront(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
         handleProjectWindowBecameActive(controller)
-    }
-
-    /// The one-at-a-time language picker for first opens. Dialog state is
-    /// local to the alert, never shared across windows (§6.2). Tests and
-    /// self-tests may substitute a scripted picker through the override.
-    var languagePickerOverride: (@MainActor (URL) async -> [LanguageID]?)?
-
-    private func presentLanguageSelection(
-        for root: URL
-    ) async -> [LanguageID]? {
-        if let languagePickerOverride {
-            return await languagePickerOverride(root)
-        }
-        let alert = makeLanguageSelectionAlert(for: root)
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            return nil
-        }
-        return alert.languageSelection
-    }
-
-    /// Directories the file-name probe skips; mirrors the indexer's fixed
-    /// skip rules so the preselection matches what will be indexed.
-    static let languageProbeSkippedDirectories: Set<String> = [
-        ".git", "target", "node_modules", ".build", "venv", ".venv",
-        "__pycache__", "dist", "build",
-    ]
-
-    /// Entry cap for the read-only filename probe: it terminates on huge
-    /// trees without reading file contents or launching providers.
-    static let languageProbeEntryLimit = 5_000
-
-    /// Languages to preselect when opening `root` for the first time. A
-    /// stored Recents preference wins when present (never the Rust
-    /// fallback); otherwise a bounded, cancellable-by-limit filename probe
-    /// classifies only the extensions that actually appear. Plain .js/.jsx
-    /// files do not select TypeScript.
-    static func preselectedLanguages(
-        for root: URL,
-        storedLanguage: LanguageID?
-    ) -> (languages: [LanguageID], probeCapped: Bool) {
-        if let storedLanguage {
-            return ([storedLanguage], false)
-        }
-        let allLanguages: [LanguageID] = [.rust, .python, .typescript]
-        var found: Set<LanguageID> = []
-        var scanned = 0
-        var capped = false
-        let enumerator = FileManager.default.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )
-        while let item = enumerator?.nextObject() as? URL {
-            scanned += 1
-            if scanned > languageProbeEntryLimit {
-                capped = true
-                break
-            }
-            if item.pathExtension.isEmpty == false,
-               item.lastPathComponent.hasPrefix(".")
-            {
-                continue
-            }
-            if item.pathComponents.contains(
-                where: { languageProbeSkippedDirectories.contains($0) }
-            ) {
-                continue
-            }
-            let name = item.lastPathComponent
-            if allLanguages.contains(where: { language in
-                LanguageMode.classify(path: name, language: language) != nil
-            }) {
-                for language in allLanguages
-                where LanguageMode.classify(path: name, language: language) != nil
-                {
-                    found.insert(language)
-                }
-            }
-        }
-        let ordered = allLanguages.filter { found.contains($0) }
-        return (ordered, capped)
-    }
-
-    /// Language picker state lives entirely inside one alert presentation
-    /// so a queued second open can never overwrite the visible choice
-    /// (§6.2). The gate is the checkbox targets; nothing survives the
-    /// modal session.
-    @MainActor final class LanguageSelectionGate: NSObject {
-        var checkboxes: [NSButton] = []
-        weak var openButton: NSButton?
-
-        @objc func checkboxChanged(_ sender: NSButton) {
-            openButton?.isEnabled = checkboxes.contains { $0.state == .on }
-        }
-
-        var selection: [LanguageID]? {
-            var selected: [LanguageID] = []
-            if checkboxes.indices.contains(0), checkboxes[0].state == .on {
-                selected.append(.rust)
-            }
-            if checkboxes.indices.contains(1), checkboxes[1].state == .on {
-                selected.append(.python)
-            }
-            if checkboxes.indices.contains(2), checkboxes[2].state == .on {
-                selected.append(.typescript)
-            }
-            guard !selected.isEmpty else { return nil }
-            return try? LanguageMode.normalize(languages: selected)
-        }
-    }
-
-    final class LanguageSelectionAlert: NSAlert {
-        var gate = LanguageSelectionGate()
-
-        var languageSelection: [LanguageID]? { gate.selection }
-    }
-
-    func makeLanguageSelectionAlert(for root: URL) -> LanguageSelectionAlert {
-        let alert = LanguageSelectionAlert()
-        alert.messageText = localized("app.open.languages")
-        alert.informativeText =
-            localizedFormat("app.open.languageDetail", root.lastPathComponent)
-        alert.addButton(withTitle: localized("app.open.action"))
-        alert.addButton(withTitle: localized("app.cancel"))
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        let options: [String] = [
-            "Rust",
-            "Python",
-            "TypeScript",
-        ]
-        // §S9: preselect a stored Recents preference when valid, otherwise
-        // the languages the bounded filename probe actually found; manual
-        // choices stay possible and win once made.
-        // A valid stored record wins; the Rust fallback never counts as a
-        // user choice (§S9).
-        let stored = recentProjectsStore
-            .storedLanguagesIfRecorded(for: root.standardizedFileURL.path)?
-            .first
-        let preselected = Self.preselectedLanguages(
-            for: root,
-            storedLanguage: stored
-        )
-        let gate = alert.gate
-        gate.checkboxes = options.map { title in
-            let checkbox = NSButton(
-                checkboxWithTitle: title,
-                target: gate,
-                action: #selector(
-                    LanguageSelectionGate.checkboxChanged(_:)
-                )
-            )
-            checkbox.setAccessibilityLabel(title)
-            let language: LanguageID = switch title {
-            case "Rust": .rust
-            case "Python": .python
-            default: .typescript
-            }
-            checkbox.state = preselected.languages.contains(language)
-                ? .on
-                : .off
-            stack.addArrangedSubview(checkbox)
-            return checkbox
-        }
-        stack.frame.size = stack.fittingSize
-        stack.layoutSubtreeIfNeeded()
-        alert.accessoryView = stack
-        let openButton = alert.buttons[0]
-        openButton.isEnabled = !preselected.languages.isEmpty
-        gate.openButton = openButton
-        return alert
     }
 
     @objc private func clearRecentProjects(_ sender: Any?) {
@@ -1883,8 +1603,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .fileOpenProject: CommandAction(#selector(AppDelegate.openProject(_:))),
         .fileNewWindow: CommandAction(#selector(AppDelegate.newWindow(_:))),
         .fileQuickOpen: CommandAction(#selector(AppDelegate.quickOpen(_:))),
-        .fileOpenPythonProject: CommandAction(#selector(AppDelegate.openPythonProject(_:))),
-        .fileOpenTypeScriptProject: CommandAction(#selector(AppDelegate.openTypeScriptProject(_:))),
         .fileOpenInNewTab: CommandAction(#selector(AppDelegate.openSelectedFileInNewTab(_:))),
         .fileCloseTab: CommandAction(#selector(AppDelegate.closeActiveTab(_:))),
         .fileCloseWindow: CommandAction(#selector(AppDelegate.closeProjectWindow(_:))),
@@ -2110,8 +1828,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let fileMenu = NSMenu(title: localized("app.menu.file"))
         appendMenuItem(for: .fileOpenProject, to: fileMenu)
         appendMenuItem(for: .fileNewWindow, to: fileMenu)
-        appendMenuItem(for: .fileOpenPythonProject, to: fileMenu)
-        appendMenuItem(for: .fileOpenTypeScriptProject, to: fileMenu)
         appendMenuItem(for: .fileQuickOpen, to: fileMenu)
         let recentItem = NSMenuItem(
             title: localized("app.menu.open.recent"),

@@ -127,7 +127,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// scheduling asynchronous cleanup into the shared test run loop.
     private let isOffscreenTestWindow: Bool
     private let onChooseProject: () -> Void
-    private let onChooseProjectLanguage: (URL, MainWindowController) -> Void
+    /// Opens a dropped project directory through the app's open routing.
+    private let onOpenProject: (URL, MainWindowController) -> Void
     private let onShowSettings: () -> Void
     /// Reports the controller to the application as soon as AppKit starts
     /// closing its window so routing excludes it immediately; the retained
@@ -165,15 +166,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var panelPreset = PanelPresetModel.reading
     private var readingSetLayoutActive = false
     private var lastOpenedProjectRoot: URL?
-    private var lastOpenedProjectLanguages: [LanguageID]?
-    var lastOpenedProjectLanguage: LanguageID? {
-        lastOpenedProjectLanguages?.first
-    }
     private var pendingRecentProjectRoot: URL?
-    private var pendingRecentProjectLanguages: [LanguageID]?
-    var pendingRecentProjectLanguage: LanguageID? {
-        pendingRecentProjectLanguages?.first
-    }
     private var pendingTabRestore: TabStripModel.Tab?
     private var pendingRefreshContentID: ContentID?
     private var sessionRestoreTask: Task<Void, Never>?
@@ -203,9 +196,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         layoutDefaults: UserDefaults? = nil,
         frameAutosaveName: NSWindow.FrameAutosaveName? = nil,
         onChooseProject: @escaping () -> Void = {},
-        onChooseProjectLanguage: @escaping (URL, MainWindowController) -> Void = {
-            _, _ in
-        },
+        onOpenProject: @escaping (URL, MainWindowController) -> Void = { _, _ in },
         onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
@@ -217,7 +208,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         self.isOffscreenTestWindow = offscreen
         self.layoutDefaults = layoutDefaults ?? (offscreen ? nil : .standard)
         self.onChooseProject = onChooseProject
-        self.onChooseProjectLanguage = onChooseProjectLanguage
+        self.onOpenProject = onOpenProject
         self.onShowSettings = onShowSettings
         self.frameAutosaveName = frameAutosaveName
         contextController = ContextWindowViewController(model: model.contextWindow, derivedDataStore: derivedDataStore)
@@ -826,104 +817,49 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     // MARK: - Project opening and session restore
 
-    func openProject(root: URL) {
-        openProject(root: root, language: .rust)
-    }
-
-    func openProject(root: URL, language: LanguageID) {
-        openProjectWithSavedSession(
-            root: root,
-            languages: [language],
-            overridesSavedLanguages: true
-        )
-    }
-
-    func openProject(root: URL, languages: [LanguageID]) {
-        guard let normalized = try? LanguageMode.normalize(languages: languages)
-        else { return }
-        openProjectWithSavedSession(
-            root: root,
-            languages: normalized,
-            overridesSavedLanguages: true
-        )
-    }
-
-    func openRecentProject(_ root: URL, forcingReopen: Bool = false) {
-        openProjectWithSavedSession(
-            root: root,
-            languages: recentProjectsStore.languages(
-                for: root.standardizedFileURL.path
-            ),
-            overridesSavedLanguages: false,
-            forcingReopen: forcingReopen
-        )
-    }
-
     /// Unified "user opened a project" boundary covering Open, Recent,
     /// dropped directories, and Retry: a project that is already being
-    /// read just focuses its window; a project with a saved reading
-    /// session restores it (an explicit language choice overrides the
-    /// saved combination); otherwise it opens fresh. The outgoing project
-    /// is always flushed first. The project identity is claimed before any
-    /// asynchronous load starts so duplicate requests resolve to this
-    /// window.
-    private func openProjectWithSavedSession(
-        root: URL,
-        languages: [LanguageID],
-        overridesSavedLanguages: Bool,
-        forcingReopen: Bool = false
-    ) {
+    /// read just focuses its window (unless `forcingReopen`); a project with
+    /// a saved reading session restores it; otherwise it opens fresh. The
+    /// outgoing project is always flushed first. The project identity is
+    /// claimed before any asynchronous load starts so duplicate requests
+    /// resolve to this window.
+    func openProject(root: URL, forcingReopen: Bool = false) {
         let root = root.standardizedFileURL
         claimProject(root)
         if !forcingReopen,
            model.projectRoot?.standardizedFileURL == root,
            case .ready = model.projectState,
-           model.sessionLoadNotice == nil,
-           !overridesSavedLanguages || model.projectLanguages == languages
+           model.sessionLoadNotice == nil
         {
             window?.makeKeyAndOrderFront(nil)
             render()
             return
         }
-        // Every actual reopen, including a language change on the same root,
-        // captures the latest reader state before consulting the saved snapshot.
+        // Every actual reopen captures the latest reader state before
+        // consulting the saved snapshot.
         checkpointSessionSynchronously()
         if let snapshot = model.loadSessionSnapshot(forProject: root).snapshot {
             cancelSessionRestore()
-            restoreSession(
-                snapshot,
-                overridingLanguages: overridesSavedLanguages ? languages : nil
-            )
+            restoreSession(snapshot)
             return
         }
-        openProjectFresh(root: root, languages: languages)
-    }
-
-    private func openProjectFresh(root: URL, languages: [LanguageID]) {
         cancelSessionRestore()
         lastOpenedProjectRoot = root
-        lastOpenedProjectLanguages = languages
         pendingRecentProjectRoot = root
-        pendingRecentProjectLanguages = languages
         model.openProject(root: root)
         render()
     }
 
     func retryLastOpenedProject() {
         if let root = lastOpenedProjectRoot {
-            openProject(
-                root: root,
-                languages: lastOpenedProjectLanguages ?? [.rust]
-            )
+            openProject(root: root)
         } else {
             onChooseProject()
         }
     }
 
-    func restoreSession(
-        _ snapshot: SessionCodec.Snapshot,
-        overridingLanguages: [LanguageID]? = nil
-    ) {
+    func restoreSession(_ snapshot: SessionCodec.Snapshot) {
         cancelSessionRestore()
         let root = URL(
             fileURLWithPath: snapshot.projectRoot,
@@ -931,9 +867,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         ).standardizedFileURL
         claimProject(root)
         lastOpenedProjectRoot = root
-        lastOpenedProjectLanguages = overridingLanguages ?? snapshot.languages
         pendingRecentProjectRoot = root
-        pendingRecentProjectLanguages = overridingLanguages ?? snapshot.languages
         // The session only remembers its last preset: panel visibility stays
         // with the global layout, so hand toggles survive restarts. Compare
         // still reopens its split as it did when the session was saved.
@@ -995,15 +929,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             "CodeInsightMainWindow-"
                 + AppModel.sessionProjectKey(for: root)
         ))
-    }
-
-    /// Releases a claim whose open never completed (cancelled language
-    /// pick, terminated request) so the window returns to the blank pool
-    /// and a repeat request starts over (§3.3).
-    func releaseProjectClaim() {
-        guard !isClosing else { return }
-        projectURL = nil
-        window?.setFrameAutosaveName("")
     }
 
     /// A window that can transparently take over an open request: it has
@@ -3271,6 +3196,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         current.isEnabled = false
         menu.addItem(current)
+        // The only place that shows what the open detected.
+        menu.addItem(.separator())
+        for unit in model.detectedLanguageUnits {
+            let row = NSMenuItem(
+                title: localizedFormat(
+                    "main.profile.detected",
+                    Self.displayName(for: unit.language),
+                    unit.sourceFiles,
+                    unit.unitRoot
+                ),
+                action: nil,
+                keyEquivalent: ""
+            )
+            row.isEnabled = false
+            menu.addItem(row)
+        }
         if profile.language == .rust {
             menu.addItem(.separator())
             for featureSelection in model.availableFeatureSelections {
@@ -3340,13 +3281,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func renderEmptyState() {
         if case .ready = model.projectState, let root = pendingRecentProjectRoot {
             if recordsRecentProjects {
-                recentProjectsStore.record(
-                    root,
-                    languages: pendingRecentProjectLanguages ?? [.rust]
-                )
+                recentProjectsStore.record(root)
             }
             pendingRecentProjectRoot = nil
-            pendingRecentProjectLanguages = nil
         }
 
         let retry = { [weak self] in
@@ -3354,29 +3291,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let openDropped = { [weak self] (root: URL) in
             guard let self else { return }
-            self.onChooseProjectLanguage(root, self)
+            self.onOpenProject(root, self)
         }
         switch model.projectState {
         case .empty:
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
-                recentLanguages: recentLanguageLabels(),
                 recentStatus: recentProjectStatus(),
                 failed: false,
                 onChooseProject: onChooseProject,
-                onOpenRecent: { [weak self] in self?.openRecentProject($0) },
+                onOpenRecent: { [weak self] in self?.openProject(root: $0) },
                 onOpenDropped: openDropped,
                 onRetry: retry
             )
         case .failed:
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
-                recentLanguages: recentLanguageLabels(),
                 recentStatus: recentProjectStatus(),
                 failed: true,
                 failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
-                onOpenRecent: { [weak self] in self?.openRecentProject($0) },
+                onOpenRecent: { [weak self] in self?.openProject(root: $0) },
                 onOpenDropped: openDropped,
                 onRetry: retry
             )
@@ -3647,25 +3582,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             case .indexing, .ready: break
             }
         }
-    }
-
-    /// Short language labels for the welcome screen's recent projects.
-    private func recentLanguageLabels() -> [String: String] {
-        // Only recorded languages: an unrecorded project shows its folder icon
-        // rather than the Rust fallback presented as fact.
-        Dictionary(uniqueKeysWithValues: recentProjectsStore.paths.compactMap { path in
-            guard let languages = recentProjectsStore.storedLanguagesIfRecorded(for: path)
-            else { return nil }
-            let label = languages.map { language in
-                switch language {
-                case .rust: "RS"
-                case .python: "PY"
-                case .typescript: "TS"
-                case .javascript: "JS"
-                }
-            }.joined(separator: "·")
-            return (path, label)
-        })
     }
 
     private func renderCommitButton() {

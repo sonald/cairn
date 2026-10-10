@@ -129,27 +129,6 @@ func languageArrayClassifierMatchesSelectedLanguageUnionMatrix() {
 }
 
 @Test
-func languageArrayNormalizationRejectsInvalidDuplicateOrJavaScriptAtBoundary() throws {
-    #expect(try LanguageMode.normalize(languages: [.rust, .python, .typescript])
-        == [LanguageID.rust, .python, .typescript])
-    #expect(try LanguageMode.normalize(languages: [.python, .rust])
-        == [.rust, .python])
-
-    let invalid: [[LanguageID]] = [
-        [],
-        [.rust, .rust],
-        [.python, .python, .rust],
-        [.javascript],
-        [.rust, .javascript],
-    ]
-    for languages in invalid {
-        #expect(throws: CocoaError.self) {
-            _ = try LanguageMode.normalize(languages: languages)
-        }
-    }
-}
-
-@Test
 func pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() throws {
     let rawKinds: [(DeclarationKind, UInt8)] = [
         (.rustFn, 0),

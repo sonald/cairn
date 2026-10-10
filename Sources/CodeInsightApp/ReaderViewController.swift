@@ -1672,7 +1672,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     func showEmptyState(
         recentPaths: [String],
-        recentLanguages: [String: String] = [:],
         recentStatus: (trusted: Set<String>, lastRead: [String: Date]) = ([], [:]),
         failed: Bool,
         failureReason: String? = nil,
@@ -1688,7 +1687,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         label.isHidden = true
         setCodeViewHidden(true)
         if let emptyStateView {
-            emptyStateView.updateRecentLanguages(recentLanguages)
             emptyStateView.updateRecentStatus(trusted: recentStatus.trusted, lastRead: recentStatus.lastRead)
             emptyStateView.update(
                 recentPaths: recentPaths,
@@ -1705,7 +1703,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onOpenDropped: onOpenDropped,
             onRetry: onRetry
         )
-        emptyStateView.updateRecentLanguages(recentLanguages)
         emptyStateView.updateRecentStatus(trusted: recentStatus.trusted, lastRead: recentStatus.lastRead)
         emptyStateView.update(
             recentPaths: recentPaths,

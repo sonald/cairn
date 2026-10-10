@@ -8,7 +8,7 @@ import Testing
 
 @MainActor
 @Test
-func sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() async throws {
+func forcedReopenCapturesPendingTabsBeforeLoadingSnapshot() async throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("SessionBoundary-\(UUID())")
     let state = FileManager.default.temporaryDirectory.appendingPathComponent("SessionBoundaryState-\(UUID())")
@@ -25,10 +25,12 @@ func sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() async throw
     defer { controller.close() }
     // The new tab has not reached the debounced checkpoint yet.
     model.openInNewTab(root.appendingPathComponent("main.py"))
-    controller.openProject(root: root, language: .python)
+    let generation = model.generation
+    controller.openProject(root: root, forcingReopen: true)
     try #require(await sessionBoundaryWait {
-        model.projectLanguages == [.python] && model.snapshotPhase == .fullReady && !model.isRestoringSession
+        model.generation != generation && model.snapshotPhase == .fullReady && !model.isRestoringSession
     })
+    #expect(model.projectLanguages == [.rust, .python])
     #expect(model.tabStrip.tabs.compactMap { $0.fileURL?.lastPathComponent } == ["main.rs", "main.py"])
     #expect(model.tabStrip.activeTab?.fileURL?.lastPathComponent == "main.py")
 }
@@ -47,11 +49,13 @@ private func sessionBoundaryWait(_ predicate: () -> Bool) async -> Bool {
 func sessionReopenRetriesAfterSavedFileBecomesReadable() async throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("SessionRetry-\(UUID())")
-    let state = root.appendingPathComponent("state")
+    // Session state lives outside the project: opening captures every
+    // project file, and this test makes the saved session unreadable.
+    let state = FileManager.default.temporaryDirectory.appendingPathComponent("SessionRetryState-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     let file = root.appendingPathComponent("main.rs")
     try "fn main() {}".write(to: file, atomically: true, encoding: .utf8)
-    defer { try? FileManager.default.removeItem(at: root) }
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
     let writer = AppModel(sessionURL: state.appendingPathComponent("session.json"))
     writer.openProject(root: root)
     try #require(await sessionBoundaryWait { writer.snapshotPhase == .fullReady })
@@ -64,12 +68,12 @@ func sessionReopenRetriesAfterSavedFileBecomesReadable() async throws {
     let model = AppModel(sessionURL: state.appendingPathComponent("session.json"))
     let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
     defer { controller.close() }
-    controller.openRecentProject(root)
+    controller.openProject(root: root)
     try #require(await sessionBoundaryWait { model.snapshotPhase == .fullReady })
     #expect(model.sessionLoadNotice != nil)
     #expect(model.tabStrip.tabs.isEmpty)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path)
-    controller.openRecentProject(root)
+    controller.openProject(root: root)
     let deadline = ContinuousClock.now + .seconds(2)
     while model.tabStrip.tabs.isEmpty && ContinuousClock.now < deadline {
         try await Task.sleep(for: .milliseconds(10))

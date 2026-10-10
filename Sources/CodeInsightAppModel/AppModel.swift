@@ -373,6 +373,18 @@ public final class AppModel {
         return querySessionTuples()
     }
 
+    /// What the open detected, one row per language in the set: its source
+    /// files in the shown snapshot and its unit root (`.` or a relative path).
+    package var detectedLanguageUnits: [(language: LanguageID, sourceFiles: Int, unitRoot: String)] {
+        querySessions.map { session, _ in
+            (
+                session.analysisProfile.language,
+                Self.sessionCoverage(for: session).filesTotal,
+                session.paths.resolve(session.analysisProfile.projectRoot)
+            )
+        }
+    }
+
     public var currentFeatureSelection: FeatureSelection? {
         activeAnalysisProfileDisplay?.featureSelection
     }

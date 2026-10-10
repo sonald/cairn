@@ -852,19 +852,10 @@ extension AppDelegate {
         ]) else { return fail("project B fixture unavailable") }
 
         launch(offscreen: true)
-        // Pre-record language preferences so the open pipeline never shows
-        // the modal language picker inside the self-test.
-        recentProjectsStore.record(projectA, language: .rust)
-        recentProjectsStore.record(projectB, language: .rust)
 
-        enqueueOpenRequest(
-            root: projectA,
-            languages: nil,
-            sourceWindow: nil
-        )
+        enqueueOpenRequest(root: projectA, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
-            self.projectWindows.first?.model.projectState
-                .isReadyForMultiWindowSelfTest == true
+            self.projectWindows.first?.model.isReadyForMultiWindowSelfTest == true
         }) else { return fail("project A never became ready") }
 
         // A second request plus an alias of the first, submitted together:
@@ -873,16 +864,11 @@ extension AppDelegate {
             fileURLWithPath: projectA.path + "/.",
             isDirectory: true
         )
-        enqueueOpenRequest(root: alias, languages: nil, sourceWindow: nil)
-        enqueueOpenRequest(
-            root: projectB,
-            languages: nil,
-            sourceWindow: nil
-        )
+        enqueueOpenRequest(root: alias, sourceWindow: nil)
+        enqueueOpenRequest(root: projectB, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
             self.projectWindows.count == 2
-                && self.projectWindows.last?.model.projectState
-                    .isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
         }) else { return fail("project B never became ready in a new window") }
 
         guard projectWindows.count == 2 else {
@@ -915,7 +901,7 @@ extension AppDelegate {
         guard windowA.model.projectRoot?.standardizedFileURL
             == projectA.standardizedFileURL
         else { return fail("alias activation reset A") }
-        enqueueOpenRequest(root: alias, languages: nil, sourceWindow: nil)
+        enqueueOpenRequest(root: alias, sourceWindow: nil)
         guard waitUntil(timeout: 15, condition: {
             self.activeWindowOrder.last === windowA
         }) else { return fail("alias request did not activate A's window") }
@@ -930,14 +916,13 @@ extension AppDelegate {
         // the pipeline must wait for the old session writer to finish
         // instead of racing a second model for the same project (review
         // F2). Exactly one B window exists afterwards.
-        enqueueOpenRequest(root: projectB, languages: nil, sourceWindow: nil)
+        enqueueOpenRequest(root: projectB, sourceWindow: nil)
         // The old B window keeps its ready state until its asynchronous
         // teardown runs, so the reopened B is identified by NOT closing.
         guard waitUntil(timeout: 30, condition: {
             self.projectWindows.count == 2
                 && self.projectWindows.last?.isClosing == false
-                && self.projectWindows.last?.model.projectState
-                    .isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
                 && self.projectWindows.last?.projectURL?.standardizedFileURL
                     == projectB.standardizedFileURL
                 && self.projectWindows.first === windowA
@@ -950,38 +935,23 @@ extension AppDelegate {
             self.projectWindows.count == 2
         }) else { return fail("closing B did not retire its window") }
         guard projectWindows.first === windowA,
-              windowA.model.projectState.isReadyForMultiWindowSelfTest,
+              windowA.model.isReadyForMultiWindowSelfTest,
               windowA.model.tabStrip.tabs.count == 1,
               projectWindows[1].isClosing == false
         else { return fail("A disturbed by B's close") }
 
-        // Cancel a first open (review F1): the claim is released, the
-        // auto-created blank window goes away, and the repeat request
-        // loads the project.
+        // A first open needs no choice: C opens directly in a new window
+        // with the language its worktree contains.
         guard let projectC = makeProject([
             "src/lib.rs": "pub fn gamma() {}\n",
         ]) else { return fail("project C fixture unavailable") }
-        languagePickerOverride = { _ in nil }
-        enqueueOpenRequest(root: projectC, languages: nil, sourceWindow: nil)
-        guard waitUntil(timeout: 15, condition: {
-            !self.isDrainingOpenRequests && self.pendingOpenURLs.isEmpty
-        }) else { return fail("cancelled open never finished draining") }
-        // The auto-created window closes with an asynchronous teardown;
-        // wait for the collection to settle back to A + B.
-        guard waitUntil(timeout: 15, condition: {
-            self.projectWindows.count == 2
-                && self.projectWindows.allSatisfy({
-                    $0.projectURL?.standardizedFileURL
-                        != projectC.standardizedFileURL
-                })
-        }) else { return fail("cancelled request left a claimed window behind") }
-        languagePickerOverride = { _ in [.rust] }
-        enqueueOpenRequest(root: projectC, languages: nil, sourceWindow: nil)
+        enqueueOpenRequest(root: projectC, sourceWindow: nil)
         guard waitUntil(timeout: 60, condition: {
             self.projectWindows.count == 3
-                && self.projectWindows.last?.model.projectState
-                    .isReadyForMultiWindowSelfTest == true
-        }) else { return fail("repeat request after cancel did not load C") }
+                && self.projectWindows.last?.model.isReadyForMultiWindowSelfTest == true
+        }) else { return fail("first open of C did not load directly") }
+        guard projectWindows.last?.model.projectLanguages == [.rust]
+        else { return fail("C did not detect Rust") }
         guard let windowC = projectWindows.last,
               windowC.projectURL?.standardizedFileURL
                 == projectC.standardizedFileURL
@@ -1152,7 +1122,7 @@ extension AppDelegate {
         window.setFrameOrigin(NSPoint(x: 80, y: 80))
         window.orderFrontRegardless()
         NSApplication.shared.activate(ignoringOtherApps: true)
-        controller.openProject(root: root, languages: languages)
+        controller.openProject(root: root)
         guard waitUntil(timeout: 60, condition: {
             if case .ready = self.model.projectState { return true }
             return false
@@ -1854,11 +1824,12 @@ private final class OpenSelfTestState {
     }
 }
 
-extension ProjectState {
-    /// Ready check shared by the multi-window self-test.
+extension AppModel {
+    /// Ready check shared by the multi-window self-test: fully indexed, so
+    /// a session checkpoint can be written.
     var isReadyForMultiWindowSelfTest: Bool {
-        if case .ready = self { return true }
-        return false
+        guard case .ready = projectState else { return false }
+        return snapshotPhase == .fullReady
     }
 }
 
