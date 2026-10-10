@@ -516,19 +516,33 @@ func pythonAttributeAccessHopsThroughTheReceiversClass() throws {
     }
 }
 
-/// R8.1: the CLI indexes Python / TypeScript projects too — `--language`
-/// wins, else the position's file extension decides, else Rust.
+/// R8.1: the CLI indexes one language at a time — `--language` wins, else
+/// the position's file extension decides, else the language with the most
+/// source files in the project.
 @Test
-func cliProjectLanguageComesFromOptionOrPositionFile() throws {
-    let inferred = try ProjectOptions.parse(["--project", "p"])
+func cliProjectLanguageComesFromOptionPositionFileOrMostSources() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CLILanguage-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    for name in ["a.py", "b.py", "main.rs", "notes.js"] {
+        try Data("x\n".utf8).write(to: root.appendingPathComponent(name))
+    }
+    let inferred = try ProjectOptions.parse(["--project", root.path])
     #expect(try inferred.languageID(inferringFrom: "pkg/models.py") == .python)
     #expect(try inferred.languageID(inferringFrom: "src/index.tsx") == .typescript)
     #expect(try inferred.languageID(inferringFrom: "src/main.rs") == .rust)
-    #expect(try inferred.languageID() == .rust)
-    let explicit = try ProjectOptions.parse(["--project", "p", "--language", "python"])
-    #expect(try explicit.languageID(inferringFrom: "src/main.rs") == .python)
-    let wrong = try ProjectOptions.parse(["--project", "p", "--language", "cobol"])
+    #expect(try inferred.languageID() == .python)
+    let explicit = try ProjectOptions.parse(["--project", root.path, "--language", "rust"])
+    #expect(try explicit.languageID(inferringFrom: "pkg/models.py") == .rust)
+    #expect(try explicit.languageID() == .rust)
+    let wrong = try ProjectOptions.parse(["--project", root.path, "--language", "cobol"])
     #expect(throws: (any Error).self) { try wrong.languageID() }
+
+    let empty = root.appendingPathComponent("docs", isDirectory: true)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let none = try ProjectOptions.parse(["--project", empty.path])
+    #expect(throws: (any Error).self) { try none.languageID() }
 }
 
 /// 2026-10-03 (superseding M7-S0A): clicking the receiver of a method call
