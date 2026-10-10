@@ -1027,7 +1027,7 @@ extension AppDelegate {
               controller.selectFileInSidebar(configFile),
               await pythonWait(timeout: 30, {
                   controller.displayedReaderFile?.standardizedFileURL == configFile
-                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewKind == "TOML"
                       && controller.selfTestReaderPreviewText == String(decoding: configBytes, as: UTF8.self)
                       && pythonModel.tabStrip.activeDocument == nil
               })
@@ -1385,7 +1385,7 @@ extension AppDelegate {
               controller.selectFileInSidebar(configFile),
               await pythonWait(timeout: 30, {
                   controller.displayedReaderFile?.standardizedFileURL == configFile
-                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewKind == "TOML"
                       && controller.selfTestReaderPreviewText == String(decoding: expectedConfigBytes, as: UTF8.self)
                       && pythonModel.tabStrip.activeDocument == nil
               })
@@ -1597,7 +1597,7 @@ extension AppDelegate {
               controller.selectFileInSidebar(configFile),
               await tsWait(timeout: 30, {
                   controller.displayedReaderFile?.standardizedFileURL == configFile
-                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewKind == "JSON"
                       && controller.selfTestReaderPreviewText == String(decoding: configBytes, as: UTF8.self)
                       && tsModel.tabStrip.activeDocument == nil
               })
@@ -1938,7 +1938,7 @@ extension AppDelegate {
               controller.selectFileInSidebar(configFile),
               await tsWait(timeout: 30, {
                   controller.displayedReaderFile?.standardizedFileURL == configFile
-                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewKind == "JSON"
                       && controller.selfTestReaderPreviewText == String(decoding: expectedConfigBytes, as: UTF8.self)
                       && tsModel.tabStrip.activeDocument == nil
               })
