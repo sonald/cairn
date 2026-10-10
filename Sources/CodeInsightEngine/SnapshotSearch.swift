@@ -9,12 +9,16 @@ public protocol SnapshotContentSource: Sendable {
     func searchIndex(for pathID: PathID) -> ContentIndex?
     func searchName(for nameID: NameID) -> String?
     var searchProjectExcludedPathCount: Int? { get }
+    /// Whether text search covers this manifest file; a unit session
+    /// searches only its own sources.
+    func searchIncludes(pathID: PathID) -> Bool
 }
 
 public extension SnapshotContentSource {
     func searchIndex(for pathID: PathID) -> ContentIndex? { nil }
     func searchName(for nameID: NameID) -> String? { nil }
     var searchProjectExcludedPathCount: Int? { nil }
+    func searchIncludes(pathID: PathID) -> Bool { true }
 }
 
 public struct ContentSearchQuery: Sendable {
@@ -680,7 +684,8 @@ public struct SnapshotSearchService: Sendable {
         mode: LanguageMode
     )] {
         source.manifest.files.compactMap { file in
-            guard let path = source.path(for: file.pathID),
+            guard source.searchIncludes(pathID: file.pathID),
+                  let path = source.path(for: file.pathID),
                   let mode = LanguageMode.classify(path: path, language: language)
             else { return nil }
             return (file, mode)
@@ -787,6 +792,7 @@ extension EngineSession: SnapshotContentSource {
     public func searchIndex(for pathID: PathID) -> ContentIndex? { content(at: pathID)?.1 }
     public func searchName(for nameID: NameID) -> String? { names.resolve(nameID) }
     public var searchProjectExcludedPathCount: Int? { manifest.ruleExcludedPathCount }
+    public func searchIncludes(pathID: PathID) -> Bool { activePathIDs.contains(pathID) }
 
     public func path(for pathID: PathID) -> String? {
         paths.resolve(pathID)

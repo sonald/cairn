@@ -723,6 +723,38 @@ func independentUnitRootsBecomeUnitsThatEachSeeOnlyTheirOwnSources() throws {
 }
 
 @Test
+func textSearchOnOneUnitReturnsOnlyThatUnitsFiles() async throws {
+    let snapshot = CountingSnapshot(files: [
+        "a/src/main.rs": Array("fn main() {}\n".utf8),
+        "b/src/main.rs": Array("fn b() {}\n".utf8),
+        "root.rs": Array("fn root() {}\n".utf8),
+        "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
+        "b/Cargo.toml": Array("[package]\nname = \"b\"\n".utf8),
+    ], configurationPaths: [
+        "a/Cargo.toml",
+        "b/Cargo.toml",
+    ])
+    let indexer = ProjectIndexer(parallelism: 1)
+    let prepared = try indexer.prepareSnapshots(
+        snapshot,
+        into: ProjectIndexStore(),
+        languages: [.rust]
+    )
+    let expected = [".": ["root.rs"], "a": ["a/src/main.rs"], "b": ["b/src/main.rs"]]
+    for session in try indexer.completeSnapshot(prepared[0]) {
+        let root = session.paths.resolve(session.analysisProfile.projectRoot)
+        var paths: [String] = []
+        for try await batch in try session.search(
+            ContentSearchQuery(pattern: "fn"),
+            context: snapshotQueryContext(for: session)
+        ) {
+            paths += batch.matchesByPath.keys.map { session.paths.resolve($0) }
+        }
+        #expect(paths.sorted() == expected[root], "unit \(root)")
+    }
+}
+
+@Test
 func nestedMarkerInsidePartitionBelongsToTheDeepestUnit() throws {
     let snapshot = CountingSnapshot(files: [
         "a/src/x.rs": Array("fn x() {}\n".utf8),
