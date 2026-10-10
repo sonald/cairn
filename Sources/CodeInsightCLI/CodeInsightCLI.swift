@@ -446,6 +446,9 @@ extension CodeInsight {
             let toSnapshot = try CommitSnapshot(repositoryURL: root, revision: to)
             let session = try indexer.indexSnapshot(toSnapshot, into: store, language: language)
             let elapsed = Date().timeIntervalSince(startedAt) * 1_000
+            FileHandle.standardError.write(Data(
+                "unit: \(session.paths.resolve(session.analysisProfile.projectRoot))\n".utf8
+            ))
             let total = session.stats.reusedCount + session.stats.extractedCount
             let hitRate = total == 0
                 ? 0 : Double(session.stats.reusedCount) * 100 / Double(total)
