@@ -23,7 +23,7 @@
 
 `ContentIndexKey` 包含内容身份、语言模式、grammar 版本和 extractor 版本。同一内容可跨路径/快照复用提取结果；解析出的路径目标必须仍属于查询快照，内容相同不等于语义环境相同。
 
-语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`（提取单位），其中每个分析单元一个 session，共享同一 store 和同一次提取。单元划分见 [product.md](product.md)“项目、快照与窗口”：有 marker 目录包含该语言全部源码时取最浅的那个，否则每个源码归入最深的 marker 祖先或项目根。`SnapshotView` 按最深单元归属过滤活动文件，所以同一语言内每个文件恰好属于一个单元，各单元合起来就是全部源码；manifest 仍是整个快照。Exact 的 profile 前缀等于所在单元根。`AnalysisProfileID` 不含单元路径，同一语言两个单元身份相同时整门语言回退为一个项目根单元。
+语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`（提取单位），其中每个分析单元一个 session，共享同一 store 和同一次提取。单元划分见 [product.md](product.md)“项目、快照与窗口”：有 marker 目录包含该语言全部源码时取最浅的那个，否则每个源码归入最深的 marker 祖先或项目根。`SnapshotView` 按最深单元归属过滤活动文件，所以同一语言内每个文件恰好属于一个单元，各单元合起来就是全部源码；manifest 仍是整个快照，但项目文本搜索只扫 session 自己的活动文件（`SnapshotContentSource.searchIncludes`），所以多单元不会把同一命中列两次。Exact 的 profile 前缀等于所在单元根。`AnalysisProfileID` 不含单元路径，同一语言两个单元身份相同时整门语言回退为一个项目根单元。
 
 `SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化，读不出来的文件被跳过并以 `unreadablePathCount` 计数（未知为 nil，不伪造为零）。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
 
