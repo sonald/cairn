@@ -46,7 +46,7 @@ swift build --product codeinsight
 .build/debug/codeinsight exact-hover --help
 ```
 
-行/列是从 1 开始的 UTF-8 字节位置，不是视觉字符列。`resolve` 可由文件扩展名推断语言，也可传 `--language`；完整命令、选项与语言支持以各子命令 `--help` 为准。CLI 成功只证明这条 CLI 路径，不等于原生窗口的焦点、悬浮或沙箱交互成功。
+行/列是从 1 开始的 UTF-8 字节位置，不是视觉字符列。CLI 一次分析一门语言：`resolve` 可由文件扩展名推断语言，其他命令未传 `--language` 时取源码文件最多的语言并在 stderr 写明；完整命令、选项与语言支持以各子命令 `--help` 为准。CLI 成功只证明这条 CLI 路径，不等于原生窗口的焦点、悬浮或沙箱交互成功。
 
 ## 按故障路径排查
 

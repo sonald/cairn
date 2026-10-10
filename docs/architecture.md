@@ -9,7 +9,7 @@
 | CodeInsightCore | 内容/路径/快照身份、源码坐标、提取事实、解析候选和查询上下文。见 [ContentIndex](../Sources/CodeInsightCore/ContentIndex.swift)、[QueryContext](../Sources/CodeInsightCore/QueryContext.swift)。 |
 | CodeInsightGit | Git 对象读取、工作区捕获与不可变快照。见 [GitSnapshot](../Sources/CodeInsightGit/GitSnapshot.swift)。 |
 | TreeSitterKit、各语言 Extractor | 语法树访问和语言事实提取；抽取器输出纯模型，不操作 UI。 |
-| CodeInsightEngine | 内容索引、SQLite 缓存、语言路由、候选解析、搜索与类型直达。见 [EngineSession](../Sources/CodeInsightEngine/EngineSession.swift)、[Resolver](../Sources/CodeInsightEngine/Resolver.swift)。 |
+| CodeInsightEngine | 内容索引、SQLite 缓存、语言路由、候选解析、搜索与类型直达。见 [EngineSession](../Sources/CodeInsightEngine/EngineSession.swift)、[Resolver](../Sources/CodeInsightEngine/Resolver.swift)。每门语言的分析单元根与 profile 由 [ProfileDetector](../Sources/CodeInsightEngine/ProfileDetector.swift) 从 marker 文件推出。 |
 | CodeInsightExact | 子进程/LSP、provider、沙箱、信任与历史源码物化。见 [ExactProvider](../Sources/CodeInsightExact/ExactProvider.swift)、[Sandbox](../Sources/CodeInsightExact/Sandbox.swift)、[Materializer](../Sources/CodeInsightExact/Materializer.swift)。三种语言服务器共用 [LSPLanguageSession](../Sources/CodeInsightExact/LSPLanguageSession.swift)；语言差异（请求前等待与重试、诊断驱动的环境、能力推导、启动条件、`languageId`）是 `LSPLanguageSpec` 的策略点，可执行文件约束与启动配置留在各 provider。新增 LSP 行为改共享会话，不在 provider 里复制会话代码。 |
 | CodeInsightReaderCore | Reader 源文档、UTF-8/UTF-16 转换、投影、折叠、阅读规划、字体偏好和派生数据；不导入 AppKit/SwiftUI。 |
 | CodeInsightAppModel | 项目与阅读状态、异步 Exact 协调、Context/Relations、轨迹、书签和会话保存；不导入 AppKit/SwiftUI。 |
@@ -22,6 +22,8 @@
 ## 身份与源码事实
 
 `ContentIndexKey` 包含内容身份、语言模式、grammar 版本和 extractor 版本。同一内容可跨路径/快照复用提取结果；解析出的路径目标必须仍属于查询快照，内容相同不等于语义环境相同。
+
+语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`，共享同一 store。单元根取包含该语言全部源码的最浅 marker 目录，否则为项目根；因此 `SnapshotView` 按单元根过滤活动文件不会丢掉源码，Exact 的 profile 前缀也总等于单元根。
 
 `SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
 
