@@ -276,59 +276,12 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
                 ),
             ]
         }
-        let expectedSnapshotID = snapshot.snapshotID
         let store = lock.withLock { self.store }
-        let indexer = ProjectIndexer()
-        let expectedProfiles = try await detachedValue {
-            if normalized.count > 1 {
-                _ = try GitRepository(url: root)
-            }
-            return try indexer.validatedProfiles(
-                snapshot: snapshot,
-                languages: normalized,
-                store: store
-            )
-        }
-        guard expectedProfiles.map(\.language) == normalized else {
-            throw CocoaError(.coderInvalidValue, userInfo: [
-                NSLocalizedFailureReasonErrorKey:
-                    "mixed profile languages did not match requested set",
-            ])
-        }
-        guard snapshot.snapshotID == expectedSnapshotID else {
-            throw CocoaError(.coderInvalidValue, userInfo: [
-                NSLocalizedFailureReasonErrorKey:
-                    "snapshot identity changed before persistence",
-            ])
-        }
         let persistent = ProjectIndexer(persistingProjectAt: root)
         lock.withLock { self.indexer = persistent }
-        let prepared = try await detachedValue {
-            try normalized.map { language in
-                try persistent.prepareSnapshot(
-                    snapshot,
-                    into: store,
-                    language: language,
-                    discoverUnitRoot: true
-                )
-            }
+        return try await detachedValue {
+            try persistent.prepareSnapshots(snapshot, into: store, languages: normalized)
         }
-        for index in prepared.indices {
-            let prepared = prepared[index]
-            let language = normalized[index]
-            let expected = expectedProfiles[index]
-            guard prepared.cachedSession.analysisProfile.language == language,
-                  prepared.cachedSession.analysisProfile.projectRoot == expected.projectRoot,
-                  prepared.cachedSession.analysisProfile.id == expected.id,
-                  prepared.cachedSession.snapshotID == expectedSnapshotID
-            else {
-                throw CocoaError(.coderInvalidValue, userInfo: [
-                    NSLocalizedFailureReasonErrorKey:
-                        "mixed prepared profile identity mismatch",
-                ])
-            }
-        }
-        return prepared
     }
 
     public func completeSnapshot(

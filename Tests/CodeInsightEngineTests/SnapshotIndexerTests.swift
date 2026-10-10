@@ -682,7 +682,7 @@ func indexerRejectsExtractorAndResultIdentityMismatches() throws {
 }
 
 @Test
-func ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() throws {
+func independentUnitRootsFallBackToRepositoryRootAndIndexBothUnits() throws {
     let snapshot = CountingSnapshot(files: [
         "a/src/main.rs": Array("fn main() {}\n".utf8),
         "b/src/main.rs": Array("fn b() {}\n".utf8),
@@ -692,28 +692,24 @@ func ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() throws {
         "a/Cargo.toml",
         "b/Cargo.toml",
     ])
-    let store = ProjectIndexStore()
-    let beforePaths = store.paths.values
 
-    do {
-        _ = try ProjectIndexer(parallelism: 1).prepareSnapshot(
-            snapshot,
-            into: store,
-            language: .rust,
-            discoverUnitRoot: true
-        )
-        Issue.record("Ambiguous same-language roots unexpectedly indexed")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?
-            .contains("multiple rust project units") == true)
+    let session = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+
+    #expect(session.paths.resolve(session.analysisProfile.projectRoot) == ".")
+    for path in ["a/src/main.rs", "b/src/main.rs"] {
+        let pathID = try #require(session.manifest.files.first {
+            session.paths.resolve($0.pathID) == path
+        }?.pathID)
+        #expect(session.content(at: pathID) != nil, "\(path) stays in the active view")
     }
-    #expect(snapshot.counts.read == 0)
-    #expect(store.paths.values == beforePaths)
 }
 
 @Test
-func perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() throws {
+func mixedPrepareReadsEachFileOnceSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() throws {
     let snapshot = CountingSnapshot(files: [
         "src/lib.rs": Array("pub fn rs() {}\n".utf8),
         "src/app.py": Array("def py():\n    pass\n".utf8),
@@ -728,15 +724,13 @@ func perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() thro
     var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
     let coldStore = ProjectIndexStore()
     let coldIndexer = ProjectIndexer(parallelism: 1, cache: cache)
-    let coldRust = try coldIndexer.prepareSnapshot(
-        snapshot, into: coldStore, language: .rust, discoverUnitRoot: true
+    let cold = try coldIndexer.prepareSnapshots(
+        snapshot, into: coldStore, languages: [.rust, .python, .typescript]
     )
-    let coldPython = try coldIndexer.prepareSnapshot(
-        snapshot, into: coldStore, language: .python, discoverUnitRoot: true
-    )
-    let coldTS = try coldIndexer.prepareSnapshot(
-        snapshot, into: coldStore, language: .typescript, discoverUnitRoot: true
-    )
+    let (coldRust, coldPython, coldTS) = (cold[0], cold[1], cold[2])
+    for file in snapshot.listFiles() {
+        #expect(snapshot.reads(of: file.path) == 1, "\(file.path) is read once for all languages")
+    }
     let coldCached = [coldRust, coldPython, coldTS].map(\.cachedSession)
     #expect(coldCached.map { $0.analysisProfile.language }
         == [.rust, .python, .typescript])
@@ -758,15 +752,10 @@ func perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() thro
     let hotCache: IndexCache? = try IndexCache(fileURL: cacheURL)
     let hotStore = ProjectIndexStore()
     let hotIndexer = ProjectIndexer(parallelism: 1, cache: hotCache)
-    let hotRust = try hotIndexer.prepareSnapshot(
-        snapshot, into: hotStore, language: .rust, discoverUnitRoot: true
+    let hot = try hotIndexer.prepareSnapshots(
+        snapshot, into: hotStore, languages: [.rust, .python, .typescript]
     )
-    let hotPython = try hotIndexer.prepareSnapshot(
-        snapshot, into: hotStore, language: .python, discoverUnitRoot: true
-    )
-    let hotTS = try hotIndexer.prepareSnapshot(
-        snapshot, into: hotStore, language: .typescript, discoverUnitRoot: true
-    )
+    let (hotRust, hotPython, hotTS) = (hot[0], hot[1], hot[2])
     #expect([hotRust, hotPython, hotTS].map(\.pendingExtractionCount) == [0, 0, 0])
     let hotCached = [hotRust, hotPython, hotTS].map(\.cachedSession)
     #expect(Set(hotCached.map { ObjectIdentifier($0.store) }).count == 1)
@@ -782,30 +771,20 @@ func perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() thro
 }
 
 @Test
-func publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutsideSource() throws {
+func singleLanguageEntryDiscoversTheUnitRootThatCoversEverySource() throws {
     let snapshot = CountingSnapshot(files: [
         "nested/src/inside.rs": Array("fn inside() {}\n".utf8),
-        "outside.rs": Array("fn outside() {}\n".utf8),
         "nested/Cargo.toml": Array("[package]\nname = \"nested\"\n".utf8),
     ], configurationPaths: [
         "nested/Cargo.toml",
     ])
 
-    let singleton = try ProjectIndexer(parallelism: 1).indexSnapshot(
+    let session = try ProjectIndexer(parallelism: 1).indexSnapshot(
         snapshot,
         into: ProjectIndexStore(),
         language: .rust
     )
-    #expect(singleton.paths.resolve(singleton.analysisProfile.projectRoot) == ".")
-
-    #expect(throws: CocoaError.self) {
-        _ = try ProjectIndexer(parallelism: 1).prepareSnapshot(
-            snapshot,
-            into: ProjectIndexStore(),
-            language: .rust,
-            discoverUnitRoot: true
-        )
-    }
+    #expect(session.paths.resolve(session.analysisProfile.projectRoot) == "nested")
 }
 
 @Test
@@ -822,8 +801,7 @@ func nestedPythonActiveViewTrimsUnitRootBeforeModuleIdentity() throws {
     let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshot(
         snapshot,
         into: ProjectIndexStore(),
-        language: .python,
-        discoverUnitRoot: true
+        language: .python
     )
     let session = try ProjectIndexer().completeSnapshot(prepared)
 
@@ -870,8 +848,7 @@ func nestedRustCrateAndSuperStayInsideUnitRoot() throws {
     let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshot(
         snapshot,
         into: ProjectIndexStore(),
-        language: .rust,
-        discoverUnitRoot: true
+        language: .rust
     )
     let session = try ProjectIndexer().completeSnapshot(prepared)
 
@@ -1482,6 +1459,7 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
     private let lock = NSLock()
     private var listCount = 0
     private var readCount = 0
+    private var readsByPath: [String: Int] = [:]
 
     init(files: [String: [UInt8]] = [
         "never.rs": Array("never".utf8),
@@ -1502,8 +1480,15 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
         }.sorted { $0.path < $1.path }
     }
 
+    func reads(of path: String) -> Int {
+        lock.withLock { readsByPath[path, default: 0] }
+    }
+
     func readBytes(path: String) throws -> [UInt8] {
-        lock.withLock { readCount += 1 }
+        lock.withLock {
+            readCount += 1
+            readsByPath[path, default: 0] += 1
+        }
         guard let bytes = files[path] else { throw GitError.missingPath(path) }
         return bytes
     }

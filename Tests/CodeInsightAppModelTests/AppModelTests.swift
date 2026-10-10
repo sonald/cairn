@@ -1632,104 +1632,6 @@ func singletonCollectionPreparePreservesLegacyRootWithoutUnitDiscovery() async t
 }
 
 @Test
-func ambiguousAndNonGitFailBeforePersistentCache() async throws {
-    let nonGit = try temporaryProject([
-        "a.rs": "fn a() {}\n",
-    ])
-    let nonGitCache = try indexCachePaths(for: nonGit)
-    defer {
-        for path in nonGitCache { try? FileManager.default.removeItem(atPath: path) }
-        try? FileManager.default.removeItem(at: nonGit)
-    }
-    do {
-        _ = try await ProjectIndexService().captureSnapshot(
-            root: nonGit,
-            revision: nil,
-            languages: [.rust, .python]
-        )
-        Issue.record("mixed non-Git capture unexpectedly succeeded")
-    } catch is GitError {
-    } catch {
-        Issue.record("unexpected mixed non-Git error: \(error)")
-    }
-    do {
-        _ = try await ProjectIndexService().prepareSnapshots(
-            CountingIndexSnapshot(
-                files: ["a.rs": Array("fn a() {}\n".utf8)],
-                configurationPaths: []
-            ),
-            root: nonGit,
-            languages: [.rust, .python]
-        )
-        Issue.record("mixed non-Git prepare unexpectedly succeeded")
-    } catch is GitError {
-    } catch {
-        Issue.record("unexpected mixed non-Git prepare error: \(error)")
-    }
-    #expect(nonGitCache.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
-
-    let ambiguousRoot = try temporaryGitProject([
-        "a/src/main.rs": "fn a() {}\n",
-        "b/src/main.rs": "fn b() {}\n",
-        "a/Cargo.toml": "[package]\nname = \"a\"\n",
-        "b/Cargo.toml": "[package]\nname = \"b\"\n",
-        "p.py": "def p():\n    pass\n",
-    ])
-    let ambiguousPaths = try indexCachePaths(for: ambiguousRoot)
-    defer {
-        for path in ambiguousPaths { try? FileManager.default.removeItem(atPath: path) }
-        try? FileManager.default.removeItem(at: ambiguousRoot)
-    }
-    let snapshot = try await ProjectIndexService().captureSnapshot(
-        root: ambiguousRoot,
-        revision: nil,
-        languages: [.rust, .python]
-    )
-    do {
-        _ = try await ProjectIndexService().prepareSnapshots(
-            snapshot,
-            root: ambiguousRoot,
-            languages: [.rust, .python]
-        )
-        Issue.record("ambiguous mixed prepare unexpectedly succeeded")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-    } catch {
-        Issue.record("ambiguous mixed prepare threw unexpected error: \(error)")
-    }
-    #expect(ambiguousPaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
-}
-
-@Test
-func preparedSnapshotIdentityMismatchFailsWithoutPartial() async throws {
-    let root = try temporaryGitProject([
-        "src/lib.rs": "fn f() {}\n",
-        "Cargo.toml": "[package]\nname = \"x\"\n",
-    ])
-    let cachePaths = try indexCachePaths(for: root)
-    defer {
-        try? FileManager.default.removeItem(at: root)
-        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
-    }
-    let snapshot = CountingIndexSnapshot(
-        files: ["src/lib.rs": Array("fn f() {}\n".utf8)],
-        configurationPaths: ["Cargo.toml"],
-        stableIdentity: false
-    )
-    do {
-        _ = try await ProjectIndexService().prepareSnapshots(
-            snapshot,
-            root: root,
-            languages: [.rust, .python]
-        )
-        Issue.record("identity mismatch unexpectedly prepared")
-    } catch let error as CocoaError {
-        #expect(error.code == .coderInvalidValue)
-    }
-    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
-}
-
-@Test
 func indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets() async throws {
     let service = CountingIndexService()
     let root = try temporaryProject([:])
@@ -2432,25 +2334,15 @@ private actor CountingIndexService: IndexService {
 }
 
 private struct CountingIndexSnapshot: Snapshot {
-    var snapshotID: SnapshotID {
-        stableIdentity ? SnapshotID(rawValue: stableUUID) : SnapshotID(rawValue: UUID())
-    }
+    let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.tracked
     let configurationPaths: [String]
     private let files: [String: [UInt8]]
-    private let stableIdentity: Bool
-    private let stableUUID: UUID
 
-    init(
-        files: [String: [UInt8]],
-        configurationPaths: [String],
-        stableIdentity: Bool = true
-    ) {
+    init(files: [String: [UInt8]], configurationPaths: [String]) {
         self.files = files
         self.configurationPaths = configurationPaths
-        self.stableIdentity = stableIdentity
-        stableUUID = UUID()
     }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {

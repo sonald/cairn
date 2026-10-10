@@ -1481,16 +1481,11 @@ struct SessionRestoreIndexService: IndexService {
         languages: [LanguageID]
     ) async throws -> [ProjectIndexer.PreparedSnapshot] {
         try await Task.detached {
-            let normalized = try LanguageMode.normalize(languages: languages)
-            let store = ProjectIndexStore()
-            return try normalized.map { language in
-                try ProjectIndexer().prepareSnapshot(
-                    snapshot,
-                    into: store,
-                    language: language,
-                    discoverUnitRoot: true
-                )
-            }
+            try ProjectIndexer().prepareSnapshots(
+                snapshot,
+                into: ProjectIndexStore(),
+                languages: LanguageMode.normalize(languages: languages)
+            )
         }.value
     }
 

@@ -312,15 +312,16 @@ func profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() throws 
         ]
     )
 
-    #expect(throws: CocoaError.self) {
-        _ = try ProfileDetector.detect(
-            snapshot: snapshot,
-            language: .typescript,
-            sourcePaths: snapshot.visiblePaths,
-            configurationPaths: snapshot.configurationPaths,
-            internPath: { interner.intern($0) }
-        )
-    }
+    // "tools/py" is not a prefix of "tools/py2", so no marker covers the
+    // TypeScript source and the unit falls back to the repository root.
+    let typescript = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .typescript,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+    #expect(typescript.projectRoot == interner.intern("."))
     let rust = try ProfileDetector.detect(
         snapshot: snapshot,
         language: .rust,
@@ -394,32 +395,36 @@ func unsafeRelativePathsAreRejectedBeforeRootSelection() throws {
 }
 
 @Test
-func singleMarkerNotCoveringAllSourceFailsInsteadOfFallingBackToDot() throws {
+func markersThatDoNotCoverEverySourceFallBackToDot() throws {
     let interner = Interner<PathID>()
-    let snapshot = ProfileSnapshot(
-        projectRootName: "partial",
-        visiblePaths: [
-            "a/src/inside.rs",
-            "outside.rs",
-        ],
-        configurationPaths: [
-            "a/Cargo.toml",
-        ],
-        bytesByPath: [
-            "a/src/inside.rs": Array("fn inside() {}\n".utf8),
-            "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
-            "outside.rs": Array("fn outside() {}\n".utf8),
-        ]
-    )
-
-    #expect(throws: CocoaError.self) {
-        _ = try ProfileDetector.detect(
+    let bytes: [String: [UInt8]] = [
+        "a/src/inside.rs": Array("fn inside() {}\n".utf8),
+        "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
+        "b/src/lib.rs": Array("fn b() {}\n".utf8),
+        "b/Cargo.toml": Array("[package]\nname = \"b\"\n".utf8),
+        "outside.rs": Array("fn outside() {}\n".utf8),
+    ]
+    // One marker with a source outside it, and two independent markers.
+    let cases: [(sources: [String], markers: [String])] = [
+        (["a/src/inside.rs", "outside.rs"], ["a/Cargo.toml"]),
+        (["a/src/inside.rs", "b/src/lib.rs"], ["a/Cargo.toml", "b/Cargo.toml"]),
+    ]
+    for (sources, markers) in cases {
+        let snapshot = ProfileSnapshot(
+            projectRootName: "partial",
+            visiblePaths: sources,
+            configurationPaths: markers,
+            bytesByPath: bytes
+        )
+        let profile = try ProfileDetector.detect(
             snapshot: snapshot,
             language: .rust,
             sourcePaths: snapshot.visiblePaths,
             configurationPaths: snapshot.configurationPaths,
             internPath: { interner.intern($0) }
         )
+        #expect(profile.projectRoot == interner.intern("."), "\(markers)")
+        #expect(profile.projectUnitName == "partial")
     }
 }
 

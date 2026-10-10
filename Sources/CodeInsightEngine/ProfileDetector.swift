@@ -99,11 +99,12 @@ enum ProfileDetector {
         if markerRoots.isEmpty {
             return "."
         }
+        // No marker covers every source (independent crates or Python
+        // projects without a shared parent): the unit is the repository
+        // root, so no source falls outside the active view. Rust Exact then
+        // reports the missing root Cargo.toml through its usual reason.
         let valid = markerRoots.filter { root in
             sources.allSatisfy { isWithin(root: root, path: $0) }
-        }
-        guard !valid.isEmpty else {
-            throw multipleUnits(language)
         }
         return valid.min {
             ($0.isEmpty ? 0 : $0.split(separator: "/").count)
@@ -159,13 +160,6 @@ enum ProfileDetector {
         CocoaError(.fileReadInvalidFileName, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 "invalid relative path for project unit root: \(path)",
-        ])
-    }
-
-    private static func multipleUnits(_ language: LanguageID) -> CocoaError {
-        CocoaError(.featureUnsupported, userInfo: [
-            NSLocalizedFailureReasonErrorKey:
-                "multiple \(language) project units are not supported in L3 V0",
         ])
     }
 

@@ -210,42 +210,45 @@ public struct ProjectIndexer: Sendable {
         into store: ProjectIndexStore,
         language: LanguageID
     ) throws -> PreparedSnapshot {
-        try prepareSnapshot(
-            snapshot,
-            into: store,
-            language: language,
-            discoverUnitRoot: false
-        )
+        try prepareSnapshots(snapshot, into: store, languages: [language])[0]
     }
 
-    package func prepareSnapshot(
+    /// One pass over the snapshot for every language in the project's set:
+    /// each file is read once into one shared manifest, and each language
+    /// gets its own prepared session over the shared store.
+    public func prepareSnapshots(
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore,
-        language: LanguageID,
-        discoverUnitRoot: Bool
-    ) throws -> PreparedSnapshot {
-        let extractor = try languageExtractor(for: language)
+        languages: [LanguageID]
+    ) throws -> [PreparedSnapshot] {
+        let extractors = try languages.map(languageExtractor(for:))
         try Task.checkCancellation()
         let startedAt = Date()
         let stored = store.snapshot()
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
-        let profile = try profile(
-            snapshot: snapshot,
-            language: language,
-            sourcePaths: files.map(\.path),
-            store: store,
-            discoverUnitRoot: discoverUnitRoot
-        )
+        let sourcePaths = files.map(\.path)
+        let profiles = try languages.map { language in
+            try validated(
+                ProfileDetector.detect(
+                    snapshot: snapshot,
+                    language: language,
+                    sourcePaths: sourcePaths,
+                    configurationPaths: snapshot.configurationPaths,
+                    internPath: { store.paths.intern($0) }
+                ),
+                for: language
+            )
+        }
         var occurrences: [FileOccurrence] = []
-        var newInputs: [ExtractionInput] = []
-        var missingKeys: Set<ContentIndexKey> = []
-        var reusedKeys: Set<ContentIndexKey> = []
+        var newInputs = Array(repeating: [ExtractionInput](), count: languages.count)
+        var missingKeys = Array(repeating: Set<ContentIndexKey>(), count: languages.count)
+        var reusedKeys = Array(repeating: Set<ContentIndexKey>(), count: languages.count)
         var capturedBytes: [ContentID: [UInt8]] = [:]
 
         for (offset, file) in files.enumerated() {
             try Task.checkCancellation()
             let bytes = try snapshot.readBytes(path: file.path)
-            let mode = LanguageMode.classify(path: file.path, language: language)
+            let mode = LanguageMode.classify(path: file.path, languages: languages)
             // Only semantic sources and real configuration reach the
             // long-lived store; non-source payloads stay in the snapshot,
             // where previews and the manifest read them by path.
@@ -266,47 +269,59 @@ public struct ProjectIndexer: Sendable {
                 fileMode: file.fileMode,
                 size: UInt64(bytes.count)
             ))
-            guard let mode, file.fileMode != .lfsPointer else { continue }
+            guard let mode, file.fileMode != .lfsPointer,
+                  let slot = languages.firstIndex(of: mode.language)
+            else { continue }
             let key = try contentKey(
                 contentID: file.contentID,
                 mode: mode,
-                extractor: extractor
+                extractor: extractors[slot]
             )
             if stored.contentIndexes[key] != nil {
-                reusedKeys.insert(key)
-            } else if missingKeys.insert(key).inserted {
-                newInputs.append(ExtractionInput(
-                    order: newInputs.count,
+                reusedKeys[slot].insert(key)
+            } else if missingKeys[slot].insert(key).inserted {
+                newInputs[slot].append(ExtractionInput(
+                    order: newInputs[slot].count,
                     bytes: bytes,
                     key: key
                 ))
             }
         }
         try Task.checkCancellation()
-        var missingInputs: [ExtractionInput] = []
-        var leadingDrafts: [ExtractionDraft] = []
-        var deferredDrafts: [ExtractionDraft] = []
-        var canInstallCachedDraft = true
-        var readyReusedKeys = reusedKeys
-        let cachedByOrder = Dictionary(uniqueKeysWithValues: loadCachedDrafts(
-            for: newInputs
-        ).map { ($0.order, $0) })
-        for input in newInputs {
-            if let draft = cachedByOrder[input.order] {
-                reusedKeys.insert(input.key)
-                if canInstallCachedDraft {
-                    leadingDrafts.append(draft)
-                    readyReusedKeys.insert(input.key)
-                } else {
-                    deferredDrafts.append(draft)
-                }
-            } else {
-                canInstallCachedDraft = false
-                missingInputs.append(input)
-            }
-        }
         store.insert(capturedBytes)
-        store.insert(remap(leadingDrafts, into: store))
+        var pending: [(
+            missing: [ExtractionInput],
+            deferred: [ExtractionDraft],
+            readyReusedCount: Int,
+            reusedCount: Int
+        )] = []
+        for slot in languages.indices {
+            var missingInputs: [ExtractionInput] = []
+            var leadingDrafts: [ExtractionDraft] = []
+            var deferredDrafts: [ExtractionDraft] = []
+            var canInstallCachedDraft = true
+            var reused = reusedKeys[slot]
+            var readyReused = reused
+            let cachedByOrder = Dictionary(uniqueKeysWithValues: loadCachedDrafts(
+                for: newInputs[slot]
+            ).map { ($0.order, $0) })
+            for input in newInputs[slot] {
+                if let draft = cachedByOrder[input.order] {
+                    reused.insert(input.key)
+                    if canInstallCachedDraft {
+                        leadingDrafts.append(draft)
+                        readyReused.insert(input.key)
+                    } else {
+                        deferredDrafts.append(draft)
+                    }
+                } else {
+                    canInstallCachedDraft = false
+                    missingInputs.append(input)
+                }
+            }
+            store.insert(remap(leadingDrafts, into: store))
+            pending.append((missingInputs, deferredDrafts, readyReused.count, reused.count))
+        }
         let storedAfterCache = store.snapshot()
 
         let manifest = SnapshotManifest(
@@ -315,78 +330,36 @@ public struct ProjectIndexer: Sendable {
             ruleExcludedPathCount: snapshot.ruleExcludedPaths.count,
             nonSourcePathCount: occurrences.filter { $0.detectedLanguage == nil }.count
         )
-        let stats = try snapshotStats(
-            manifest: manifest,
-            paths: store.paths,
-            stored: storedAfterCache,
-            extractor: extractor,
-            reusedCount: readyReusedKeys.count,
-            extractedCount: 0,
-            startedAt: startedAt
-        )
-        let view = SnapshotView(
-            store: store,
-            manifest: manifest,
-            stats: stats,
-            analysisProfile: profile,
-            extractor: extractor
-        )
-        return PreparedSnapshot(
-            cachedSession: EngineSession(store: store, snapshotView: view),
-            store: store,
-            manifest: manifest,
-            analysisProfile: profile,
-            extractor: extractor,
-            missingInputs: missingInputs,
-            deferredDrafts: deferredDrafts,
-            cache: cache,
-            reusedCount: reusedKeys.count,
-            startedAt: startedAt
-        )
-    }
-
-    package func validatedProfiles(
-        snapshot: any Snapshot,
-        languages: [LanguageID],
-        store: ProjectIndexStore
-    ) throws -> [AnalysisProfile] {
-        let files = snapshot.listFiles()
-        let sourcePaths = files.map(\.path)
-        return try languages.map { language in
-            try profile(
-                snapshot: snapshot,
-                language: language,
-                sourcePaths: sourcePaths,
+        return try languages.indices.map { slot in
+            let stats = try snapshotStats(
+                manifest: manifest,
+                paths: store.paths,
+                stored: storedAfterCache,
+                extractor: extractors[slot],
+                reusedCount: pending[slot].readyReusedCount,
+                extractedCount: 0,
+                startedAt: startedAt
+            )
+            let view = SnapshotView(
                 store: store,
-                discoverUnitRoot: true
+                manifest: manifest,
+                stats: stats,
+                analysisProfile: profiles[slot],
+                extractor: extractors[slot]
+            )
+            return PreparedSnapshot(
+                cachedSession: EngineSession(store: store, snapshotView: view),
+                store: store,
+                manifest: manifest,
+                analysisProfile: profiles[slot],
+                extractor: extractors[slot],
+                missingInputs: pending[slot].missing,
+                deferredDrafts: pending[slot].deferred,
+                cache: cache,
+                reusedCount: pending[slot].reusedCount,
+                startedAt: startedAt
             )
         }
-    }
-
-    private func profile(
-        snapshot: any Snapshot,
-        language: LanguageID,
-        sourcePaths: [String],
-        store: ProjectIndexStore,
-        discoverUnitRoot: Bool
-    ) throws -> AnalysisProfile {
-        if discoverUnitRoot {
-            return try validated(
-                ProfileDetector.detect(
-                    snapshot: snapshot,
-                    language: language,
-                    sourcePaths: sourcePaths,
-                    configurationPaths: snapshot.configurationPaths,
-                    internPath: { store.paths.intern($0) }
-                ),
-                for: language
-            )
-        }
-        return try analysisProfile(
-            snapshot: snapshot,
-            language: language,
-            projectRoot: store.paths.intern(".")
-        )
     }
 
     public func completeSnapshot(
@@ -550,36 +523,6 @@ public struct ProjectIndexer: Sendable {
         case .typescript:
             profile = ProfileDetector.detect(
                 projectURL: root,
-                language: language,
-                projectRoot: projectRoot
-            )
-        case .javascript:
-            throw unsupportedLanguage(language)
-        }
-        return try validated(profile, for: language)
-    }
-
-    private func analysisProfile(
-        snapshot: any Snapshot,
-        language: LanguageID,
-        projectRoot: PathID
-    ) throws -> AnalysisProfile {
-        let profile: AnalysisProfile
-        switch language {
-        case .rust:
-            profile = ProfileDetector.detect(
-                snapshot: snapshot,
-                projectRoot: projectRoot
-            )
-        case .python:
-            profile = ProfileDetector.detect(
-                snapshot: snapshot,
-                language: language,
-                projectRoot: projectRoot
-            )
-        case .typescript:
-            profile = ProfileDetector.detect(
-                snapshot: snapshot,
                 language: language,
                 projectRoot: projectRoot
             )
