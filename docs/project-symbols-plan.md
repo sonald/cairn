@@ -1,8 +1,7 @@
-# 项目符号浏览计划（未实现）
+# 项目符号浏览：待原生验收
 
-> 状态：需求与决定已确认（2026-10-11，D1–D7 全部按推荐值），待实施。**以下能力均未实现**，不得写入 README 或 [产品说明](product.md) 作为现有功能。
-> 原型：[project-symbols-prototype.html](project-symbols-prototype.html)（浏览器打开，可切三主题；数据是示意，不是真实索引）。
-> 完成后把仍有效的行为归入 `product.md`，删除本文件和原型。
+> 状态（2026-10-11）：B1–B8 已实现，现行行为见 [product.md](product.md)“项目符号面板”与“当前限制”，模型属性测试与集成测试通过。剩下的是 P3 第 6 步的**打包应用原生交互验收**：本轮后台控制未获授权，全部路径 BLOCKED，不能视为已验收。B1、B7、B8（抽取器事实与引擎数据）已由 golden 与集成测试覆盖，从本文删除；B2–B6 留作验收对照。验收完成后删除本文和原型。
+> 原型：[project-symbols-prototype.html](project-symbols-prototype.html)（示意数据，不是真实索引）。
 
 ## 要解决的问题
 
@@ -40,14 +39,6 @@
 6. **键位进入集中表**，文案同时加 `en.lproj` 和 `zh-Hans.lproj`，AppKit 只进 `CodeInsightApp`。
 
 ---
-
-## B1 数据来源
-
-- **B1.1** 数据是当前快照里每个分析单元 session 的 `contentIndexes` 中的 `symbols`，按 `SnapshotView` 的活动文件过滤，所以同一语言的多个单元不会重复列出同一文件；被项目排除规则剪掉的路径不出现。
-- **B1.2** 每行携带：名称、`DeclarationKind`、所属（`parentFacetIndex` 链）、文件路径、行号、可见性（B7）、语言与单元。impl 块行另带 `ImplRelation` 的 trait 名。
-- **B1.3** 列出的种类按 `DeclarationShape` 归成九个组：函数、方法、结构体/类、枚举、trait/接口、类型别名、impl、模块、常量/静态；字段不成组，只作为类型行的子项（D5）。"方法"的定义是父 facet 为类型、impl 或 trait 的函数（Rust `rustMethod`，Python/TypeScript 父为 class 的函数）。
-- **B1.4** 当前不是 facet 的东西不出现：Rust 枚举变体、宏，Python 模块级变量，TypeScript 的 interface/type alias/enum 在 P1 完成前。大纲能看到而项目符号没有的条目，需要在面板的 `?` 说明里列出，避免被当成 bug。
-- **B1.5** 枚举全部 facet 在后台进行，结果是不可变数组，主线程只做树的物化与过滤。目标：5 万个 facet 的首次构建在 Apple Silicon 上低于 300ms（实施时只取少量样本确认方向，不做反复 p95）。
 
 ## B2 组织方式
 
@@ -109,22 +100,6 @@
 - **B6.5** 图标与颜色复用 `SidebarViewController` 的 `symbolName(for:)` / `symbolColor(for:)`：加一个 `DeclarationKind → OutlineKind` 的映射（interface 复用 trait 图标），不复制一份按形状的分支。
 - **B6.6** 可见性在行首用一个 9pt 的小记号表示：实心圆 = 公开，半圆 = 受限，空心圆 = 私有，不适用不画；辅助功能文本写全称。
 
-## B7 可见性事实
-
-`DeclarationFacet` 新增 `visibility: DeclarationVisibility?`（`public` / `restricted` / `private`，`nil` = 不适用），初始化参数默认 `nil`。缓存 codec 格式 4 → 5，旧缓存重建；Rust/Python/TypeScript 的 `extractorVersion` 各升一位。
-
-| 语言 | 公开 | 受限 | 私有 | 不适用 |
-| --- | --- | --- | --- | --- |
-| Rust | `pub` | `pub(crate)`、`pub(super)`、`pub(in …)` | 无修饰（含 `mod tests` 这类私有模块本身） | impl 块；trait 内的方法签名与默认方法；`impl Trait for T` 里的方法 |
-| TypeScript | 顶层声明被 `export`（含 `export default` 与后置 `export { x }`，用现有 `ExportRecord` 判断）；类成员无修饰或 `public` | 类成员 `protected` | 顶层未导出；类成员 `private` 或 `#name`；嵌套函数 | — |
-| Python | 名字不以 `_` 开头，或是 `__x__` 形式 | — | 以 `_` 开头且不是 `__x__`；嵌套函数 | — |
-
-固有 impl（`impl Log { }`）里的方法按自身修饰判断。Rust 字段按修饰判断；Python/TypeScript 字段目前不是 facet。
-
-## B8 TypeScript 新种类（D1 已采纳）
-
-若采纳：`DeclarationKind` 新增 `typescriptInterface = 15`、`typescriptTypeAlias = 16`、`typescriptEnum = 17`，形状分别映射到 `.trait`、`.typeAlias`、`.enum`；抽取器在 `interface_declaration`、`type_alias_declaration`、`enum_declaration` 处产出 facet（名称节点为 `type_identifier` / `identifier`），作用域与执行区域不变。它们随 B7 一起升 `extractorVersion`，不额外多一次缓存重建。接口里的方法签名不产出 facet，保持与现在 `abstract_method_signature` 的处理一致。
-
 ---
 
 ## 已决定（2026-10-11，全部采用推荐值）
@@ -139,40 +114,6 @@
 | D6 | 是否同时加 CLI `codeinsight symbols` | **可选，放在 P2 末尾** | 给集成测试一个稳定边界，与 `search` 一样支持 `--json`；不是面板上线的前提 |
 | D7 | 跨文件 impl 何时合并到类型行 | **同文件 impl 总是挂；跨文件 impl 只在该名字在单元内唯一时合并并打标** | 真实 crate 里 `Config`、`Error`、`State` 常重名，无条件按名称合并会让每个类型行挂上别人的 impl |
 
-## 实施计划
+## 剩余验收
 
-四个切片，依赖关系：P1 → P2 → P3；P4 贯穿。每个切片完成后把已实现的行为写进 [product.md](product.md)，从本文删除对应的 B 节；全部完成后删除本文和原型。
-
-### P1 抽取器事实：B7 + B8
-
-1. `CodeInsightCore`：`DeclarationVisibility` 枚举与 `DeclarationFacet.visibility`；D1 采纳时同时加三个 `DeclarationKind` case 与 `DeclarationShape` 映射。`kindWeight` 给新种类补权重（interface 18、typeAlias 14、enum 18，与 Rust 同类一致）。
-2. `RustDeclarations.enter` 读 `visibility_modifier` 子节点（`RustImports.swift` 已有识别写法）；trait 容器内与 trait impl 内的函数记 `nil`。
-3. `TypeScriptExtractor`：顶层声明的可见性在收齐 `ExportRecord` 后回填（后置 `export { x }` 在声明之后）；类成员读 `accessibility_modifier` 与 `private_property_identifier`。D1 采纳时在 `collectDeclarations` 对应分支产出 facet。
-4. `PythonExtractor`：按名字规则赋值；嵌套函数记 `private`。
-5. `ContentIndexDraftCodec` 格式 5，三个 `extractorVersion` 升位；`CanonicalDump` 输出可见性，goldset 相应更新。
-6. **验证**：三语言 fixture 各加少量用例（`pub(crate)`、后置 export、`#private`、`__x__`、trait 方法为 nil）作为 `CanonicalDump` 的 golden；codec 往返的现有测试覆盖新字段；旧格式缓存被重建而不是误解码。
-
-### P2 引擎枚举与模块路径：B1 + B2 的数据侧
-
-1. `EngineSession` 新增一个只读枚举接口：遍历活动文件的全部 facet，产出 B1.2 所述的行（含 `SymbolOccurrenceID`，供 Context 与关系命令复用）。`contentIndexes` 以内容为键，字节相同的文件共享一份索引，所以必须像 `definitionOccurrences` 那样按 `occurrences(of:)` 展开成每个文件一行。不做评分，不设上限。
-2. `ModuleMap` 新增公开的 `modulePath(of: PathID) -> [NameID]?`（Rust 沿 `parentModules` 上溯到 crate 根；到不了根返回 `nil`），以及 crate 根集合。Python/TypeScript 的路径规则在同一处实现，供面板与"复制限定名"共用。
-3. 可选（D6）：CLI `symbols` 子命令，`--kind`、`--public`、`--path`、`--json`，复用同一枚举接口。
-4. **验证**：一个集成测试在 `fixtures/` 的多单元项目上检查：每个文件恰好出现在一个单元下、未挂载文件进入兜底节点、计数与 `CanonicalDump` 一致；模块路径对 `mod.rs`、`foo.rs`、内联 `mod` 三种写法各一例。
-
-### P3 面板：B2–B6
-
-1. `CodeInsightAppModel` 新增 `ProjectSymbolsPanelModel`：持有不可变行数组、组织方式、过滤状态、树的物化与过滤结果、过期与选中恢复；不导入 AppKit。过滤文字复用 `SymbolSearchIndex`，组织方式切换不重新枚举。
-2. `PanelID.symbols`、`PanelLayout.standard`、`视图 → 面板` 菜单项、`⌃⌘S`（`KeyBindings` 默认表 + `CommandID`）、`panel.symbols.*` 文案。
-3. `CodeInsightApp` 新增一个面板控制器（`NSOutlineView`，懒物化子项），工具栏为过滤框、种类/模块分段、过滤按钮（弹出种类勾选、仅公开、范围）、定位按钮；底部计数行；右键菜单接到 `MainWindowController` 现有命令。
-4. 单击/方向键走搜索结果面板的"预览并闪烁、焦点留在列表"路径；回车/双击走"保留打开"路径；Context 按符号模式接收 `SymbolOccurrenceID`。
-5. 过期与恢复按 B5；偏好按 B6.4 写 UserDefaults。
-6. **验证**：
-   - 模型层属性测试：任意过滤组合下，容器节点保留当且仅当存在匹配后代；计数等于可见叶子数；选中恢复只在 contentID 一致时成功。
-   - 集成测试：首帧缓存会话 → 完整会话的静默替换保留展开与选中；切换 commit 后旧行禁导航、新树恢复选中。
-   - 原生应用（打包后）：在 toydb 或 tokio 上走一遍——`⌃⌘S` 打开并聚焦、空查询列出全部、种类/模块切换、输入过滤、仅公开、当前目录、单击预览与 Context 跟随、回车打开、右键查看调用者、定位当前符号、切换 commit 后的过期与恢复、180pt 窄面板、三主题截图。结果分 PASS / FAIL / BLOCKED 记录。
-
-### P4 文档
-
-1. 把已实现的行为写进 `product.md` 的"Reader 与导航"（面板一段）与"当前限制"（B1.4 的不出现项、可见性是句法修饰、Python 不读 `__all__`）。
-2. `architecture.md` 的面板布局段落补一句新面板；"身份与源码事实"补可见性字段与 codec 格式 5。
-3. `?` 说明文案列出 B1.4 的差异，避免反复被报成 bug。
+实现见提交 1cb4701、27cd13e、8283098、1837acd、47c1678。打包应用（`CAIRN_LIBGIT2=brew bash scripts/make-app.sh`）在 toydb 或 tokio 上走一遍：`⌃⌘S` 打开并聚焦、空查询列出全部、种类/模块切换、输入过滤、仅公开、当前目录、单击预览与 Context 跟随、回车打开、右键查看调用者、定位当前符号、切换 commit 后的过期与恢复、180pt 窄面板、三主题截图。结果分 PASS / FAIL / BLOCKED 记录，通过后把结论写进 product.md“当前限制”的项目符号行，删除本文与原型和 [docs/README.md](README.md) 的计划行。

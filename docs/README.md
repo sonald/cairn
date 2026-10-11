@@ -14,7 +14,7 @@
 
 | 计划 | 内容 |
 | --- | --- |
-| [项目符号浏览](project-symbols-plan.md) | 不输入名字就按种类或模块列出整个项目的声明；可见性事实、TypeScript 新种类待决；附[交互原型](project-symbols-prototype.html) |
+| [项目符号浏览](project-symbols-plan.md) | 不输入名字就按种类或模块列出整个项目的声明；已实现，剩打包应用的原生交互验收（BLOCKED）；附[交互原型](project-symbols-prototype.html) |
 
 仓库工作规则集中在 [AGENTS.md](../AGENTS.md)。README 面向使用者；源码中的类型、命令和脚本参数是实现细节的查证入口，不在文档复制一份完整清单。
 
