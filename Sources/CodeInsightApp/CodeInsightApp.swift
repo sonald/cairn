@@ -1202,6 +1202,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.toggleProjectSearchResults()
     }
 
+    @objc private func toggleProjectSymbols(_ sender: Any?) {
+        projectCommandTarget()?.toggleProjectSymbols()
+    }
+
+    @objc private func locateProjectSymbol(_ sender: Any?) {
+        projectCommandTarget()?.locateCurrentProjectSymbol()
+    }
+
     @objc private func findInFile(_ sender: Any?) {
         _ = projectCommandTarget()?.showFindBar()
     }
@@ -1467,6 +1475,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         case #selector(toggleProjectSearchResults(_:)):
             menuItem.state = target?.isPanelShown(.search) == true ? .on : .off
             return target != nil
+        case #selector(toggleProjectSymbols(_:)):
+            menuItem.state = target?.isPanelShown(.symbols) == true ? .on : .off
+            return target != nil
+        case #selector(locateProjectSymbol(_:)):
+            return target != nil
         case #selector(togglePanel(_:)):
             let id = (menuItem.representedObject as? String).flatMap(PanelID.init(rawValue:))
             menuItem.state = id.map { target?.isPanelShown($0) == true } == true ? .on : .off
@@ -1666,6 +1679,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .viewPanelDocs: CommandAction(
             #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.docs.rawValue
         ),
+        .viewPanelSymbols: CommandAction(#selector(AppDelegate.toggleProjectSymbols(_:))),
+        .viewLocateProjectSymbol: CommandAction(#selector(AppDelegate.locateProjectSymbol(_:))),
         .viewRestoreDefaultLayout: CommandAction(#selector(AppDelegate.restoreDefaultLayout(_:))),
         .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
         .viewReadingHeightFull: CommandAction(#selector(AppDelegate.useFullReadingHeight(_:))),
@@ -1935,6 +1950,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             (.context, .viewPanelContext),
             (.search, .toggleProjectSearchResults),
             (.docs, .viewPanelDocs),
+            (.symbols, .viewPanelSymbols),
         ]
         for (panel, id) in panelCommands {
             let before = panelsMenu.items.count
@@ -1943,6 +1959,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
         panelsItem.submenu = panelsMenu
         viewMenu.addItem(panelsItem)
+        appendMenuItem(for: .viewLocateProjectSymbol, to: viewMenu)
         appendMenuItem(for: .viewRestoreDefaultLayout, to: viewMenu)
         viewMenu.addItem(.separator())
         appendMenuItem(for: .viewCloseComparison, to: viewMenu)

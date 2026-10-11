@@ -8,6 +8,7 @@ public enum PanelID: String, CaseIterable, Sendable {
     case context
     case search
     case docs
+    case symbols
 }
 
 /// The side zones stack their panels top to bottom; the bottom zone, under
@@ -36,10 +37,10 @@ public struct PanelLayout: Equatable, Sendable {
     public var readerSplitFraction: Double
 
     public static let standard = PanelLayout(
-        zones: [.left: [.files, .outline], .right: [.relations, .context, .search, .docs], .bottom: []],
-        hidden: [.relations, .search, .docs],
+        zones: [.left: [.files, .outline, .symbols], .right: [.relations, .context, .search, .docs], .bottom: []],
+        hidden: [.relations, .search, .docs, .symbols],
         zoneWidths: [.left: 240, .right: 300, .bottom: 260],
-        heights: [.files: 0.55, .outline: 0.45, .relations: 0.5, .context: 0.25, .search: 0.25, .docs: 0],
+        heights: [.files: 0.55, .outline: 0.45, .relations: 0.5, .context: 0.25, .search: 0.25, .docs: 0, .symbols: 0],
         readerSplitFraction: 0.5
     )
 
@@ -150,7 +151,8 @@ public struct PanelLayout: Equatable, Sendable {
 
     /// Decodes a stored layout. Unknown panel IDs are dropped, duplicates
     /// keep their first place, missing panels return to the end of their
-    /// default zone, and non-finite or out-of-range numbers fall back to
+    /// default zone in their default visibility (a panel added after the
+    /// layout was saved starts hidden if it does by default), and non-finite or out-of-range numbers fall back to
     /// their defaults. Data that is not a layout at all yields `standard`.
     public static func decode(_ data: Data?) -> PanelLayout {
         guard let data, let stored = try? JSONDecoder().decode(Stored.self, from: data) else {
@@ -171,8 +173,10 @@ public struct PanelLayout: Equatable, Sendable {
                 }
             }
         }
+        var hidden = stored.hidden.map { Set($0.compactMap(PanelID.init(rawValue:))) } ?? standard.hidden
         for panel in PanelID.allCases where !zones.values.contains(where: { $0.contains(panel) }) {
             zones[standard.zone(of: panel).zone]!.append(panel)
+            if standard.hidden.contains(panel) { hidden.insert(panel) }
         }
         for panel in PanelID.allCases where heights[panel] == nil {
             heights[panel] = standard.heights[panel]
@@ -186,7 +190,7 @@ public struct PanelLayout: Equatable, Sendable {
         let fraction = stored.readerSplitFraction ?? standard.readerSplitFraction
         return PanelLayout(
             zones: zones,
-            hidden: stored.hidden.map { Set($0.compactMap(PanelID.init(rawValue:))) } ?? standard.hidden,
+            hidden: hidden,
             zoneWidths: zoneWidths,
             heights: heights,
             readerSplitFraction: fraction > 0 && fraction < 1 ? fraction : standard.readerSplitFraction

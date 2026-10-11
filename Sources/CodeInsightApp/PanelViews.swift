@@ -382,5 +382,6 @@ func panelTitle(_ id: PanelID) -> String {
     case .context: localized("main.context")
     case .search: localized("panel.query.results")
     case .docs: localized("panel.docs")
+    case .symbols: localized("panel.symbols")
     }
 }

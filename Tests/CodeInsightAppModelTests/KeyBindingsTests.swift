@@ -8,6 +8,10 @@ import Testing
 func defaultKeyBindingSchemeHasNoConflicts() {
     let table = KeyBindingTable(scheme: .default)
     #expect(table.conflicts().isEmpty)
+    // ⌃⌘S belongs to the project symbols panel alone.
+    let symbols = KeyBinding.keyboard(KeyChord(modifiers: [.control, .command], key: .character("s")))
+    #expect(table.commands(boundTo: symbols) == [.viewPanelSymbols])
+    #expect(!table.isLocked(symbols))
     // The checker itself must be able to see a conflict: two commands bound
     // to the same keyboard chord show up grouped with both command IDs.
     let duplicated = KeyBindingScheme(

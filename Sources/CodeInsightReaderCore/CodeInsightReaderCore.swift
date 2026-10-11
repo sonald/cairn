@@ -123,6 +123,26 @@ public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
         case .const, .static, .field, .enumMember: .value
         }
     }
+
+    /// The outline's kind for an indexed declaration, so every list shows
+    /// the same icon; `isMethod` marks a Python/TypeScript function of a class.
+    public init(_ kind: DeclarationKind, isMethod: Bool) {
+        self = switch kind {
+        case .rustFn: .fn
+        case .rustMethod: .method
+        case .pythonFunction, .typescriptFunction: isMethod ? .method : .fn
+        case .rustStruct: .struct
+        case .rustEnum, .typescriptEnum: .enum
+        case .rustTrait, .typescriptInterface: .trait
+        case .rustImpl: .impl
+        case .rustMod: .mod
+        case .rustConst: .const
+        case .rustStatic: .static
+        case .rustTypeAlias, .typescriptTypeAlias: .typeAlias
+        case .rustField: .field
+        case .pythonClass, .typescriptClass: .class
+        }
+    }
 }
 
 public struct OutlineFacet: Equatable, Sendable {

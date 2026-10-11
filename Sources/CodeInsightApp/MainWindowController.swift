@@ -176,6 +176,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let docsController = DocumentationPanelController(
         model: DocumentationPanelModel(source: DashIntegration.documentationSource)
     )
+    private let symbolsPanel = ProjectSymbolsPanel(model: ProjectSymbolsPanelModel())
     /// Screen rects of recently hovered tokens, so the card anchors to the
     /// token it shows even after the pointer moved on.
     private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
@@ -1884,7 +1885,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let self else { return }
             self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
         }
-        for controller in [sidebarController, relationController, contextController, panel, docsController]
+        symbolsPanel.host = self
+        for controller in [sidebarController, relationController, contextController, panel, docsController, symbolsPanel]
             as [NSViewController] {
             host.addChild(controller)
         }
@@ -1896,6 +1898,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             (.context, contextController.view, []),
             (.search, panel.view, []),
             (.docs, docsController.view, []),
+            (.symbols, symbolsPanel.view, []),
         ]
         for (id, content, accessories) in contents {
             let chrome = PanelChromeView(id: id, title: panelTitle(id), content: content, accessories: accessories)
@@ -1929,6 +1932,31 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func previousProjectSearchResult() { searchPanel?.moveResult(by: -1) }
     func toggleProjectSearchResults() {
         if isPanelShown(.search) { setPanelVisible(.search, false) } else { showProjectSearch() }
+    }
+
+    /// ⌃⌘S: show the project symbols and focus their filter; pressed again
+    /// while the filter has focus, hide the panel (B6.3).
+    func toggleProjectSymbols() {
+        if isPanelShown(.symbols), symbolsPanel.filterHasFocus {
+            setPanelVisible(.symbols, false)
+        } else {
+            setPanelVisible(.symbols, true)
+            symbolsPanel.focusFilter()
+        }
+    }
+
+    func locateCurrentProjectSymbol() {
+        setPanelVisible(.symbols, true)
+        symbolsPanel.locate()
+    }
+
+    /// The panel follows the window's sessions and the focused source file.
+    private func refreshProjectSymbols() {
+        symbolsPanel.model.update(from: model)
+        if let file = paneFile(for: focusedReader), let path = projectPath(for: file),
+           LanguageMode.classify(path: path, languages: model.projectLanguages) != nil {
+            symbolsPanel.model.setCurrentFile(path)
+        }
     }
 
     func selfTestSetProjectSearchQuery(_ query: String) {
@@ -2294,7 +2322,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard chromes[id] != nil else { return false }
         switch contentSurfaceMode {
         case .noProject: return false
-        case .nonSource: if id != .files { return false }
+        // Project symbols stay through a non-source preview (B5.4).
+        case .nonSource: if id != .files && id != .symbols { return false }
         case .source, nil: break
         }
         // The split needs width; the bottom zone shares the reader's.
@@ -2550,6 +2579,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         palettePanel?.apply(settings: settings)
         searchPanel?.apply(settings: settings)
         docsController.apply(settings: settings)
+        symbolsPanel.apply(settings: settings)
         for chrome in chromes.values { chrome.apply(theme: theme) }
         for zoneView in zoneViews.values { zoneView.apply(theme: theme) }
         bookmarkPanel?.apply(settings: settings)
@@ -3068,6 +3098,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         palettePanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+        refreshProjectSymbols()
         bookmarkPanel?.refresh()
     }
 
@@ -4821,4 +4852,54 @@ final class ThemeSelectionRowView: NSTableRowView {
         selectionColor.setFill()
         bounds.fill()
     }
+}
+
+extension MainWindowController: ProjectSymbolsPanelHost {
+    /// The search results' path: preview in a tab and flash the name; the
+    /// Context follows as it does for a search hit.
+    func openProjectSymbol(path: String, nameRange: ByteRange, contentID: ContentID, focusReader: Bool) {
+        guard let root = model.fileTree?.root else { return }
+        let file = root.appendingPathComponent(path)
+        if model.selectedFile?.standardizedFileURL != file.standardizedFileURL
+            || model.selectedByteOffset != nameRange.lowerBound {
+            navigate(to: file, byteOffset: nameRange.lowerBound, cause: .search, expectedContentID: contentID)
+        }
+        readerController.revealProjectSearchMatch(nameRange, expectedContentID: contentID)
+        if focusReader { readerController.focusText() }
+    }
+
+    func openProjectSymbolToSide(path: String, offset: UInt32) {
+        guard let root = model.fileTree?.root else { return }
+        openReference(root.appendingPathComponent(path), byteOffset: offset)
+    }
+
+    func showProjectSymbolRelations(path: String, offset: UInt32, direction: RelationTreeModel.Direction) {
+        setPanelVisible(.relations, true)
+        Task { [weak self] in
+            guard let self,
+                  let candidate = await model.contextWindow.resolvedCandidate(file: path, offset: offset),
+                  let symbol = candidate.symbol
+            else { return }
+            showRelations(target: .engine(symbol), direction: direction)
+        }
+    }
+
+    func toggleProjectSymbolHighlight(name: String) { toggleHighlight(name: name) }
+
+    func revealProjectSymbolFile(path: String) {
+        guard let root = model.fileTree?.root else { return }
+        setPanelVisible(.files, true)
+        _ = selectFileInSidebar(root.appendingPathComponent(path))
+    }
+
+    func currentSymbolLocation() -> (path: String, offset: UInt32)? {
+        if let candidate = model.contextWindow.displayedCandidate {
+            return (candidate.path, candidate.targetByteOffset)
+        }
+        guard let caret = lastLensCaret, let file = paneFile(for: caret.reader),
+              let path = projectPath(for: file) else { return nil }
+        return (path, caret.offset)
+    }
+
+    func returnFocusToReader() { readerController.focusText() }
 }

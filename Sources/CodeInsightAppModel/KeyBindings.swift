@@ -178,6 +178,8 @@ extension CommandID {
     public static let viewPanelOutline = CommandID(rawValue: "view.panel.outline")
     public static let viewPanelContext = CommandID(rawValue: "view.panel.context")
     public static let viewPanelDocs = CommandID(rawValue: "view.panel.docs")
+    public static let viewPanelSymbols = CommandID(rawValue: "view.panel.symbols")
+    public static let viewLocateProjectSymbol = CommandID(rawValue: "view.symbols.locate")
     public static let viewRestoreDefaultLayout = CommandID(rawValue: "view.restoreDefaultLayout")
     public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
     public static let viewCloseSplit = CommandID(rawValue: "view.closeSplit")
@@ -390,6 +392,10 @@ public extension KeyBindingScheme {
             def(.viewPanelOutline, .view, "app.menu.show.hide.outline", []),
             def(.viewPanelContext, .view, "app.menu.show.hide.context", []),
             def(.viewPanelDocs, .view, "app.menu.show.hide.docs", []),
+            def(.viewPanelSymbols, .view, "app.menu.show.hide.symbols", [
+                keyboard([.control, .command], .character("s")),
+            ]),
+            def(.viewLocateProjectSymbol, .view, "panel.symbols.locate", []),
             def(.viewRestoreDefaultLayout, .view, "app.menu.restore.default.layout", []),
             def(.viewOpenToSide, .view, "app.menu.open.to.side", [
                 keyboard([.command], .character("\\")),

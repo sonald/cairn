@@ -747,10 +747,10 @@ final class SidebarViewController: NSViewController,
         let image = cell.arrangedSubviews[0] as! NSImageView
         let label = cell.arrangedSubviews[1] as! NSTextField
         let detail = cell.arrangedSubviews[2] as! NSTextField
-        image.contentTintColor = symbolColor(for: node.kind)
+        image.contentTintColor = Self.symbolColor(for: node.kind, theme: theme)
         label.textColor = theme.foregroundColor
         image.image = NSImage(
-            systemSymbolName: symbolName(for: node.kind),
+            systemSymbolName: Self.symbolName(for: node.kind),
             accessibilityDescription: nil
         )
         label.stringValue = node.title
@@ -789,7 +789,7 @@ final class SidebarViewController: NSViewController,
         return cell
     }
 
-    private func symbolName(for kind: OutlineKind) -> String {
+    static func symbolName(for kind: OutlineKind) -> String {
         switch kind {
         case .fn: "function"
         case .method: "m.square"
@@ -806,7 +806,7 @@ final class SidebarViewController: NSViewController,
         }
     }
 
-    private func symbolColor(for kind: OutlineKind) -> NSColor {
+    static func symbolColor(for kind: OutlineKind, theme: ReaderTheme) -> NSColor {
         switch kind {
         case .struct, .class, .trait, .typeAlias: theme.color(for: .typeName)
         case .enum, .enumMember, .const, .static: theme.color(for: .number)
