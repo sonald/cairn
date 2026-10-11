@@ -1,0 +1,63 @@
+scopes:
+  - #0 module 1:1..29:1 bytes=0..<454
+    - #1 impl 7:1..11:2 bytes=92..<195
+      - #2 function 8:5..8:32 bytes=107..<134
+        - #3 block 8:30..8:32 bytes=132..<134
+      - #4 function 9:5..9:37 bytes=139..<171
+        - #5 block 9:35..9:37 bytes=169..<171
+      - #6 function 10:5..10:22 bytes=176..<193
+        - #7 block 10:20..10:22 bytes=191..<193
+    - #8 function 15:5..15:23 bytes=245..<263
+      - #9 block 15:21..15:23 bytes=261..<263
+    - #10 impl 18:1..20:2 bytes=267..<320
+      - #11 function 19:5..19:30 bytes=293..<318
+        - #12 block 19:25..19:30 bytes=313..<318
+    - #13 module 26:1..28:2 bytes=417..<453
+      - #14 function 27:5..27:23 bytes=433..<451
+        - #15 block 27:21..27:23 bytes=449..<451
+bindings:
+  - #0 scope=#2 kind=param name=self at=8:24..8:28 bytes=126..<130 typeRef=selfType@7:6..7:9 bytes=97..<100
+  - #1 scope=#4 kind=param name=self at=9:29..9:33 bytes=163..<167 typeRef=selfType@7:6..7:9 bytes=97..<100
+  - #2 scope=#6 kind=param name=self at=10:14..10:18 bytes=185..<189 typeRef=selfType@7:6..7:9 bytes=97..<100
+  - #3 scope=#0 kind=param name=self at=14:13..14:17 bytes=228..<232
+  - #4 scope=#8 kind=param name=self at=15:15..15:19 bytes=255..<259
+  - #5 scope=#11 kind=param name=self at=19:13..19:17 bytes=301..<305 typeRef=selfType@18:17..18:20 bytes=283..<286
+regions:
+  - #0 kind=method scope=#2 facet=#5 range=8:5..8:32 bytes=107..<134
+  - #1 kind=method scope=#4 facet=#6 range=9:5..9:37 bytes=139..<171
+  - #2 kind=method scope=#6 facet=#7 range=10:5..10:22 bytes=176..<193
+  - #3 kind=method scope=#8 facet=#10 range=15:5..15:23 bytes=245..<263
+  - #4 kind=method scope=#11 facet=#12 range=19:5..19:30 bytes=293..<318
+  - #5 kind=constantInitializer scope=#0 facet=#13 range=22:42..22:43 bytes=363..<364
+  - #6 kind=constantInitializer scope=#0 facet=#14 range=23:30..23:31 bytes=395..<396
+  - #7 kind=function scope=#14 facet=#17 range=27:5..27:23 bytes=433..<451
+contentRegions:
+  (none)
+facets:
+  - #0 kind=rustStruct space=type name=Log parent=- nameAt=1:12..1:15 bytes=11..<14 range=1:1..5:2 bytes=0..<90 visibility=public
+  - #1 kind=rustField space=value name=entries parent=Log nameAt=2:9..2:16 bytes=25..<32 range=2:5..2:25 bytes=21..<41 typeRef=primitive@2:22..2:24 bytes=38..<40 visibility=public
+  - #2 kind=rustField space=value name=cursor parent=Log nameAt=3:16..3:22 bytes=58..<64 range=3:5..3:29 bytes=47..<71 typeRef=primitive@3:24..3:29 bytes=66..<71 visibility=restricted
+  - #3 kind=rustField space=value name=secret parent=Log nameAt=4:5..4:11 bytes=77..<83 range=4:5..4:15 bytes=77..<87 typeRef=primitive@4:13..4:15 bytes=85..<87 visibility=private
+  - #4 kind=rustImpl space=type name=Log parent=- nameAt=7:6..7:9 bytes=97..<100 range=7:1..11:2 bytes=92..<195 visibility=-
+  - #5 kind=rustMethod space=value name=append parent=Log nameAt=8:12..8:18 bytes=114..<120 range=8:5..8:32 bytes=107..<134 visibility=public
+  - #6 kind=rustMethod space=value name=trim parent=Log nameAt=9:19..9:23 bytes=153..<157 range=9:5..9:37 bytes=139..<171 visibility=restricted
+  - #7 kind=rustMethod space=value name=scan parent=Log nameAt=10:8..10:12 bytes=179..<183 range=10:5..10:22 bytes=176..<193 visibility=private
+  - #8 kind=rustTrait space=type name=Engine parent=- nameAt=13:11..13:17 bytes=207..<213 range=13:1..16:2 bytes=197..<265 visibility=public
+  - #9 kind=rustMethod space=value name=get parent=Engine nameAt=14:8..14:11 bytes=223..<226 range=14:5..14:25 bytes=220..<240 visibility=-
+  - #10 kind=rustMethod space=value name=flush parent=Engine nameAt=15:8..15:13 bytes=248..<253 range=15:5..15:23 bytes=245..<263 visibility=-
+  - #11 kind=rustImpl space=type name=Log parent=- nameAt=18:17..18:20 bytes=283..<286 range=18:1..20:2 bytes=267..<320 visibility=-
+  - #12 kind=rustMethod space=value name=get parent=Log nameAt=19:8..19:11 bytes=296..<299 range=19:5..19:30 bytes=293..<318 visibility=-
+  - #13 kind=rustConst space=value name=LIMIT parent=- nameAt=22:27..22:32 bytes=348..<353 range=22:1..22:44 bytes=322..<365 visibility=restricted
+  - #14 kind=rustStatic space=value name=COUNT parent=- nameAt=23:18..23:23 bytes=383..<388 range=23:1..23:32 bytes=366..<397 visibility=private
+  - #15 kind=rustTypeAlias space=type name=Alias parent=- nameAt=24:6..24:11 bytes=403..<408 range=24:1..24:18 bytes=398..<415 visibility=private
+  - #16 kind=rustMod space=module name=tests parent=- nameAt=26:5..26:10 bytes=421..<426 range=26:1..28:2 bytes=417..<453 visibility=private
+  - #17 kind=rustFn space=value name=helper parent=tests nameAt=27:12..27:18 bytes=440..<446 range=27:5..27:23 bytes=433..<451 visibility=public
+implRelations:
+  - impl=#4 trait=- traitAt=- type=Log
+  - impl=#11 trait=Engine traitAt=18:6..18:12 bytes=272..<278 type=Log
+calls:
+  (none)
+imports:
+  (none)
+exports:
+  (none)

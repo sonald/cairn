@@ -126,6 +126,20 @@ public enum DeclarationKind: UInt8, Codable, Sendable {
     case pythonClass = 12
     case typescriptFunction = 13
     case typescriptClass = 14
+    case typescriptInterface = 15
+    case typescriptTypeAlias = 16
+    case typescriptEnum = 17
+}
+
+/// The visibility modifier written at a declaration (`pub`, `export`, a
+/// leading `_`). It is syntax, not reachability: a `pub` item in a private
+/// module is still `.public`. `nil` on a facet means the language gives the
+/// declaration no modifier of its own (impl blocks, trait members).
+public enum DeclarationVisibility: UInt8, Codable, Sendable {
+    case `public`
+    /// `pub(crate)`, `pub(super)`, `pub(in …)`, TypeScript `protected`.
+    case restricted
+    case `private`
 }
 
 public struct SymbolGroupID: Codable, Hashable, Sendable {
@@ -148,6 +162,7 @@ public struct DeclarationFacet: Codable, Sendable {
     public let bodyFingerprint: ContentID?
     /// Where a field's type is spelled (only fields carry it today).
     public let typeRef: TypeRef?
+    public let visibility: DeclarationVisibility?
 
     public init(
         symbolGroupID: SymbolGroupID,
@@ -159,7 +174,8 @@ public struct DeclarationFacet: Codable, Sendable {
         parentFacetIndex: UInt32?,
         signatureFingerprint: ContentID?,
         bodyFingerprint: ContentID?,
-        typeRef: TypeRef? = nil
+        typeRef: TypeRef? = nil,
+        visibility: DeclarationVisibility? = nil
     ) {
         self.symbolGroupID = symbolGroupID
         self.space = space
@@ -171,6 +187,18 @@ public struct DeclarationFacet: Codable, Sendable {
         self.signatureFingerprint = signatureFingerprint
         self.bodyFingerprint = bodyFingerprint
         self.typeRef = typeRef
+        self.visibility = visibility
+    }
+
+    /// The same facet with another visibility (extractors that learn it
+    /// after the walk, such as TypeScript's trailing `export { x }`).
+    public func with(visibility: DeclarationVisibility?) -> DeclarationFacet {
+        DeclarationFacet(
+            symbolGroupID: symbolGroupID, space: space, kind: kind, nameID: nameID,
+            range: range, nameRange: nameRange, parentFacetIndex: parentFacetIndex,
+            signatureFingerprint: signatureFingerprint, bodyFingerprint: bodyFingerprint,
+            typeRef: typeRef, visibility: visibility
+        )
     }
 }
 

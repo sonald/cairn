@@ -616,7 +616,7 @@ private enum CanonicalDumperProvider {
     ) -> String {
         var lines = ["facets:"]
         for f in index.symbols.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
-            lines.append("  - \(names.resolve(f.nameID)) kind=\(f.kind.rawValue) parent=\(f.parentFacetIndex?.description ?? "-")")
+            lines.append("  - \(names.resolve(f.nameID)) kind=\(f.kind.rawValue) parent=\(f.parentFacetIndex?.description ?? "-") visibility=\(f.visibility.map { "\($0)" } ?? "-")")
         }
         lines.append("bindings:")
         for b in index.bindings.sorted(by: { $0.declarationRange.lowerBound < $1.declarationRange.lowerBound }) {

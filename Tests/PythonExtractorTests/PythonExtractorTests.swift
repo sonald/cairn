@@ -382,6 +382,23 @@ func basicPackageFixtureCoversFileExtractionAndPythonFeatures() throws {
 }
 
 
+@Test
+func visibilityFollowsUnderscoreConventionAndNesting() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/visibility", isDirectory: true)
+    let result = try extract(fileURL: root.appendingPathComponent("main.py"))
+    let dump = result.index.symbols.map {
+        "\(result.names.resolve($0.nameID)) kind=\($0.kind) parent=\($0.parentFacetIndex?.description ?? "-") visibility=\($0.visibility.map { "\($0)" } ?? "-")"
+    }.joined(separator: "\n") + "\n"
+    let goldenURL = root.appendingPathComponent("dump.golden")
+    if ProcessInfo.processInfo.environment["RECORD"] == "1" {
+        try dump.write(to: goldenURL, atomically: true, encoding: .utf8)
+    } else {
+        #expect(dump == (try String(contentsOf: goldenURL, encoding: .utf8)))
+    }
+}
+
 private struct ExtractionResult {
     let source: String
     let index: ContentIndex

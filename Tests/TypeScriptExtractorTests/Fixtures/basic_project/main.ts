@@ -22,3 +22,22 @@ import * as all from "./all"
 
 export { renamed } from "./barrel"
 export * from "./wild"
+
+class Store {
+    load() {}
+    protected save() {}
+    private drop() {}
+    #seal() {}
+}
+
+export interface Shape {
+    area(): number
+}
+
+type Point = { x: number }
+
+export enum Color { Red, Green }
+
+const later = () => 0
+
+export { later, Store as Box }

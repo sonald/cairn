@@ -1,0 +1,3 @@
+# Visibility facts live in dump.golden: pub, pub(crate)/pub(super)/pub(in …),
+# pub(self) and no modifier; impl blocks, trait members and trait-impl
+# methods carry none.

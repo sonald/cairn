@@ -738,7 +738,8 @@ public struct ProjectIndexer: Sendable {
                     parentFacetIndex: $0.parentFacetIndex,
                     signatureFingerprint: $0.signatureFingerprint,
                     bodyFingerprint: $0.bodyFingerprint,
-                    typeRef: $0.typeRef
+                    typeRef: $0.typeRef,
+                    visibility: $0.visibility
                 )
             },
             implRelations: index.implRelations.map {

@@ -62,6 +62,32 @@ private struct PreviousRegionExtractor: LanguageExtractor {
 }
 
 @Test
+func draftCodecKeepsVisibilityAndRejectsFormatFourPayloads() throws {
+    let bytes = Array("pub struct A; impl A { pub(crate) fn f(&self) {} }\n".utf8)
+    let key = ContentIndexKey(
+        contentID: ContentID.sha256(of: bytes), languageMode: LanguageMode(language: .rust),
+        grammarVersion: RustExtractorInfo.grammarVersion, extractorVersion: RustExtractorInfo.extractorVersion
+    )
+    let names = Interner<NameID>()
+    let strings = Interner<StringID>()
+    let index = try RustExtractor().extract(
+        bytes: bytes, key: key, interner: ExtractionInterners(names: names, strings: strings)
+    )
+    let data = try ContentIndexDraftCodec.encode(ExtractionDraft(
+        order: 0, bytes: bytes, index: index, names: names, strings: strings, containsErrorNodes: false
+    ))
+    let decoded = try ContentIndexDraftCodec.decode(data, order: 0, bytes: bytes, expectedKey: key)
+    #expect(decoded.index.symbols.map(\.visibility) == [.public, nil, .restricted])
+
+    // A format-4 cache (old magic byte) is rebuilt, never decoded.
+    var old = data
+    old[old.startIndex + 4] = 0x04
+    #expect(throws: DraftCodecError.self) {
+        try ContentIndexDraftCodec.decode(old, order: 0, bytes: bytes, expectedKey: key)
+    }
+}
+
+@Test
 func malformedContentRegionCacheCannotEnterSearchIndex() throws {
     let bytes = Array("// comment\n\"string\"".utf8)
     let key = ContentIndexKey(

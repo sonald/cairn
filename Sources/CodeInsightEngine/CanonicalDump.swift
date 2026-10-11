@@ -74,6 +74,7 @@ public enum CanonicalDump {
             if let typeRef = facet.typeRef {
                 line += " typeRef=\(formatTypeRef(typeRef, table: index.lineTable))"
             }
+            line += " visibility=\(facet.visibility.map { "\($0)" } ?? "-")"
             lines.append(line)
         }
         appendNoneIfNeeded(to: &lines, count: index.symbols.count)

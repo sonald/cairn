@@ -2,8 +2,8 @@ import CodeInsightCore
 import Foundation
 
 package enum ContentIndexDraftCodec {
-    private static let formatVersion: UInt32 = 4
-    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x04])
+    private static let formatVersion: UInt32 = 5
+    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x05])
 
     private struct Payload: Codable {
         let formatVersion: UInt32

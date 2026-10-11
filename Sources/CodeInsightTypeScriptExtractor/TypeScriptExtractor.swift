@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct TypeScriptExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 4
+    public static let extractorVersion: UInt32 = 5
 
     #if DEBUG
     @TaskLocal
@@ -204,6 +204,10 @@ private func buildIndex(
     var imports: [ImportBinding] = []
     var exports: [ExportRecord] = []
     var facetStack: [UInt32] = []
+    /// Module-level names an `export` makes public, by their local name
+    /// (`export { a as b }` exports the local `a`). Read after the walk,
+    /// since a trailing `export { x }` follows its declaration.
+    var exportedLocalNames: Set<String> = []
 
     func pushScope(_ node: Node, kind: ScopeKind, parent: ScopeID?) -> ScopeID {
         let id = ScopeID(rawValue: UInt32(scopes.count))
@@ -428,7 +432,8 @@ let tsPrimitiveNames: Set<String> = [
                 nameRange: coreRange(name),
                 parentFacetIndex: facetStack.last,
                 signatureFingerprint: fingerprint(declarationRange(node, body: body), bytes: bytes),
-                bodyFingerprint: fingerprint(coreRange(body), bytes: bytes)
+                bodyFingerprint: fingerprint(coreRange(body), bytes: bytes),
+                visibility: isMethod ? memberVisibility(node, name: name) : nil
             ))
             facetStack.append(index)
         }
@@ -463,7 +468,47 @@ let tsPrimitiveNames: Set<String> = [
             nameRange: coreRange(name),
             parentFacetIndex: facetStack.last,
             signatureFingerprint: fingerprint(coreRange(node), bytes: bytes),
-            bodyFingerprint: nil
+            bodyFingerprint: nil,
+            visibility: memberVisibility(node, name: name)
+        ))
+    }
+
+    /// A class member's `public`/`protected`/`private` or `#name`; no
+    /// modifier is public.
+    func memberVisibility(_ node: Node, name: Node) -> DeclarationVisibility {
+        if name.kind == "private_property_identifier" { return .private }
+        let modifier = node.namedChildren
+            .first { $0.kind == "accessibility_modifier" }
+            .flatMap { text($0, in: bytes) }
+        switch modifier {
+        case "private": return .private
+        case "protected": return .restricted
+        default: return .public
+        }
+    }
+
+    /// `interface`, `type` and `enum` at module level: a facet without a
+    /// scope or region of its own; the walk continues into the body.
+    func emitTypeDeclaration(_ node: Node, kind: DeclarationKind) {
+        guard shouldEmitTopLevelFacet(),
+              let name = childField(node, "name"),
+              let nameString = text(name, in: bytes)
+        else { return }
+        let index = UInt32(symbols.count)
+        let body = childField(node, "body")
+        symbols.append(DeclarationFacet(
+            symbolGroupID: SymbolGroupID(rawValue: index),
+            space: kind == .typescriptEnum ? .value : .type,
+            kind: kind,
+            nameID: names.intern(nameString),
+            range: coreRange(node),
+            nameRange: coreRange(name),
+            parentFacetIndex: facetStack.last,
+            signatureFingerprint: fingerprint(
+                body.map { declarationRange(node, body: $0) } ?? coreRange(node),
+                bytes: bytes
+            ),
+            bodyFingerprint: body.flatMap { fingerprint(coreRange($0), bytes: bytes) }
         ))
     }
 
@@ -776,12 +821,20 @@ let tsPrimitiveNames: Set<String> = [
                        let name = text(nameNode, in: bytes)
                     {
                         appendNamedExport(name, range: coreRange(child))
+                        exportedLocalNames.insert(name)
                     }
                 }
             } else if let name = declarationFacetName(declaration) {
                 appendNamedExport(name, range: coreRange(declaration))
+                exportedLocalNames.insert(name)
             }
             return
+        }
+        // `export default name;` makes the local declaration public.
+        if let value = childField(node, "value"), value.kind == "identifier",
+           let name = text(value, in: bytes)
+        {
+            exportedLocalNames.insert(name)
         }
         if let source = childField(node, "source"),
            let specifier = unquote(source, in: bytes)
@@ -829,6 +882,7 @@ let tsPrimitiveNames: Set<String> = [
                 else { continue }
                 let exported = text(childField(child, "alias") ?? nameNode, in: bytes) ?? name
                 appendNamedExport(name, range: coreRange(child))
+                exportedLocalNames.insert(name)
                 if exported != name {
                     exports[exports.count - 1] = ExportRecord(
                         exportedName: names.intern(exported),
@@ -875,6 +929,12 @@ let tsPrimitiveNames: Set<String> = [
         case "abstract_method_signature":
             emitMethodSignature(node)
             return
+        case "interface_declaration":
+            emitTypeDeclaration(node, kind: .typescriptInterface)
+        case "type_alias_declaration":
+            emitTypeDeclaration(node, kind: .typescriptTypeAlias)
+        case "enum_declaration":
+            emitTypeDeclaration(node, kind: .typescriptEnum)
         case "lexical_declaration", "variable_declaration":
             enterVariableDeclaration(node)
             return
@@ -928,6 +988,12 @@ let tsPrimitiveNames: Set<String> = [
     walk(root)
     popRegion()
     popScope()
+    // Module-level declarations are public when exported; members already
+    // carry their own modifier.
+    for (offset, facet) in symbols.enumerated() where facet.parentFacetIndex == nil {
+        let name = names.resolve(facet.nameID)
+        symbols[offset] = facet.with(visibility: exportedLocalNames.contains(name) ? .public : .private)
+    }
 
     return ContentIndex(
         key: key,

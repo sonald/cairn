@@ -802,6 +802,7 @@ public final class EngineSession: Sendable {
     static let typeKinds: Set<DeclarationKind> = [
         .rustStruct, .rustEnum, .rustTrait, .rustTypeAlias,
         .pythonClass, .typescriptClass,
+        .typescriptInterface, .typescriptTypeAlias, .typescriptEnum,
     ]
 
     public func tokenRange(
@@ -975,6 +976,8 @@ public final class EngineSession: Sendable {
         case .pythonClass: 22
         case .typescriptFunction: 24
         case .typescriptClass: 22
+        case .typescriptInterface, .typescriptEnum: 18
+        case .typescriptTypeAlias: 14
         }
     }
 }

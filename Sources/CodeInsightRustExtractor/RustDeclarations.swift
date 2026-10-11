@@ -20,6 +20,8 @@ struct RustDeclarations {
         let owner: RustNodeKey
         let facetIndex: UInt32
         let kind: DeclarationKind
+        /// `impl Trait for T`: its methods take the trait's visibility.
+        let implementsTrait: Bool
     }
 
     let bytes: [UInt8]
@@ -115,7 +117,8 @@ struct RustDeclarations {
             parentFacetIndex: parentFacetIndex(for: kind),
             signatureFingerprint: fingerprints.signature,
             bodyFingerprint: fingerprints.body,
-            typeRef: fieldTypeRef
+            typeRef: fieldTypeRef,
+            visibility: visibility(of: node, kind: kind, byteOffset: byteOffset)
         ))
 
         var implTypeNameID: NameID?
@@ -151,7 +154,9 @@ struct RustDeclarations {
             containers.append(Container(
                 owner: RustNodeKey(node, byteOffset: byteOffset),
                 facetIndex: facetIndex,
-                kind: kind
+                kind: kind,
+                implementsTrait: kind == .rustImpl
+                    && implementationNames(in: node)?.trait != nil
             ))
         }
 
@@ -169,6 +174,28 @@ struct RustDeclarations {
         if containers.last?.owner == RustNodeKey(node, byteOffset: byteOffset) {
             containers.removeLast()
         }
+    }
+
+    /// The written modifier. Impl blocks, trait members and the members of
+    /// a trait impl have none of their own.
+    private func visibility(
+        of node: Node,
+        kind: DeclarationKind,
+        byteOffset: UInt32
+    ) -> DeclarationVisibility? {
+        if kind == .rustImpl { return nil }
+        if kind != .rustField, let container = containers.last,
+           container.kind == .rustTrait || container.implementsTrait
+        {
+            return nil
+        }
+        guard let modifier = node.directNamedChild(where: { $0.kind == "visibility_modifier" }),
+              let text = modifier.text(in: bytes, byteOffset: byteOffset)
+        else { return .private }
+        let compact = text.filter { !$0.isWhitespace }
+        if compact == "pub" { return .public }
+        if compact == "pub(self)" { return .private }
+        return .restricted
     }
 
     private func isMember(parent: Node?) -> Bool {

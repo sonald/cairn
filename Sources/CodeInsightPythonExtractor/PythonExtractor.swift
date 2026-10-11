@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 4
+    public static let extractorVersion: UInt32 = 5
 
     public init() {}
 
@@ -329,6 +329,14 @@ private func buildIndex(
         ))
     }
 
+    /// `_name` is private by convention, `__name__` is not; anything
+    /// declared inside a function is private to it.
+    func visibility(of name: String, parent: UInt32?) -> DeclarationVisibility {
+        if let parent, symbols[Int(parent)].kind == .pythonFunction { return .private }
+        if name.hasPrefix("__") && name.hasSuffix("__") && name.count > 4 { return .public }
+        return name.hasPrefix("_") ? .private : .public
+    }
+
     func enterFunction(
         _ node: Node,
         wrapper: Node,
@@ -364,7 +372,8 @@ private func buildIndex(
                 ),
                 bytes: bytes
             ),
-            bodyFingerprint: fingerprint(bodyRange, bytes: bytes)
+            bodyFingerprint: fingerprint(bodyRange, bytes: bytes),
+            visibility: visibility(of: nameString, parent: parentFacet)
         ))
         facetStack.append(facetIndex)
         let parentScope = scopeStack.last(where: {
@@ -398,7 +407,8 @@ private func buildIndex(
                 ),
                 bytes: bytes
             ),
-            bodyFingerprint: fingerprint(bodyRange, bytes: bytes)
+            bodyFingerprint: fingerprint(bodyRange, bytes: bytes),
+            visibility: visibility(of: nameString, parent: facetStack.last)
         ))
         facetStack.append(facetIndex)
         let scopeID = pushScope(body, kind: .class, parent: currentScope())

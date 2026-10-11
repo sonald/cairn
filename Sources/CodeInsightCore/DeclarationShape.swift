@@ -36,10 +36,10 @@ public extension DeclarationKind {
         switch self {
         case .rustFn, .rustMethod, .pythonFunction, .typescriptFunction: .function
         case .rustStruct: .struct
-        case .rustEnum: .enum
+        case .rustEnum, .typescriptEnum: .enum
         case .pythonClass, .typescriptClass: .class
-        case .rustTypeAlias: .typeAlias
-        case .rustTrait: .trait
+        case .rustTypeAlias, .typescriptTypeAlias: .typeAlias
+        case .rustTrait, .typescriptInterface: .trait
         case .rustImpl: .impl
         case .rustMod: .module
         case .rustConst, .rustStatic, .rustField: .value
@@ -52,7 +52,8 @@ public extension DeclarationKind {
              .rustConst, .rustStatic, .rustTypeAlias, .rustMethod, .rustField:
             .rust
         case .pythonFunction, .pythonClass: .python
-        case .typescriptFunction, .typescriptClass: .typescript
+        case .typescriptFunction, .typescriptClass, .typescriptInterface,
+             .typescriptTypeAlias, .typescriptEnum: .typescript
         }
     }
 

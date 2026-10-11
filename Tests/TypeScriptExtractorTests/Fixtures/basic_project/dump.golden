@@ -1,9 +1,18 @@
 facets:
-  - model kind=13 parent=-
-  - hidden kind=13 parent=-
-  - Widget kind=14 parent=-
-  - method kind=13 parent=2
-  - run kind=13 parent=-
+  - model kind=13 parent=- visibility=public
+  - hidden kind=13 parent=- visibility=private
+  - Widget kind=14 parent=- visibility=public
+  - method kind=13 parent=2 visibility=public
+  - run kind=13 parent=- visibility=public
+  - Store kind=14 parent=- visibility=public
+  - load kind=13 parent=5 visibility=public
+  - save kind=13 parent=5 visibility=restricted
+  - drop kind=13 parent=5 visibility=private
+  - #seal kind=13 parent=5 visibility=private
+  - Shape kind=15 parent=- visibility=public
+  - Point kind=16 parent=- visibility=private
+  - Color kind=17 parent=- visibility=public
+  - later kind=13 parent=- visibility=public
 bindings:
   - value kind=0 scope=1
   - label kind=0 scope=4
@@ -12,6 +21,7 @@ bindings:
   - renamed kind=2 scope=0
   - TypeOnly kind=2 scope=0
   - all kind=2 scope=0
+  - later kind=1 scope=0
 calls:
 imports:
   - ./models kind=1 flags=0
@@ -25,3 +35,7 @@ exports:
   - run
   - alias
   - renamed
+  - Shape
+  - Color
+  - later
+  - Box

@@ -11,7 +11,7 @@ regions:
 contentRegions:
   (none)
 facets:
-  - #0 kind=rustFn space=value name=f parent=- nameAt=1:4..1:5 bytes=3..<4 range=1:1..8:2 bytes=0..<42
+  - #0 kind=rustFn space=value name=f parent=- nameAt=1:4..1:5 bytes=3..<4 range=1:1..8:2 bytes=0..<42 visibility=private
 implRelations:
   (none)
 calls:
