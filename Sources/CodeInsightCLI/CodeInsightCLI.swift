@@ -14,7 +14,7 @@ struct CodeInsight: AsyncParsableCommand {
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
-            Search.self, Symsearch.self, SnapshotCommand.self, SwitchStats.self,
+            Search.self, Symsearch.self, Symbols.self, SnapshotCommand.self, SwitchStats.self,
             Goldset.self, ExactDef.self, ExactTypeDef.self, ExactHover.self,
         ]
     )
@@ -1077,6 +1077,57 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         }
     }
 
+    struct Symbols: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List every indexed declaration of the project (one row per file)."
+        )
+
+        @OptionGroup var options: ProjectOptions
+
+        @Option(name: .long, help: "Comma-separated shapes: function, struct, enum, class, typeAlias, trait, impl, module, value.")
+        var kind: String?
+
+        @Flag(name: .long, help: "Only declarations written as public (pub, export, no leading _).")
+        var `public` = false
+
+        @Option(name: .long, help: "Only files under this project-relative path.")
+        var path: String?
+
+        func run() throws {
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
+            let listing = try session.projectSymbols(context: queryContext(for: session))
+            let shapes = kind.map { Set($0.split(separator: ",").map(String.init)) }
+            let rows = listing.symbols.filter { symbol in
+                let file = listing.files[symbol.fileIndex].path
+                return (shapes?.contains(String(describing: symbol.kind.shape)) ?? true)
+                    && (!self.public || symbol.visibility == .public)
+                    && (path.map { isWithin(root: $0, path: file) } ?? true)
+            }.map { symbol in
+                ProjectSymbolJSON(
+                    name: symbol.name,
+                    kind: String(describing: symbol.kind),
+                    visibility: symbol.visibility.map { String(describing: $0) },
+                    file: listing.files[symbol.fileIndex].path,
+                    line: symbol.line,
+                    module: listing.files[symbol.fileIndex].modulePath,
+                    implTrait: symbol.implTraitName
+                )
+            }
+            if options.global.json {
+                try printJSON(rows)
+            } else {
+                for row in rows {
+                    print("\(row.file):\(row.line)  \(row.kind)  \(row.visibility ?? "-")  \(row.name)")
+                }
+                print("\(rows.count) symbols in \(Set(rows.map(\.file)).count) files")
+            }
+        }
+    }
+
     struct Search: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Search project source contents."
@@ -1477,6 +1528,16 @@ private struct ResolutionJSON: Codable {
 private struct MatchRangeJSON: Codable {
     let lowerBound: Int
     let upperBound: Int
+}
+
+private struct ProjectSymbolJSON: Codable {
+    let name: String
+    let kind: String
+    let visibility: String?
+    let file: String
+    let line: UInt32
+    let module: [String]?
+    let implTrait: String?
 }
 
 private struct SymbolSearchJSON: Codable {

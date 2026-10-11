@@ -755,6 +755,67 @@ func textSearchOnOneUnitReturnsOnlyThatUnitsFiles() async throws {
 }
 
 @Test
+func projectSymbolsListEachFileOnceWithItsModulePath() throws {
+    let same = Array("pub fn same() {}\n".utf8)
+    let snapshot = CountingSnapshot(files: [
+        "app/Cargo.toml": Array("[package]\nname = \"app\"\n".utf8),
+        "app/src/main.rs": Array("mod net;\nmod util;\nmod inline { pub fn deep() {} }\nfn main() {}\n".utf8),
+        "app/src/net/mod.rs": Array("pub mod tcp;\n".utf8),
+        "app/src/net/tcp.rs": Array("pub struct Conn;\n".utf8),
+        "app/src/util.rs": same,
+        "app/src/copy.rs": same,
+        "app/src/bin/tool.rs": Array("fn main() {}\n".utf8),
+        "app/examples/demo.rs": Array("fn demo() {}\n".utf8),
+        "lib/Cargo.toml": Array("[package]\nname = \"lib\"\n".utf8),
+        "lib/src/lib.rs": Array("pub trait Engine {}\n".utf8),
+    ], configurationPaths: ["app/Cargo.toml", "lib/Cargo.toml"])
+    let indexer = ProjectIndexer(parallelism: 1)
+    let prepared = try indexer.prepareSnapshots(snapshot, into: ProjectIndexStore(), languages: [.rust])
+    let listings = try indexer.completeSnapshot(prepared[0]).map {
+        try $0.projectSymbols(context: snapshotQueryContext(for: $0))
+    }
+    #expect(listings.map(\.unitRoot) == ["app", "lib"])
+
+    // Every source file sits in exactly one unit, duplicates included.
+    let paths = listings.flatMap { $0.files.map(\.path) }
+    #expect(paths.sorted() == [
+        "app/examples/demo.rs", "app/src/bin/tool.rs", "app/src/copy.rs", "app/src/main.rs",
+        "app/src/net/mod.rs", "app/src/net/tcp.rs", "app/src/util.rs", "lib/src/lib.rs",
+    ])
+    let app = listings[0]
+    func file(_ path: String) -> ProjectSymbolListing.File? { app.files.first { $0.path == path } }
+    #expect(file("app/src/main.rs")?.modulePath == [])
+    #expect(file("app/src/net/mod.rs")?.modulePath == ["net"])
+    #expect(file("app/src/net/tcp.rs")?.modulePath == ["net", "tcp"])
+    #expect(file("app/src/util.rs")?.modulePath == ["util"])
+    #expect(file("app/src/bin/tool.rs")?.isCrateRoot == true)
+    // Unmounted files have no module path; the panel lists them apart.
+    #expect(file("app/examples/demo.rs")?.modulePath == nil)
+    #expect(file("app/src/copy.rs")?.modulePath == nil)
+
+    // Identical bytes share one content index but list one row per file.
+    let sameRows = app.symbols.filter { $0.name == "same" }
+    #expect(sameRows.map { app.files[$0.fileIndex].path }.sorted() == ["app/src/copy.rs", "app/src/util.rs"])
+    #expect(Set(sameRows.map(\.occurrence)).count == 2)
+
+    // An inline `mod` reaches its items through the parent facet.
+    let deep = try #require(app.symbols.first { $0.name == "deep" })
+    let parent = try #require(app.symbols.first {
+        $0.fileIndex == deep.fileIndex && $0.facetIndex == deep.parentFacetIndex
+    })
+    #expect(parent.kind == .rustMod && parent.name == "inline")
+    #expect(deep.visibility == .public && parent.visibility == .private)
+
+    // Counts agree with the content indexes the dump renders.
+    for (session, listing) in zip(try indexer.completeSnapshot(prepared[0]), listings) {
+        let expected = session.manifest.files.reduce(0) { total, file in
+            total + (session.content(at: file.pathID)?.1.symbols.count ?? 0)
+        }
+        #expect(listing.symbols.count == expected)
+    }
+}
+
+@Test
 func nestedMarkerInsidePartitionBelongsToTheDeepestUnit() throws {
     let snapshot = CountingSnapshot(files: [
         "a/src/x.rs": Array("fn x() {}\n".utf8),

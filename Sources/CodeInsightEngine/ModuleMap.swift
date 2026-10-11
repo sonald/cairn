@@ -104,7 +104,7 @@ public struct ModuleMap: Sendable {
         for file in files {
             let path = Self.relativePath(paths.resolve(file.pathID), root: projectRoot)
             let fileName = path.split(separator: "/").last.map(String.init) ?? path
-            if fileName == "main.rs" || fileName == "lib.rs" {
+            if fileName == "main.rs" || fileName == "lib.rs" || Self.isBinaryRoot(path) {
                 roots.insert(file.pathID)
             }
             guard
@@ -135,6 +135,13 @@ public struct ModuleMap: Sendable {
         }
 
         return (children, parents, roots)
+    }
+
+    /// `src/bin/name.rs` is a crate of its own.
+    private static func isBinaryRoot(_ path: String) -> Bool {
+        let components = path.split(separator: "/")
+        return components.count == 3 && components[0] == "src" && components[1] == "bin"
+            && components[2].hasSuffix(".rs")
     }
 
     private static func pythonModuleFiles(
@@ -396,6 +403,45 @@ public struct ModuleMap: Sendable {
             return nil
         }
         return matches[0]
+    }
+
+    /// Files that root a Rust crate: `main.rs`, `lib.rs` and `src/bin/*.rs`.
+    public var crateRootFiles: Set<PathID> { crateRoots }
+
+    /// The module a file declares, as names below its root. Rust walks
+    /// `mod foo;` parents up to a crate root (`[]` for the root itself) and
+    /// returns `nil` when no crate root reaches the file. Python is the
+    /// dotted path under the unit root without `src/` (`__init__.py` is its
+    /// package); TypeScript is the directories plus the file name.
+    public func modulePath(of file: PathID, names: Interner<NameID>) -> [String]? {
+        switch language {
+        case .rust:
+            var components: [String] = []
+            var current = file
+            var seen: Set<PathID> = []
+            while seen.insert(current).inserted {
+                if crateRoots.contains(current) { return components.reversed() }
+                guard let parent = parentModules[current],
+                      let name = moduleChildren[parent]?.first(where: { $0.value == current })?.key
+                else { return nil }
+                components.append(names.resolve(name))
+                current = parent
+            }
+            return nil
+        case .python:
+            guard var path = pathsByID[file] else { return nil }
+            if path.hasPrefix("src/") { path.removeFirst("src/".count) }
+            var components = path.split(separator: "/").map(String.init)
+            if let last = components.popLast() {
+                let stem = last.split(separator: ".", maxSplits: 1).first.map(String.init) ?? last
+                if stem != "__init__" { components.append(stem) }
+            }
+            return components
+        case .typescript:
+            return pathsByID[file].map { $0.split(separator: "/").map(String.init) }
+        case .javascript:
+            return nil
+        }
     }
 
     private func crateRoot(containing path: PathID) -> PathID? {
