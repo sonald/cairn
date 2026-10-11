@@ -10,8 +10,16 @@ public struct ProjectSymbolListing: Sendable {
         /// Module components below the crate or unit root; `nil` when no
         /// Rust crate root reaches the file (see `ModuleMap.modulePath`).
         public let modulePath: [String]?
-        /// The file roots a Rust crate (`main.rs`, `lib.rs`, `src/bin/*.rs`).
-        public let isCrateRoot: Bool
+        /// The Rust crate root file that reaches this file (its own path for
+        /// a root); `nil` for other languages and unmounted files.
+        public let crateRoot: String?
+
+        public init(path: String, contentID: ContentID, modulePath: [String]?, crateRoot: String?) {
+            self.path = path
+            self.contentID = contentID
+            self.modulePath = modulePath
+            self.crateRoot = crateRoot
+        }
     }
 
     public let language: LanguageID
@@ -19,6 +27,13 @@ public struct ProjectSymbolListing: Sendable {
     public let unitRoot: String
     public let files: [File]
     public let symbols: [ProjectSymbol]
+
+    public init(language: LanguageID, unitRoot: String, files: [File], symbols: [ProjectSymbol]) {
+        self.language = language
+        self.unitRoot = unitRoot
+        self.files = files
+        self.symbols = symbols
+    }
 }
 
 public struct ProjectSymbol: Sendable {
@@ -29,6 +44,8 @@ public struct ProjectSymbol: Sendable {
     public let kind: DeclarationKind
     public let visibility: DeclarationVisibility?
     public let nameRange: ByteRange
+    /// The whole declaration.
+    public let range: ByteRange
     /// 1-based line of the name.
     public let line: UInt32
     public var facetIndex: UInt32 { occurrence.localIndex }
@@ -36,6 +53,23 @@ public struct ProjectSymbol: Sendable {
     public let parentFacetIndex: UInt32?
     /// For an impl row, the implemented trait (`impl Engine for BitCask`).
     public let implTraitName: String?
+
+    public init(
+        occurrence: SymbolOccurrenceID, fileIndex: Int, name: String, kind: DeclarationKind,
+        visibility: DeclarationVisibility?, nameRange: ByteRange, range: ByteRange, line: UInt32,
+        parentFacetIndex: UInt32?, implTraitName: String?
+    ) {
+        self.occurrence = occurrence
+        self.fileIndex = fileIndex
+        self.name = name
+        self.kind = kind
+        self.visibility = visibility
+        self.nameRange = nameRange
+        self.range = range
+        self.line = line
+        self.parentFacetIndex = parentFacetIndex
+        self.implTraitName = implTraitName
+    }
 }
 
 extension EngineSession {
@@ -56,7 +90,7 @@ extension EngineSession {
                 path: path,
                 contentID: file.contentID,
                 modulePath: moduleMap.modulePath(of: file.pathID, names: names),
-                isCrateRoot: moduleMap.crateRootFiles.contains(file.pathID)
+                crateRoot: moduleMap.crateRoot(of: file.pathID).map(paths.resolve)
             ))
             let traits = Dictionary(
                 index.implRelations.compactMap { relation in
@@ -80,6 +114,7 @@ extension EngineSession {
                     kind: facet.kind,
                     visibility: facet.visibility,
                     nameRange: facet.nameRange,
+                    range: facet.range,
                     line: index.lineTable.lineColumn(at: facet.nameRange.lowerBound)?.line ?? 1,
                     parentFacetIndex: facet.parentFacetIndex,
                     implTraitName: traits[facetIndex]

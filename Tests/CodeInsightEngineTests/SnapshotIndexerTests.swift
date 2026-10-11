@@ -788,10 +788,12 @@ func projectSymbolsListEachFileOnceWithItsModulePath() throws {
     #expect(file("app/src/net/mod.rs")?.modulePath == ["net"])
     #expect(file("app/src/net/tcp.rs")?.modulePath == ["net", "tcp"])
     #expect(file("app/src/util.rs")?.modulePath == ["util"])
-    #expect(file("app/src/bin/tool.rs")?.isCrateRoot == true)
+    #expect(file("app/src/bin/tool.rs")?.crateRoot == "app/src/bin/tool.rs")
+    #expect(file("app/src/net/tcp.rs")?.crateRoot == "app/src/main.rs")
     // Unmounted files have no module path; the panel lists them apart.
     #expect(file("app/examples/demo.rs")?.modulePath == nil)
     #expect(file("app/src/copy.rs")?.modulePath == nil)
+    #expect(file("app/src/copy.rs")?.crateRoot == nil)
 
     // Identical bytes share one content index but list one row per file.
     let sameRows = app.symbols.filter { $0.name == "same" }

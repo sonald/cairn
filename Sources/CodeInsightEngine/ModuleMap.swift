@@ -405,8 +405,11 @@ public struct ModuleMap: Sendable {
         return matches[0]
     }
 
-    /// Files that root a Rust crate: `main.rs`, `lib.rs` and `src/bin/*.rs`.
-    public var crateRootFiles: Set<PathID> { crateRoots }
+    /// The Rust crate root (`main.rs`, `lib.rs`, `src/bin/*.rs`) whose
+    /// `mod` tree reaches `file`; the file itself when it is one.
+    public func crateRoot(of file: PathID) -> PathID? {
+        language == .rust ? crateRoot(containing: file) : nil
+    }
 
     /// The module a file declares, as names below its root. Rust walks
     /// `mod foo;` parents up to a crate root (`[]` for the root itself) and
