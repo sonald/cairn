@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn 项目符号原型</title>
+<style>
+/* Review frame around a mock Cairn window. Reader palette copied from reader-qol-prototype.html (ReaderSettings.swift). Symbol data below is illustrative, not a real index. */
+:root {
+  --page-bg: #F1EFE9; --page-fg: #1D2320; --page-muted: #5E6661; --page-line: #D7D2C6; --page-panel: #FAF9F5; --page-accent: #2B5849;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+:root[data-theme="dark"] { --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97; --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page-bg); color: var(--page-fg); font-family: var(--font-ui); }
+.wrap { max-width: 1360px; margin: 0 auto; padding: 24px 16px 48px; display: grid; gap: 16px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.lede { margin: 4px 0 0; color: var(--page-muted); max-width: 90ch; line-height: 1.55; font-size: 13.5px; }
+.lede code, .notes code { font-family: var(--font-code); font-size: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 10px 14px; background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; }
+.ctl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
+.ctl > span { color: var(--page-muted); }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: 7px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: transparent; color: var(--page-fg); padding: 4px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--page-line); }
+.seg button[aria-pressed="true"] { background: var(--page-accent); color: var(--page-panel); }
+.act { font: inherit; font-size: 12px; border: 1px solid var(--page-line); background: transparent; color: var(--page-fg); border-radius: 7px; padding: 4px 10px; cursor: pointer; }
+.act:hover { border-color: var(--page-accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 1px; }
+.notes { background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; padding: 14px 16px; font-size: 12.5px; line-height: 1.55; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.notes h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--page-muted); margin: 0 0 6px; font-weight: 600; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.notes kbd { font-family: var(--font-code); font-size: 11px; border: 1px solid var(--page-line); border-radius: 4px; padding: 0 4px; }
+.notes p { margin: 0; color: var(--page-muted); }
+
+/* ---------- Mock window palette ---------- */
+.win { --r-bg:#FBFAF6; --r-fg:#1B211F; --r-chrome:#F3F1EB; --r-header:#E7E3DA; --r-divider:#D5D1C6; --r-sec:#5C645F; --r-ter:#6E756F; --r-accent:#2B5849; --r-lineno:#7E847F; --r-occ:#ECE3C6; --r-sel:#DCE7E0; --r-cur:#F1EEE3; --r-unres:#9B3D27; --r-amber:#C98A2E;
+  --k:#8A3A28; --c:#5F665F; --s:#4D7030; --n:#8A5610; --fn:#111715; --t:#2D5D77; --p:#4B544F; --ma:#6A5594;
+  border-radius: 10px; overflow: hidden; border: 1px solid var(--r-divider); background: var(--r-bg); color: var(--r-fg); min-width: 0; display: flex; flex-direction: column; position: relative; }
+.th-dark { --r-bg:#121614; --r-fg:#E7E5DD; --r-chrome:#161A18; --r-header:#1D221F; --r-divider:#2B312D; --r-sec:#9BA29B; --r-ter:#858C85; --r-accent:#8CC6A9; --r-lineno:#6F766F; --r-occ:#2E2F21; --r-sel:#1D3A2F; --r-cur:#191E1B; --r-unres:#E8927A; --r-amber:#E6AE5A;
+  --k:#E89C80; --c:#99A198; --s:#AACB8C; --n:#E6AE5A; --fn:#F4F2EA; --t:#93C4DE; --p:#B9BDB5; --ma:#BCA9E8; }
+.th-si { --r-bg:#FFFFFF; --r-fg:#111111; --r-chrome:#EFEFEA; --r-header:#E0E0DA; --r-divider:#C9C9C1; --r-sec:#555555; --r-ter:#6B6B6B; --r-accent:#1D3A8F; --r-lineno:#8A8A8A; --r-occ:#FFF1C2; --r-sel:#FFF1C2; --r-cur:#FFFBE6; --r-unres:#A01E1E; --r-amber:#C9A227;
+  --k:#00008B; --c:#2E7D32; --s:#8B1A1A; --n:#A0522D; --fn:#000000; --t:#006A6A; --p:#3A3A3A; --ma:#7A1F7A; }
+.titlebar { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--r-header); border-bottom: 1px solid var(--r-divider); font-size: 12px; color: var(--r-sec); }
+.dots { display: flex; gap: 6px; margin-right: 8px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--r-divider); display: block; }
+.titlebar .grow { flex: 1; }
+.body { display: grid; grid-template-columns: var(--left-w, 300px) minmax(0, 1fr) 300px; height: 560px; min-height: 0; }
+.win.narrow { --left-w: 180px; }
+.zone { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--r-chrome); }
+.zone.left { border-right: 1px solid var(--r-divider); }
+.zone.right { border-left: 1px solid var(--r-divider); }
+.panel { display: flex; flex-direction: column; min-height: 0; }
+.panel.mini { flex: none; }
+.panel.main { flex: 1; min-height: 0; }
+.phead { height: 26px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; background: var(--r-header); border-bottom: 1px solid var(--r-divider); font-size: 11.5px; color: var(--r-sec); font-weight: 600; }
+.phead .grow { flex: 1; }
+.phead .ic { font-weight: 400; color: var(--r-ter); cursor: default; padding: 0 3px; font-size: 13px; line-height: 1; }
+.mini .mbody { padding: 4px 10px 6px; font-size: 11.5px; color: var(--r-ter); border-bottom: 1px solid var(--r-divider); font-family: var(--font-code); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Project symbols panel ---------- */
+.tools { flex: none; display: grid; gap: 5px; padding: 6px 6px 5px; border-bottom: 1px solid var(--r-divider); background: var(--r-chrome); }
+.row1 { display: flex; gap: 5px; align-items: center; }
+.field { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; border: 1px solid var(--r-divider); border-radius: 6px; background: var(--r-bg); padding: 2px 4px 2px 6px; height: 22px; }
+.field .mag { color: var(--r-ter); font-size: 11px; }
+.field input { flex: 1; min-width: 0; font: inherit; font-size: 12px; border: 0; outline: none; background: transparent; color: var(--r-fg); }
+.field .clr { border: 0; background: transparent; color: var(--r-ter); cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; visibility: hidden; }
+.field .clr.on { visibility: visible; }
+.tb { font: inherit; font-size: 11px; height: 22px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--r-sec); cursor: pointer; padding: 0 6px; white-space: nowrap; }
+.tb[aria-pressed="true"], .tb.on { background: color-mix(in srgb, var(--r-accent) 16%, transparent); border-color: var(--r-accent); color: var(--r-fg); }
+.tb:hover { border-color: var(--r-divider); }
+.row2 { display: flex; gap: 5px; align-items: center; }
+.mseg { display: inline-flex; border: 1px solid var(--r-divider); border-radius: 6px; overflow: hidden; height: 22px; }
+.mseg button { font: inherit; font-size: 11px; border: 0; background: transparent; color: var(--r-sec); padding: 0 9px; cursor: pointer; }
+.mseg button + button { border-left: 1px solid var(--r-divider); }
+.mseg button[aria-pressed="true"] { background: color-mix(in srgb, var(--r-accent) 16%, transparent); color: var(--r-fg); }
+.row2 .sp { flex: 1; }
+.narrow .row2 { flex-wrap: wrap; }
+.narrow .row2 .lbl { display: none; }
+.row2 .sl { display: none; }
+.narrow .row2 .sl { display: inline; }
+.pop { position: absolute; z-index: 20; top: 0; left: 0; background: var(--r-bg); border: 1px solid var(--r-divider); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 8px 10px; font-size: 11.5px; display: none; min-width: 190px; }
+.pop.open { display: grid; gap: 6px; }
+.pop h4 { margin: 2px 0 0; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--r-ter); font-weight: 600; }
+.pop label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pop .two { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; }
+.pop input { margin: 0; accent-color: var(--r-accent); }
+.pop .sep { height: 1px; background: var(--r-divider); margin: 2px 0; }
+.pop .dis { color: var(--r-ter); cursor: default; }
+.banner { flex: none; display: none; padding: 4px 10px; font-size: 11px; color: var(--r-fg); background: color-mix(in srgb, var(--r-amber) 22%, transparent); border-bottom: 1px solid var(--r-divider); }
+.banner.on { display: block; }
+.tree { flex: 1; min-height: 0; overflow: auto; background: var(--r-bg); outline: none; font-size: 12px; position: relative; }
+.tree.stale .r { opacity: .55; pointer-events: none; }
+.r { display: flex; align-items: center; gap: 4px; height: 22px; padding-right: 6px; white-space: nowrap; cursor: default; user-select: none; }
+.r:hover { background: color-mix(in srgb, var(--r-fg) 5%, transparent); }
+.r.sel { background: var(--r-sel); }
+.tree:focus .r.sel { box-shadow: inset 2px 0 0 var(--r-accent); }
+.r .tri { width: 14px; flex: none; text-align: center; color: var(--r-ter); font-size: 9px; }
+.r .tri.leaf { visibility: hidden; }
+.r .vis { width: 9px; flex: none; display: grid; place-items: center; font-size: 8px; color: var(--r-accent); }
+.r .vis.res { color: var(--r-amber); }
+.r .vis.priv { color: var(--r-ter); }
+.r .ki { width: 14px; height: 14px; flex: none; border-radius: 3px; display: grid; place-items: center; font-family: var(--font-code); font-size: 9px; font-weight: 700; color: var(--r-bg); }
+.r .nm { font-family: var(--font-code); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; }
+.r .nm b { font-weight: 700; color: var(--r-accent); }
+.r .own { font-family: var(--font-code); font-size: 11px; color: var(--r-ter); }
+.r .lang { font-family: var(--font-code); font-size: 9.5px; color: var(--r-ter); border: 1px solid var(--r-divider); border-radius: 3px; padding: 0 3px; line-height: 13px; }
+.r .cnt { color: var(--r-ter); font-size: 11px; }
+.r .tag { font-size: 10px; color: var(--r-ter); border: 1px dashed var(--r-divider); border-radius: 3px; padding: 0 4px; }
+.r .path { margin-left: auto; font-family: var(--font-code); font-size: 10.5px; color: var(--r-ter); overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; max-width: 46%; flex: 1; }
+.narrow .r .path, .narrow .r .own, .narrow .r .tag { display: none; }
+.r.grp { font-weight: 600; color: var(--r-sec); background: color-mix(in srgb, var(--r-chrome) 60%, transparent); position: sticky; top: 0; z-index: 1; }
+.r.grp .nm { font-family: var(--font-ui); font-size: 11.5px; }
+.r.grp.sel { background: var(--r-sel); }
+.r.dim .nm, .r.dim .own { color: var(--r-ter); font-style: italic; }
+.r.unit .nm { font-family: var(--font-ui); font-weight: 600; }
+.ph { padding: 14px 12px; color: var(--r-ter); font-size: 12px; }
+.hint { position: absolute; left: 8px; right: 8px; bottom: 8px; background: var(--r-fg); color: var(--r-bg); font-size: 11px; padding: 4px 8px; border-radius: 6px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.hint.on { opacity: .9; }
+.foot { flex: none; padding: 4px 10px; font-size: 10.5px; color: var(--r-ter); border-top: 1px solid var(--r-divider); background: var(--r-chrome); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu { position: absolute; z-index: 30; background: var(--r-bg); border: 1px solid var(--r-divider); border-radius: 7px; box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 4px; font-size: 12px; display: none; min-width: 170px; }
+.menu.open { display: block; }
+.menu div { padding: 4px 10px; border-radius: 4px; cursor: default; }
+.menu div:hover { background: var(--r-sel); }
+.menu div.dis { color: var(--r-ter); }
+.menu hr { border: 0; border-top: 1px solid var(--r-divider); margin: 3px 0; }
+
+/* ---------- Reader ---------- */
+.reader { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.reader::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--r-accent); z-index: 2; }
+.tabs { height: 26px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; background: var(--r-chrome); border-bottom: 1px solid var(--r-divider); font-size: 11px; }
+.tab { font-family: var(--font-code); padding: 2px 8px; border-radius: 4px; color: var(--r-sec); }
+.tab.cur { background: var(--r-bg); color: var(--r-fg); border: 1px solid var(--r-divider); }
+.tab.prev { font-style: italic; }
+.code { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.62; padding: 8px 0; background: var(--r-bg); }
+.ln { display: grid; grid-template-columns: 44px minmax(0, 1fr); white-space: pre; }
+.ln > b { font-weight: 400; color: var(--r-lineno); text-align: right; padding-right: 12px; user-select: none; }
+.ln.cur { background: var(--r-cur); }
+.ln.flash { animation: flash 0.9s ease-out; }
+@keyframes flash { from { background: var(--r-occ); } }
+.k{color:var(--k)} .c{color:var(--c);font-style:italic} .s{color:var(--s)} .n{color:var(--n)} .fn{color:var(--fn);font-weight:650} .t{color:var(--t)} .ma{color:var(--ma)}
+.ln .nmhit { background: var(--r-occ); border-radius: 2px; }
+.status { height: 24px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: var(--r-chrome); border-top: 1px solid var(--r-divider); font-size: 11px; color: var(--r-ter); }
+.status .grow { flex: 1; }
+
+/* ---------- Context ---------- */
+.ctxhead { height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--r-header); border-bottom: 1px solid var(--r-divider); font-size: 11.5px; color: var(--r-sec); white-space: nowrap; overflow: hidden; }
+.ctxhead .sym { font-family: var(--font-code); color: var(--r-fg); font-weight: 600; }
+.ctxhead .p { font-family: var(--font-code); font-size: 11px; color: var(--r-ter); overflow: hidden; text-overflow: ellipsis; }
+.ctxbody { background: var(--r-bg); font-family: var(--font-code); font-size: 12px; line-height: 1.55; padding: 6px 0; flex: 1; overflow: hidden; }
+.ctxbody .empty { padding: 8px 14px; color: var(--r-ter); font-family: var(--font-ui); font-size: 12px; }
+.ctxbody .ln { grid-template-columns: 34px minmax(0, 1fr); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>项目符号面板 · 交互原型</h1>
+    <p class="lede">对应 <code>docs/project-symbols-plan.md</code>。一个新的侧栏面板：空查询就列出整个项目的声明，按<b>种类</b>或<b>模块</b>组织，可按文字、种类、仅公开、范围过滤；单击预览、回车打开、右键接关系命令。示意数据模仿 toydb（Rust）外加一个 <code>tools/</code> Python 单元，不是真实索引。待决项 D1–D6 在原型里都按推荐值实现。</p>
+  </div>
+
+  <div class="controls">
+    <div class="ctl"><span>主题</span>
+      <div class="seg" id="themeSeg">
+        <button aria-pressed="true" data-th="light">Light</button><button aria-pressed="false" data-th="dark">Dark</button><button aria-pressed="false" data-th="si">SI Classic</button>
+      </div>
+    </div>
+    <div class="ctl"><span>演示</span>
+      <button class="act" id="demoIndexing">模拟索引中 → 首帧 → 完整</button>
+      <button class="act" id="demoStale">模拟切换 commit（过期 → 重建）</button>
+      <button class="act" id="demoNarrow" aria-pressed="false">面板 180pt</button>
+      <button class="act" id="demoLocate">在阅读区点到 <code>Log::append</code> 再定位</button>
+    </div>
+  </div>
+
+  <div class="win" id="win">
+    <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div><span>toydb</span><span class="grow"></span><span>main · 工作区</span></div>
+    <div class="body">
+      <div class="zone left">
+        <div class="panel mini"><div class="phead">文件 <span class="grow"></span><span class="ic">⋯</span><span class="ic">×</span></div><div class="mbody">src/raft/log.rs</div></div>
+        <div class="panel mini"><div class="phead">大纲 <span class="grow"></span><span class="ic">⋯</span><span class="ic">×</span></div><div class="mbody" id="outlineMini">impl Log › fn append</div></div>
+        <div class="panel main" id="symPanel">
+          <div class="phead">项目符号 <span class="grow"></span><span class="ic" title="说明：哪些声明不会出现" id="helpBtn">?</span><span class="ic">⋯</span><span class="ic">×</span></div>
+          <div class="tools">
+            <div class="row1">
+              <div class="field"><span class="mag">⌕</span><input id="q" placeholder="过滤符号（与 # 相同的匹配）" autocomplete="off" spellcheck="false"><button class="clr" id="qClr" title="清除">×</button></div>
+              <button class="tb" id="locate" title="定位当前符号">◎</button>
+            </div>
+            <div class="row2">
+              <div class="mseg" id="modeSeg"><button aria-pressed="true" data-mode="kind">种类</button><button aria-pressed="false" data-mode="module">模块</button></div>
+              <button class="tb" id="filterBtn"><span class="lbl">过滤 </span>▾</button>
+              <button class="tb" id="pubBtn" aria-pressed="false" title="只保留声明处标为公开的符号"><span class="lbl">仅公开</span><span class="sl">公开</span></button>
+              <span class="sp"></span>
+              <button class="tb" id="scopeBtn" aria-pressed="false" title="范围：整个项目 / 当前目录"><span class="lbl">整个项目</span><span class="sl">全部</span></button>
+            </div>
+          </div>
+          <div class="pop" id="pop">
+            <h4>种类</h4>
+            <div class="two" id="kindBoxes"></div>
+            <div class="sep"></div>
+            <h4>范围</h4>
+            <label><input type="radio" name="scope" value="project" checked> 整个项目</label>
+            <label><input type="radio" name="scope" value="dir"> 当前目录 <span class="dis" id="scopeDir">src/raft/</span></label>
+          </div>
+          <div class="banner" id="banner">列表来自上一快照，正在重建…</div>
+          <div class="tree" id="tree" tabindex="0" aria-label="项目符号"></div>
+          <div class="hint" id="hint"></div>
+          <div class="foot" id="foot"></div>
+        </div>
+      </div>
+      <div class="reader">
+        <div class="tabs" id="tabs"></div>
+        <div class="code" id="code"></div>
+        <div class="status"><span id="stLang">Rust · toydb</span><span class="grow"></span><span id="stPos"></span></div>
+      </div>
+      <div class="zone right">
+        <div class="panel main">
+          <div class="phead">上下文 <span class="grow"></span><span class="ic">⋯</span><span class="ic">×</span></div>
+          <div class="ctxhead" id="ctxhead"><span class="sym">—</span></div>
+          <div class="ctxbody" id="ctxbody"><div class="empty">选中一个符号后在这里显示它的声明。</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="menu" id="menu"></div>
+  </div>
+
+  <div class="notes">
+    <div>
+      <h2>组织方式</h2>
+      <ul>
+        <li><b>种类</b>：函数、方法、结构体/类、枚举、Trait/接口、类型别名、impl、模块、常量/静态十个组，标题带计数，默认折叠。</li>
+        <li>类型行可展开：先列字段，再列同文件的 impl；别的文件里的同名 impl 只在这个名字在单元内唯一时合并进来并打“按名称合并”标记（看 <code>Entry</code>）。<code>raft::log::Log</code> 与 <code>storage::bitcask::Log</code> 重名，所以各自只挂同文件 impl，其余留在 impl 组。</li>
+        <li>方法在“方法”组里平铺（所属在名称前），展开类型或 impl 时再次出现，指向同一个 facet。</li>
+        <li><b>模块</b>：单元 → crate → <code>mod</code> 链（含内联 <code>mod tests</code>）；到不了 crate 根的文件进“未挂载的文件”。Python 按目录路径；TypeScript 按目录加文件。</li>
+      </ul>
+    </div>
+    <div>
+      <h2>过滤与状态</h2>
+      <ul>
+        <li>文字过滤用 <code>#</code> 同一套匹配（前缀、缩写、子序列），容器只要有匹配的后代就保留并自动展开，自身不匹配时灰显。</li>
+        <li><b>仅公开</b>是一个开关：受限（<code>pub(crate)</code>、<code>protected</code>）和私有一起隐藏；trait 方法签名“不适用”视为通过，impl 块只在有通过的方法时灰显保留（<code>impl Key</code> 不会留下）。行首记号：● 公开 ◐ 受限 ○ 私有。</li>
+        <li>范围“当前目录”取焦点阅读区文件所在目录，含子目录。</li>
+        <li>索引中显示占位；快照变化后旧树置灰并禁止跳转，重建后按 (path, contentID, nameRange) 恢复选中。</li>
+      </ul>
+    </div>
+    <div>
+      <h2>交互</h2>
+      <ul>
+        <li>单击 / <kbd>↑</kbd><kbd>↓</kbd>：预览标签打开并闪烁声明名，焦点留在列表，Context 跟随。<kbd>⏎</kbd> / 双击：保留打开，焦点交给阅读区。</li>
+        <li><kbd>←</kbd><kbd>→</kbd> 折叠/展开；过滤框 <kbd>↓</kbd> 进列表；<kbd>Esc</kbd> 先清过滤文字，再把焦点还给阅读区。</li>
+        <li>右键：打开、在右侧打开、查看调用者/被调用者/引用/实现、高亮此名称、在文件树中显示、复制限定名。</li>
+        <li>◎ 定位当前符号：按 Context 指向的符号（没有则光标所在声明）展开并选中；被过滤隐藏时只提示，不改过滤。面板不自动跟随光标。</li>
+        <li>默认 <kbd>⌃⌘S</kbd> 显示面板并聚焦过滤框；组织方式、种类、仅公开、范围按应用级记忆。</li>
+      </ul>
+      <p>“?”列出不会出现的声明：Rust 枚举变体与宏、Python 模块级变量；TypeScript 的 interface / type / enum 在 D1 采纳前也不出现。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- Illustrative data (toydb-like Rust crate + a Python tools unit) ---------------- */
+const UNITS = { rs: { lang: 'Rust', badge: 'rs', label: 'Rust · /' }, py: { lang: 'Python', badge: 'py', label: 'Python · tools' } };
+const K = { fn: '函数', method: '方法', struct: '结构体/类', class: '结构体/类', enum: '枚举', trait: 'Trait/接口', interface: 'Trait/接口', alias: '类型别名', impl: 'impl', mod: '模块', const: '常量/静态', static: '常量/静态', field: '字段' };
+const KGROUPS = [['fn','函数'],['method','方法'],['type','结构体/类'],['enum','枚举'],['trait','Trait/接口'],['alias','类型别名'],['impl','impl'],['mod','模块'],['const','常量/静态']];
+const KICON = { fn: ['ƒ','var(--fn)'], method: ['m','var(--fn)'], struct: ['S','var(--t)'], class: ['C','var(--t)'], enum: ['E','var(--n)'], trait: ['T','var(--t)'], interface: ['I','var(--t)'], alias: ['t','var(--t)'], impl: ['i','var(--r-sec)'], mod: ['M','var(--r-sec)'], const: ['c','var(--n)'], static: ['s','var(--n)'], field: ['·','var(--r-sec)'] };
+let _id = 0;
+const SYMS = [];
+function S(u, f, m, rows) {
+  // rows: [name, kind, vis, line, decl, parentName?, trait?]
+  const byName = {};
+  for (const [n, k, v, l, d, p, tr] of rows) {
+    const id = ++_id;
+    const parent = p ? byName[p] : null;
+    SYMS.push({ id, n, k, v, f, l, d, u, m, p: parent ? parent.id : null, tr: tr || null });
+    byName[n + (k === 'impl' ? '#' + id : '')] = SYMS[SYMS.length - 1];
+    if (k === 'impl') byName[n] = SYMS[SYMS.length - 1];
+  }
+}
+S('rs', 'src/lib.rs', ['toydb'], [
+  ['error','mod','pub',3,'pub mod error;'], ['raft','mod','pub',4,'pub mod raft;'], ['sql','mod','pub',5,'pub mod sql;'], ['storage','mod','pub',6,'pub mod storage;'],
+]);
+S('rs', 'src/error.rs', ['toydb','error'], [
+  ['Error','enum','pub',6,'pub enum Error {'], ['Result','alias','pub',22,'pub type Result<T> = std::result::Result<T, Error>;'],
+  ['Error','impl',null,24,'impl std::fmt::Display for Error {',null,'Display'], ['fmt','method',null,25,'    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {','Error'],
+  ['Error','impl',null,40,'impl From<std::io::Error> for Error {',null,'From'], ['from','method',null,41,'    fn from(err: std::io::Error) -> Self {','Error'],
+]);
+S('rs', 'src/raft/mod.rs', ['toydb','raft'], [
+  ['log','mod','priv',1,'mod log;'], ['node','mod','priv',2,'mod node;'], ['state','mod','priv',3,'mod state;'],
+  ['Ticks','alias','pub',9,'pub type Ticks = u8;'], ['NodeID','alias','pub',10,'pub type NodeID = u8;'],
+  ['Entry','impl',null,18,'impl std::fmt::Display for Entry {',null,'Display'], ['fmt','method',null,19,'    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {','Entry'],
+  ['HEARTBEAT_INTERVAL','const','pub',13,'pub const HEARTBEAT_INTERVAL: Ticks = 3;'], ['ELECTION_TIMEOUT_RANGE','const','pub',14,'pub const ELECTION_TIMEOUT_RANGE: std::ops::Range<Ticks> = 10..20;'],
+]);
+S('rs', 'src/raft/log.rs', ['toydb','raft','log'], [
+  ['Index','alias','pub',8,'pub type Index = u64;'], ['Term','alias','pub',10,'pub type Term = u64;'],
+  ['Entry','struct','pub',14,'pub struct Entry {'], ['index','field','pub',16,'    pub index: Index,','Entry'], ['term','field','pub',18,'    pub term: Term,','Entry'], ['command','field','pub',20,'    pub command: Option<Vec<u8>>,','Entry'],
+  ['Key','enum','priv',26,'enum Key {'], ['Key','impl',null,34,'impl Key {'], ['encode','method','priv',35,'    fn encode(&self) -> Vec<u8> {','Key'], ['decode','method','priv',44,'    fn decode(bytes: &[u8]) -> Result<Self> {','Key'],
+  ['Log','struct','pub',58,'pub struct Log {'], ['engine','field','priv',60,'    engine: Box<dyn Engine>,','Log'], ['last_index','field','priv',62,'    last_index: Index,','Log'], ['last_term','field','priv',63,'    last_term: Term,','Log'], ['commit_index','field','priv',65,'    commit_index: Index,','Log'], ['commit_term','field','priv',66,'    commit_term: Term,','Log'],
+  ['Log','impl',null,70,'impl Log {'],
+  ['new','method','pub',72,'    pub fn new(mut engine: Box<dyn Engine>) -> Result<Self> {','Log'], ['get_last_index','method','pub',86,'    pub fn get_last_index(&self) -> (Index, Term) {','Log'], ['get_commit_index','method','pub',91,'    pub fn get_commit_index(&self) -> (Index, Term) {','Log'],
+  ['get_term','method','res',96,'    pub(crate) fn get_term(&self) -> Term {','Log'], ['set_term','method','res',101,'    pub(crate) fn set_term(&mut self, term: Term, vote: Option<NodeID>) -> Result<()> {','Log'],
+  ['append','method','pub',142,'    pub fn append(&mut self, term: Term, command: Option<Vec<u8>>) -> Result<Index> {','Log'], ['commit','method','pub',160,'    pub fn commit(&mut self, index: Index) -> Result<Index> {','Log'], ['get','method','pub',178,'    pub fn get(&self, index: Index) -> Result<Option<Entry>> {','Log'], ['scan','method','pub',184,'    pub fn scan(&self, range: impl std::ops::RangeBounds<Index>) -> Result<Scan> {','Log'], ['splice','method','pub',196,'    pub fn splice(&mut self, entries: Vec<Entry>) -> Result<Index> {','Log'],
+  ['set_commit','method','priv',230,'    fn set_commit(&mut self, index: Index, term: Term) -> Result<()> {','Log'],
+  ['tests','mod','priv',262,'mod tests {'], ['setup','fn','priv',266,'    fn setup() -> Log {','tests'], ['append','fn','priv',271,'    fn append() -> Result<()> {','tests'], ['splice','fn','priv',290,'    fn splice() -> Result<()> {','tests'],
+]);
+S('rs', 'src/raft/node.rs', ['toydb','raft','node'], [
+  ['Node','enum','pub',12,'pub enum Node {'], ['Node','impl',null,20,'impl Node {'], ['new','method','pub',22,'    pub fn new(id: NodeID, peers: HashSet<NodeID>, log: Log, state: Box<dyn State>) -> Result<Self> {','Node'], ['step','method','pub',40,'    pub fn step(self, msg: Message) -> Result<Self> {','Node'], ['tick','method','pub',48,'    pub fn tick(self) -> Result<Self> {','Node'], ['id','method','res',56,'    pub(crate) fn id(&self) -> NodeID {','Node'],
+  ['Message','struct','pub',64,'pub struct Message {'], ['from','field','pub',66,'    pub from: Address,','Message'], ['to','field','pub',67,'    pub to: Address,','Message'], ['term','field','pub',68,'    pub term: Term,','Message'],
+  ['Follower','struct','priv',80,'struct Follower {'], ['leader','field','priv',81,'    leader: Option<NodeID>,','Follower'], ['Follower','impl',null,86,'impl Follower {'], ['new','method','priv',87,'    fn new(leader: Option<NodeID>, voted_for: Option<NodeID>) -> Self {','Follower'], ['step','method','priv',94,'    fn step(mut self, msg: Message) -> Result<Node> {','Follower'],
+  ['Candidate','struct','priv',130,'struct Candidate {'], ['votes','field','priv',131,'    votes: HashSet<NodeID>,','Candidate'], ['Candidate','impl',null,136,'impl Candidate {'], ['new','method','priv',137,'    fn new() -> Self {','Candidate'], ['step','method','priv',142,'    fn step(mut self, msg: Message) -> Result<Node> {','Candidate'],
+  ['Leader','struct','priv',170,'struct Leader {'], ['peers','field','priv',171,'    peers: HashMap<NodeID, Progress>,','Leader'], ['Leader','impl',null,178,'impl Leader {'], ['new','method','priv',179,'    fn new(peers: HashSet<NodeID>, last_index: Index) -> Self {','Leader'], ['step','method','priv',188,'    fn step(mut self, msg: Message) -> Result<Node> {','Leader'], ['heartbeat','method','priv',221,'    fn heartbeat(&mut self) -> Result<()> {','Leader'],
+]);
+S('rs', 'src/raft/state.rs', ['toydb','raft','state'], [
+  ['State','trait','pub',6,'pub trait State: Send {'], ['get_applied_index','method',null,8,'    fn get_applied_index(&self) -> Index;','State'], ['apply','method',null,11,'    fn apply(&mut self, entry: Entry) -> Result<Vec<u8>>;','State'], ['read','method',null,14,'    fn read(&self, command: Vec<u8>) -> Result<Vec<u8>>;','State'],
+]);
+S('rs', 'src/storage/mod.rs', ['toydb','storage'], [
+  ['bitcask','mod','priv',1,'mod bitcask;'], ['engine','mod','priv',2,'mod engine;'], ['memory','mod','priv',3,'mod memory;'],
+]);
+S('rs', 'src/storage/engine.rs', ['toydb','storage','engine'], [
+  ['Engine','trait','pub',8,'pub trait Engine: std::fmt::Display + Send + Sync {'], ['get','method',null,13,'    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>>;','Engine'], ['set','method',null,16,'    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()>;','Engine'], ['delete','method',null,19,'    fn delete(&mut self, key: &[u8]) -> Result<()>;','Engine'], ['scan','method',null,22,'    fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<\'_>;','Engine'], ['flush','method',null,25,'    fn flush(&mut self) -> Result<()>;','Engine'],
+  ['Status','struct','pub',40,'pub struct Status {'], ['keys','field','pub',42,'    pub keys: u64,','Status'], ['size','field','pub',44,'    pub size: u64,','Status'],
+]);
+S('rs', 'src/storage/bitcask.rs', ['toydb','storage','bitcask'], [
+  ['BitCask','struct','pub',20,'pub struct BitCask {'], ['log','field','priv',22,'    log: Log,','BitCask'], ['keydir','field','priv',24,'    keydir: KeyDir,','BitCask'],
+  ['KeyDir','alias','priv',28,'type KeyDir = std::collections::BTreeMap<Vec<u8>, (u64, u32)>;'],
+  ['BitCask','impl',null,30,'impl BitCask {'], ['new','method','pub',32,'    pub fn new(path: PathBuf) -> Result<Self> {','BitCask'], ['new_compact','method','pub',44,'    pub fn new_compact(path: PathBuf, garbage_ratio_threshold: f64) -> Result<Self> {','BitCask'], ['compact','method','priv',60,'    fn compact(&mut self) -> Result<()> {','BitCask'], ['write_log','method','priv',78,'    fn write_log(&mut self, path: PathBuf) -> Result<(Log, KeyDir)> {','BitCask'],
+  ['BitCask','impl',null,100,'impl Engine for BitCask {',null,'Engine'], ['get','method',null,103,'    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {','BitCask'], ['set','method',null,112,'    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {','BitCask'], ['delete','method',null,119,'    fn delete(&mut self, key: &[u8]) -> Result<()> {','BitCask'], ['scan','method',null,126,'    fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<\'_> {','BitCask'], ['flush','method',null,131,'    fn flush(&mut self) -> Result<()> {','BitCask'],
+  ['Log','struct','priv',150,'struct Log {'], ['path','field','priv',151,'    path: PathBuf,','Log'], ['file','field','priv',152,'    file: std::fs::File,','Log'],
+  ['Log','impl',null,156,'impl Log {'], ['new','method','priv',157,'    fn new(path: PathBuf) -> Result<Self> {','Log'], ['build_keydir','method','priv',170,'    fn build_keydir(&mut self) -> Result<KeyDir> {','Log'], ['read_value','method','priv',204,'    fn read_value(&mut self, value_pos: u64, value_len: u32) -> Result<Vec<u8>> {','Log'], ['write_entry','method','priv',212,'    fn write_entry(&mut self, key: &[u8], value: Option<&[u8]>) -> Result<(u64, u32)> {','Log'],
+]);
+S('rs', 'src/storage/memory.rs', ['toydb','storage','memory'], [
+  ['Memory','struct','pub',6,'pub struct Memory {'], ['data','field','priv',7,'    data: std::collections::BTreeMap<Vec<u8>, Vec<u8>>,','Memory'],
+  ['Memory','impl',null,10,'impl Memory {'], ['new','method','pub',11,'    pub fn new() -> Self {','Memory'],
+  ['Memory','impl',null,22,'impl Engine for Memory {',null,'Engine'], ['get','method',null,25,'    fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {','Memory'], ['set','method',null,29,'    fn set(&mut self, key: &[u8], value: Vec<u8>) -> Result<()> {','Memory'], ['delete','method',null,34,'    fn delete(&mut self, key: &[u8]) -> Result<()> {','Memory'], ['scan','method',null,39,'    fn scan(&mut self, range: impl std::ops::RangeBounds<Vec<u8>>) -> Self::ScanIterator<\'_> {','Memory'], ['flush','method',null,43,'    fn flush(&mut self) -> Result<()> {','Memory'],
+]);
+S('rs', 'src/sql/mod.rs', ['toydb','sql'], [ ['parser','mod','pub',1,'pub mod parser;'], ['types','mod','pub',2,'pub mod types;'] ]);
+S('rs', 'src/sql/parser/mod.rs', ['toydb','sql','parser'], [
+  ['ast','mod','pub',1,'pub mod ast;'], ['lexer','mod','priv',2,'mod lexer;'],
+  ['Parser','struct','pub',10,'pub struct Parser<\'a> {'], ['lexer','field','priv',11,'    lexer: std::iter::Peekable<Lexer<\'a>>,','Parser'],
+  ['Parser','impl',null,15,'impl<\'a> Parser<\'a> {'], ['new','method','pub',17,'    pub fn new(query: &str) -> Parser {','Parser'], ['parse','method','pub',22,'    pub fn parse(&mut self) -> Result<ast::Statement> {','Parser'], ['parse_statement','method','priv',36,'    fn parse_statement(&mut self) -> Result<ast::Statement> {','Parser'], ['parse_expression','method','priv',120,'    fn parse_expression(&mut self, min_prec: u8) -> Result<ast::Expression> {','Parser'], ['next_expect','method','priv',188,'    fn next_expect(&mut self, expect: Option<Token>) -> Result<Token> {','Parser'],
+]);
+S('rs', 'src/sql/parser/lexer.rs', ['toydb','sql','parser','lexer'], [
+  ['Token','enum','pub',8,'pub enum Token {'], ['Keyword','enum','pub',40,'pub enum Keyword {'],
+  ['Lexer','struct','pub',120,'pub struct Lexer<\'a> {'], ['iter','field','priv',121,'    iter: std::iter::Peekable<std::str::Chars<\'a>>,','Lexer'],
+  ['Lexer','impl',null,124,'impl<\'a> Iterator for Lexer<\'a> {',null,'Iterator'], ['next','method',null,127,'    fn next(&mut self) -> Option<Result<Token>> {','Lexer'],
+  ['Lexer','impl',null,140,'impl<\'a> Lexer<\'a> {'], ['new','method','pub',142,'    pub fn new(input: &\'a str) -> Lexer<\'a> {','Lexer'], ['scan','method','priv',150,'    fn scan(&mut self) -> Result<Option<Token>> {','Lexer'], ['scan_number','method','priv',190,'    fn scan_number(&mut self) -> Option<Token> {','Lexer'], ['scan_string','method','priv',210,'    fn scan_string(&mut self) -> Result<Option<Token>> {','Lexer'],
+]);
+S('rs', 'src/sql/parser/ast.rs', ['toydb','sql','parser','ast'], [
+  ['Statement','enum','pub',4,'pub enum Statement {'], ['Expression','enum','pub',60,'pub enum Expression {'], ['Column','struct','pub',110,'pub struct Column {'], ['name','field','pub',111,'    pub name: String,','Column'], ['datatype','field','pub',112,'    pub datatype: DataType,','Column'],
+]);
+S('rs', 'src/sql/types/mod.rs', ['toydb','sql','types'], [
+  ['DataType','enum','pub',5,'pub enum DataType {'], ['Value','enum','pub',14,'pub enum Value {'], ['Value','impl',null,24,'impl Value {'], ['datatype','method','pub',26,'    pub fn datatype(&self) -> Option<DataType> {','Value'], ['is_null','method','pub',36,'    pub fn is_null(&self) -> bool {','Value'],
+]);
+S('rs', 'src/bin/toydb.rs', ['toydb (bin)'], [
+  ['main','fn','priv',8,'fn main() -> Result<()> {'], ['Config','struct','priv',30,'struct Config {'], ['listen_sql','field','priv',31,'    listen_sql: String,','Config'], ['Config','impl',null,40,'impl Config {'], ['load','method','priv',41,'    fn load(path: &str) -> Result<Self> {','Config'],
+]);
+S('rs', 'benches/raft.rs', null, [ ['bench_append','fn','priv',6,'fn bench_append(c: &mut Criterion) {'], ['main','fn','priv',30,'fn main() {'] ]);
+S('rs', 'tests/sql.rs', null, [ ['setup','fn','priv',5,'fn setup() -> Engine {'], ['select_basic','fn','priv',14,'fn select_basic() -> Result<()> {'] ]);
+S('py', 'tools/bench/run.py', ['bench','run'], [
+  ['Benchmark','class','pub',12,'class Benchmark:'], ['__init__','method','pub',13,'    def __init__(self, target: str, rounds: int = 5) -> None:','Benchmark'], ['run','method','pub',20,'    def run(self) -> Report:','Benchmark'], ['_collect','method','priv',31,'    def _collect(self, round: int) -> Sample:','Benchmark'],
+  ['main','fn','pub',48,'def main(argv: list[str] | None = None) -> int:'], ['_parse_args','fn','priv',62,'def _parse_args(argv: list[str] | None) -> argparse.Namespace:'],
+]);
+S('py', 'tools/bench/report.py', ['bench','report'], [
+  ['Report','class','pub',6,'class Report:'], ['__init__','method','pub',7,'    def __init__(self, samples: list[Sample]) -> None:','Report'], ['to_markdown','method','pub',11,'    def to_markdown(self) -> str:','Report'], ['_rows','method','priv',22,'    def _rows(self) -> list[str]:','Report'],
+  ['write_report','fn','pub',30,'def write_report(report: Report, path: str) -> None:'],
+]);
+S('py', 'tools/gen_data.py', ['gen_data'], [ ['main','fn','pub',10,'def main() -> None:'], ['_rand_row','fn','priv',24,'def _rand_row(rng: random.Random) -> tuple[int, str]:'] ]);
+
+const byId = new Map(SYMS.map(s => [s.id, s]));
+const kids = new Map();
+for (const s of SYMS) if (s.p) { if (!kids.has(s.p)) kids.set(s.p, []); kids.get(s.p).push(s); }
+const parentName = s => s.p ? byId.get(s.p).n : null;
+const sep = s => s.u === 'rs' ? '::' : '.';
+const ownerLabel = s => { const p = s.p && byId.get(s.p); if (!p) return ''; if (p.k === 'mod') return p.n + '::'; return p.n + sep(s); };
+const groupOf = s => (s.k === 'struct' || s.k === 'class') ? 'type' : (s.k === 'interface' ? 'trait' : (s.k === 'static' ? 'const' : s.k));
+function qualified(s) { const parts = []; let c = s; while (c) { if (c.k !== 'impl') parts.unshift(c.n); c = c.p ? byId.get(c.p) : null; } const m = s.m ? s.m.filter(x => !x.endsWith('(bin)')) : []; return (m.length ? m.join(sep(s)) + sep(s) : '') + parts.join(sep(s)); }
+
+/* ---------------- State ---------------- */
+const state = { mode: 'kind', q: '', kinds: new Set(KGROUPS.map(g => g[0]).concat(['field'])), pub: false, scope: 'project', narrow: false, stale: false, indexing: false };
+const expanded = new Set();
+let selectedKey = null, caretSym = null, currentFile = 'src/raft/log.rs', keptTabs = new Set(['src/raft/log.rs']), previewTab = null;
+const langCount = () => new Set(SYMS.map(s => s.u)).size;
+
+/* ---------------- Matching (prefix > word start > subsequence, like SymbolSearchIndex) ---------------- */
+function match(name, q) {
+  if (!q) return { ok: true, score: 0, ranges: [] };
+  const n = name.toLowerCase(), ql = q.toLowerCase();
+  if (n.startsWith(ql)) return { ok: true, score: 100 + ql.length, ranges: [[0, ql.length]] };
+  let i = 0, ranges = [], score = 0, prevHit = false;
+  for (let j = 0; j < n.length && i < ql.length; j++) {
+    if (n[j] === ql[i]) { const ws = j === 0 || n[j-1] === '_' || (name[j] >= 'A' && name[j] <= 'Z'); score += ws ? 10 : (prevHit ? 4 : 1); if (ranges.length && ranges[ranges.length-1][1] === j) ranges[ranges.length-1][1] = j+1; else ranges.push([j, j+1]); i++; prevHit = true; } else prevHit = false;
+  }
+  return i === ql.length ? { ok: true, score, ranges } : { ok: false };
+}
+function passes(s) {
+  if (s.k === 'field' && !state.kinds.has('field')) return false;
+  if (s.k !== 'field' && !state.kinds.has(groupOf(s))) return false;
+  // 仅公开: nil leaves (trait method signatures) pass; nil containers (impl blocks) only survive through passing children.
+  if (state.pub && s.k === 'impl') return false;
+  if (state.pub && s.v !== 'pub' && s.v !== null) return false;
+  if (state.scope === 'dir' && !s.f.startsWith(dirOf(currentFile))) return false;
+  return true;
+}
+const dirOf = f => f.slice(0, f.lastIndexOf('/') + 1);
+
+/* ---------------- Tree building ---------------- */
+// node: {key, label, kind, sym, children[], count, dim, cls, path}
+function symNode(s, keyPrefix, opts = {}) {
+  const m = match(s.n, state.q);
+  const node = { key: keyPrefix + ':' + s.id, sym: s, kind: s.k, children: [], ranges: m.ranges || [], own: opts.own !== false ? ownerLabel(s) : '', tag: opts.tag, selfOk: passes(s) && m.ok };
+  if (opts.members) {
+    const children = (kids.get(s.id) || []).filter(c => c.k === 'field' || c.k === 'method' || c.k === 'fn' || c.k === 'mod' || c.k === 'struct' || c.k === 'enum' || c.k === 'const');
+    for (const c of children) node.children.push(symNode(c, node.key, { own: false, members: true }));
+    if (opts.mergeImpls && (s.k === 'struct' || s.k === 'enum' || s.k === 'class')) {
+      // D7: same-file impls always attach; cross-file impls only when this name has exactly one type declaration in the unit.
+      const unique = SYMS.filter(x => (x.k === 'struct' || x.k === 'enum' || x.k === 'class') && x.n === s.n && x.u === s.u).length === 1;
+      for (const im of SYMS.filter(x => x.k === 'impl' && x.n === s.n && x.u === s.u && (x.f === s.f || unique))) node.children.push(symNode(im, node.key, { own: false, members: true, tag: im.f === s.f ? null : '按名称合并' }));
+    }
+  }
+  finish(node);
+  return node;
+}
+function finish(node) {
+  node.children = node.children.filter(c => c.visible);
+  const leaf = c => c.sym && c.selfOk && c.kind !== 'field' ? 1 : 0;
+  // Kind groups count their own members (while filtering, the matches beneath them); modules and types count everything beneath them.
+  node.count = node.cls === 'grp' && !state.q ? node.children.reduce((a, c) => a + leaf(c), 0) : node.children.reduce((a, c) => a + leaf(c) + (c.count || 0), 0);
+  node.visible = node.selfOk || node.children.length > 0;
+  node.dim = !node.selfOk && node.children.length > 0;
+}
+function groupNode(key, label, children, cls) { const n = { key, label, children, cls, selfOk: false }; finish(n); n.dim = false; return n; }
+
+function buildKindTree() {
+  const roots = [];
+  for (const [g, label] of KGROUPS) {
+    if (!state.kinds.has(g)) continue;
+    let items = [];
+    if (g === 'type') items = SYMS.filter(s => s.k === 'struct' || s.k === 'class').map(s => symNode(s, 'k:' + g, { members: true, mergeImpls: true }));
+    else if (g === 'enum') items = SYMS.filter(s => s.k === 'enum').map(s => symNode(s, 'k:' + g, { members: true, mergeImpls: true }));
+    else if (g === 'trait') items = SYMS.filter(s => s.k === 'trait' || s.k === 'interface').map(s => symNode(s, 'k:' + g, { members: true }));
+    else if (g === 'impl') items = SYMS.filter(s => s.k === 'impl').map(s => symNode(s, 'k:' + g, { members: true }));
+    else items = SYMS.filter(s => groupOf(s) === g).map(s => symNode(s, 'k:' + g));
+    if (state.q) items.sort((a, b) => (b.selfOk ? 1 : 0) - (a.selfOk ? 1 : 0) || scoreOf(b) - scoreOf(a) || a.sym.f.localeCompare(b.sym.f) || a.sym.l - b.sym.l);
+    else items.sort((a, b) => a.sym.f.localeCompare(b.sym.f) || a.sym.l - b.sym.l);
+    const n = groupNode('k:' + g, label, items, 'grp');
+    if (n.visible) roots.push(n);
+  }
+  return roots;
+}
+const scoreOf = n => match(n.sym.n, state.q).score || 0;
+
+function buildModuleTree() {
+  const units = {};
+  for (const s of SYMS) {
+    if (s.p && s.k !== 'mod') continue; // members hang under their parent
+    if (s.p && s.k === 'mod' && byId.get(s.p).k === 'mod') continue; // inline mod inside inline mod: still via parent chain
+    const u = units[s.u] || (units[s.u] = { mounted: {}, unmounted: {} });
+    if (!s.m) { (u.unmounted[s.f] || (u.unmounted[s.f] = [])).push(s); continue; }
+    let cur = u.mounted;
+    for (const part of s.m) cur = cur[part] || (cur[part] = { __syms: [], __sub: {} }), cur = cur.__sub ? cur : cur;
+    // walk again to the leaf object properly
+    let node = u.mounted; for (const part of s.m) node = node[part];
+    node.__syms.push(s);
+  }
+  const roots = [];
+  for (const uid of Object.keys(units)) {
+    const u = units[uid];
+    const crates = Object.keys(u.mounted).map(name => modNode(u.mounted[name], name, 'm:' + uid + ':' + name, uid));
+    const unmountedFiles = Object.keys(u.unmounted).sort().map(f => groupNode('m:' + uid + ':unm:' + f, f, u.unmounted[f].map(s => symNode(s, 'm:' + uid + ':unm:' + f, { own: false, members: true })), 'file'));
+    const un = groupNode('m:' + uid + ':unm', '未挂载的文件', unmountedFiles, 'file');
+    const children = crates.concat(un.visible ? [un] : []).filter(c => c.visible);
+    if (langCount() > 1) roots.push(groupNode('m:' + uid, UNITS[uid].label, children, 'unit'));
+    else roots.push(...children);
+  }
+  return roots;
+}
+function modNode(obj, name, key, uid) {
+  const children = [];
+  const syms = obj.__syms.slice().sort((a, b) => a.f.localeCompare(b.f) || a.l - b.l);
+  for (const s of syms) {
+    if (s.k === 'mod' && obj[s.n] && !s.d.endsWith('{')) continue; // file module: shown as a subtree below
+    children.push(symNode(s, key, { own: false, members: true }));
+  }
+  for (const sub of Object.keys(obj).filter(k => !k.startsWith('__')).sort()) children.push(modNode(obj[sub], sub, key + '/' + sub, uid));
+  const n = groupNode(key, name, children, 'mod'); n.kind = 'mod'; n.isModule = true; return n;
+}
+
+/* ---------------- Rendering ---------------- */
+const treeEl = document.getElementById('tree');
+let flatRows = [];
+function render() {
+  flatRows = [];
+  treeEl.classList.toggle('stale', state.stale);
+  if (state.indexing) { treeEl.innerHTML = '<div class="ph">正在索引…</div>'; updateFoot(0, 0); return; }
+  const roots = state.mode === 'kind' ? buildKindTree() : buildModuleTree();
+  if (state.mode === 'kind' && roots.length === 1 && !state.q) expanded.add(roots[0].key);
+  if (state.mode === 'module' && langCount() > 1) roots.forEach(r => expanded.add(r.key));
+  const frag = document.createDocumentFragment();
+  let visibleLeaves = 0;
+  const walk = (node, depth) => {
+    const open = state.q ? (node.children.length > 0 && (node.cls !== 'grp' || true)) : expanded.has(node.key);
+    const isOpen = state.q ? (node.children.length > 0 && !collapsedUnderFilter.has(node.key)) : open;
+    const row = rowEl(node, depth, isOpen);
+    frag.appendChild(row); flatRows.push({ node, row, depth, open: isOpen });
+    if (node.sym && node.selfOk && node.kind !== 'impl') visibleLeaves++;
+    if (isOpen) node.children.forEach(c => walk(c, depth + 1));
+  };
+  roots.forEach(r => walk(r, 0));
+  treeEl.innerHTML = '';
+  if (!roots.length) treeEl.innerHTML = '<div class="ph">没有符合条件的符号。</div>';
+  treeEl.appendChild(frag);
+  // A method shows under its impl and in the 方法 group; count each symbol once.
+  const shown = new Set(); const collect = n => { if (n.sym && n.selfOk && n.kind !== 'field') shown.add(n.sym.id); n.children.forEach(collect); }; roots.forEach(collect);
+  updateFoot(shown.size, visibleLeaves);
+  const selRow = flatRows.find(r => r.node.key === selectedKey); if (selRow) selRow.row.classList.add('sel');
+}
+const collapsedUnderFilter = new Set();
+function rowEl(node, depth, open) {
+  const d = document.createElement('div');
+  d.className = 'r' + (node.cls === 'grp' ? ' grp' : '') + (node.cls === 'unit' ? ' unit' : '') + (node.dim ? ' dim' : '');
+  d.style.paddingLeft = (8 + depth * 14) + 'px';
+  d.dataset.key = node.key;
+  const tri = document.createElement('span'); tri.className = 'tri' + (node.children.length ? '' : ' leaf'); tri.textContent = open ? '▾' : '▸'; d.appendChild(tri);
+  if (node.sym) {
+    const v = document.createElement('span'); v.className = 'vis' + (node.sym.v === 'res' ? ' res' : node.sym.v === 'priv' ? ' priv' : ''); v.textContent = node.sym.v === 'pub' ? '●' : node.sym.v === 'res' ? '◐' : node.sym.v === 'priv' ? '○' : ''; v.title = { pub: '公开', res: '受限', priv: '私有' }[node.sym.v] || '不适用'; d.appendChild(v);
+    const ki = document.createElement('span'); ki.className = 'ki'; const [g, c] = KICON[node.sym.k]; ki.textContent = g; ki.style.background = c; ki.title = K[node.sym.k]; d.appendChild(ki);
+    if (langCount() > 1 && state.mode === 'kind' && depth <= 1) { const l = document.createElement('span'); l.className = 'lang'; l.textContent = UNITS[node.sym.u].badge; d.appendChild(l); }
+    if (node.own) { const o = document.createElement('span'); o.className = 'own'; o.textContent = node.own; d.appendChild(o); }
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.innerHTML = node.sym.k === 'impl' ? implLabel(node.sym, node.ranges) : hl(node.sym.n, node.ranges); d.appendChild(nm);
+    if (node.tag) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = node.tag; d.appendChild(t); }
+    if (node.children.length && node.kind !== 'impl') { const c = document.createElement('span'); c.className = 'cnt'; c.textContent = node.count; d.appendChild(c); }
+    const p = document.createElement('span'); p.className = 'path'; p.textContent = node.sym.f + ':' + node.sym.l; d.appendChild(p);
+  } else {
+    if (node.isModule) { const ki = document.createElement('span'); ki.className = 'ki'; ki.textContent = 'M'; ki.style.background = 'var(--r-sec)'; d.appendChild(ki); }
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = node.label; d.appendChild(nm);
+    const c = document.createElement('span'); c.className = 'cnt'; c.textContent = node.count; d.appendChild(c);
+  }
+  return d;
+}
+function hl(name, ranges) { if (!ranges || !ranges.length) return esc(name); let out = '', i = 0; for (const [a, b] of ranges) { out += esc(name.slice(i, a)) + '<b>' + esc(name.slice(a, b)) + '</b>'; i = b; } return out + esc(name.slice(i)); }
+function implLabel(s, ranges) { return 'impl ' + (s.tr ? '<span class="t">' + esc(s.tr) + '</span> for ' : '') + hl(s.n, ranges); }
+const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+function updateFoot(total, shown) {
+  const all = SYMS.filter(s => s.k !== 'field').length;
+  const files = new Set(SYMS.map(s => s.f)).size;
+  const filtered = state.q || state.pub || state.scope === 'dir' || state.kinds.size < KGROUPS.length + 1;
+  const langs = [...new Set(SYMS.map(s => UNITS[s.u].lang))].join('、');
+  document.getElementById('foot').textContent = state.indexing ? '正在索引…' : (filtered ? `显示 ${total} / ${all} 个符号` : `${all} 个符号`) + ` · ${files} 个文件 · ${langs}`;
+}
+
+/* ---------------- Reader & context ---------------- */
+function showFile(f, sym, opts = {}) {
+  currentFile = f;
+  if (opts.keep) { keptTabs.add(f); if (previewTab === f) previewTab = null; } else if (!keptTabs.has(f)) previewTab = f;
+  const tabs = document.getElementById('tabs'); tabs.innerHTML = '';
+  for (const t of [...keptTabs, ...(previewTab ? [previewTab] : [])]) { const e = document.createElement('span'); e.className = 'tab' + (t === f ? ' cur' : '') + (t === previewTab ? ' prev' : ''); e.textContent = t; tabs.appendChild(e); }
+  const syms = SYMS.filter(s => s.f === f).sort((a, b) => a.l - b.l);
+  const max = (syms[syms.length - 1]?.l || 1) + 3;
+  const lines = new Array(max + 1).fill('');
+  lines[1] = f.endsWith('.py') ? '"""' + f.split('/').pop() + ' — illustrative"""' : '//! ' + f + ' — illustrative';
+  for (const s of syms) { lines[s.l] = s.d; if (s.d.endsWith('{') || s.d.endsWith(':')) { if (!lines[s.l + 1]) lines[s.l + 1] = (s.d.match(/^\s*/)[0]) + '    ' + (f.endsWith('.py') ? '...' : '// …'); } }
+  const code = document.getElementById('code'); code.innerHTML = '';
+  for (let i = 1; i <= max; i++) { const ln = document.createElement('div'); ln.className = 'ln'; ln.dataset.l = i; const b = document.createElement('b'); b.textContent = i; ln.appendChild(b); const t = document.createElement('span'); t.innerHTML = colorize(lines[i], sym && sym.l === i ? sym.n : null); ln.appendChild(t); code.appendChild(ln); }
+  if (sym) { const ln = code.querySelector(`[data-l="${sym.l}"]`); ln.classList.add('cur', 'flash'); ln.scrollIntoView({ block: 'center' }); document.getElementById('stPos').textContent = `第 ${sym.l} 行`; document.getElementById('outlineMini').textContent = (sym.p ? byId.get(sym.p).k + ' ' + byId.get(sym.p).n + ' › ' : '') + sym.k + ' ' + sym.n; }
+  document.getElementById('stLang').textContent = (f.endsWith('.py') ? 'Python · tools' : 'Rust · toydb');
+  document.getElementById('scopeDir').textContent = dirOf(f);
+  document.querySelector('.mini .mbody').textContent = f;
+}
+const KW = /\b(pub|fn|struct|enum|trait|impl|mod|const|static|type|for|use|def|class|crate|super|in|where|dyn|self|Self|return|import|from|async|await|mut|None|Option|Result|Vec|Box|Send|Sync)\b/;
+function colorize(line, hit) {
+  if (!line) return '';
+  const parts = line.split(/(\b(?:pub|fn|struct|enum|trait|impl|mod|const|static|type|for|use|def|class|crate|super|in|where|dyn|self|Self|return|import|from|async|await|mut)\b|"[^"]*"|\/\/.*$|#.*$|\b\d+\b|\b[A-Z][A-Za-z0-9_]*\b|\b[a-z_][a-z0-9_]*(?=\s*[(<])|[A-Za-z_][A-Za-z0-9_]*)/).filter(Boolean);
+  let prevFn = false;
+  return parts.map(p => {
+    let cls = '';
+    if (KW.test(p) && /^[a-zA-Z]+$/.test(p) && ['pub','fn','struct','enum','trait','impl','mod','const','static','type','for','use','def','class','crate','super','in','where','dyn','self','Self','return','import','from','async','await','mut'].includes(p)) { cls = 'k'; prevFn = p === 'fn' || p === 'def'; }
+    else if (/^"/.test(p)) cls = 's';
+    else if (/^(\/\/|#)/.test(p)) cls = 'c';
+    else if (/^\d/.test(p)) cls = 'n';
+    else if (/^[A-Z]/.test(p)) cls = 't';
+    else if (prevFn && /^[a-z_]/.test(p)) { cls = 'fn'; prevFn = false; }
+    const inner = (hit && p === hit) ? '<span class="nmhit">' + esc(p) + '</span>' : esc(p);
+    return cls ? `<span class="${cls}">${inner}</span>` : inner;
+  }).join('');
+}
+function showContext(s) {
+  const h = document.getElementById('ctxhead'), b = document.getElementById('ctxbody');
+  if (!s) { h.innerHTML = '<span class="sym">—</span>'; b.innerHTML = '<div class="empty">选中一个符号后在这里显示它的声明。</div>'; return; }
+  const kindWord = s.k === 'impl' ? 'impl' : K[s.k];
+  h.innerHTML = `<span class="sym">${esc(s.n)}</span><span>${kindWord}</span><span class="p">${esc(s.f)}:${s.l}</span>`;
+  const lines = [s.d.trim()]; if (s.d.endsWith('{') || s.d.endsWith(':')) lines.push('    …');
+  b.innerHTML = lines.map((l, i) => `<div class="ln"><b>${s.l + i}</b><span>${colorize(l, null)}</span></div>`).join('');
+}
+
+/* ---------------- Interaction ---------------- */
+function select(key, { preview = true, keep = false } = {}) {
+  selectedKey = key;
+  treeEl.querySelectorAll('.r.sel').forEach(e => e.classList.remove('sel'));
+  const r = flatRows.find(x => x.node.key === key); if (!r) return;
+  r.row.classList.add('sel'); r.row.scrollIntoView({ block: 'nearest' });
+  if (r.node.sym && (preview || keep)) { showFile(r.node.sym.f, r.node.sym, { keep }); showContext(r.node.sym); caretSym = r.node.sym; }
+  if (keep) document.getElementById('code').focus?.();
+}
+function toggle(key) { const r = flatRows.find(x => x.node.key === key); if (!r || !r.node.children.length) return; if (state.q) { collapsedUnderFilter.has(key) ? collapsedUnderFilter.delete(key) : collapsedUnderFilter.add(key); } else { expanded.has(key) ? expanded.delete(key) : expanded.add(key); } render(); }
+function expandAll(key, on) { const r = flatRows.find(x => x.node.key === key); if (!r) return; const walk = n => { on ? expanded.add(n.key) : expanded.delete(n.key); n.children.forEach(walk); }; walk(r.node); render(); }
+treeEl.addEventListener('click', e => {
+  if (state.stale) return;
+  const row = e.target.closest('.r'); if (!row) return; const key = row.dataset.key;
+  if (e.target.classList.contains('tri')) { e.altKey ? expandAll(key, !expanded.has(key)) : toggle(key); return; }
+  const r = flatRows.find(x => x.node.key === key);
+  if (r.node.sym) select(key); else { selectedKey = key; toggle(key); }
+  treeEl.focus();
+});
+treeEl.addEventListener('dblclick', e => { const row = e.target.closest('.r'); if (!row) return; const r = flatRows.find(x => x.node.key === row.dataset.key); if (r?.node.sym) select(row.dataset.key, { keep: true }); else toggle(row.dataset.key); });
+treeEl.addEventListener('keydown', e => {
+  const idx = flatRows.findIndex(x => x.node.key === selectedKey);
+  const move = d => { const n = flatRows[Math.max(0, Math.min(flatRows.length - 1, (idx < 0 ? (d > 0 ? -1 : flatRows.length) : idx) + d))]; if (n) n.node.sym ? select(n.node.key) : (selectedKey = n.node.key, render()); };
+  if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); const r = flatRows[idx]; if (r && r.node.children.length && !r.open) toggle(r.node.key); else move(1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); const r = flatRows[idx]; if (r && r.open) toggle(r.node.key); else if (r) { const parent = flatRows.slice(0, idx).reverse().find(x => x.depth < r.depth); if (parent) { parent.node.sym ? select(parent.node.key) : (selectedKey = parent.node.key, render()); } } }
+  else if (e.key === 'Enter') { e.preventDefault(); if (idx >= 0 && flatRows[idx].node.sym) select(selectedKey, { keep: true }); else if (idx >= 0) toggle(selectedKey); }
+  else if (e.key === 'Escape') { e.preventDefault(); if (state.q) { setQuery(''); } else { document.getElementById('code').focus?.(); showHint('焦点已交还阅读区'); } }
+});
+// context menu
+const menu = document.getElementById('menu');
+treeEl.addEventListener('contextmenu', e => {
+  const row = e.target.closest('.r'); if (!row) return; e.preventDefault();
+  const r = flatRows.find(x => x.node.key === row.dataset.key); if (!r?.node.sym) return;
+  select(r.node.key); const s = r.node.sym;
+  const canRel = s.k === 'fn' || s.k === 'method'; const canImpl = s.k === 'trait' || s.k === 'interface' || s.k === 'struct' || s.k === 'class' || s.k === 'enum';
+  menu.innerHTML = `<div>打开</div><div>在右侧打开</div><hr><div class="${canRel ? '' : 'dis'}">查看调用者</div><div class="${canRel ? '' : 'dis'}">查看被调用者</div><div>查看引用</div><div class="${canImpl ? '' : 'dis'}">查看实现</div><hr><div>高亮此名称</div><div>在文件树中显示</div><div>复制限定名 <span style="color:var(--r-ter);font-family:var(--font-code);font-size:10.5px">${esc(qualified(s))}</span></div>`;
+  const wr = document.getElementById('win').getBoundingClientRect();
+  menu.style.left = (e.clientX - wr.left) + 'px'; menu.style.top = (e.clientY - wr.top) + 'px'; menu.classList.add('open');
+  menu.querySelectorAll('div').forEach(d => d.addEventListener('click', () => { menu.classList.remove('open'); showHint('原型：' + d.textContent.split(' ')[0] + '（接现有命令）'); }));
+});
+document.addEventListener('click', e => { if (!e.target.closest('#menu')) menu.classList.remove('open'); if (!e.target.closest('#pop') && !e.target.closest('#filterBtn')) document.getElementById('pop').classList.remove('open'); });
+// filter field
+const q = document.getElementById('q'); let qTimer;
+function setQuery(v) { q.value = v; state.q = v; document.getElementById('qClr').classList.toggle('on', !!v); collapsedUnderFilter.clear(); render(); }
+q.addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(() => setQuery(q.value), 150); });
+q.addEventListener('keydown', e => { if (e.key === 'ArrowDown') { e.preventDefault(); treeEl.focus(); if (!flatRows.some(x => x.node.key === selectedKey)) { const first = flatRows.find(x => x.node.sym) || flatRows[0]; if (first) first.node.sym ? select(first.node.key) : (selectedKey = first.node.key, render()); } } else if (e.key === 'Escape') { setQuery(''); } });
+document.getElementById('qClr').addEventListener('click', () => { setQuery(''); q.focus(); });
+// mode
+document.getElementById('modeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; state.mode = b.dataset.mode; [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b)); render(); });
+// filter popover
+const kb = document.getElementById('kindBoxes');
+for (const [g, label] of KGROUPS.concat([['field', '字段（仅类型展开后）']])) { const l = document.createElement('label'); l.innerHTML = `<input type="checkbox" value="${g}" checked> ${label}`; kb.appendChild(l); }
+kb.addEventListener('change', e => { e.target.checked ? state.kinds.add(e.target.value) : state.kinds.delete(e.target.value); document.getElementById('filterBtn').classList.toggle('on', state.kinds.size < KGROUPS.length + 1); render(); });
+document.getElementById('pop').addEventListener('change', e => { if (e.target.name === 'scope') { state.scope = e.target.value; document.getElementById('scopeBtn').setAttribute('aria-pressed', state.scope === 'dir'); setScopeLabel(); render(); } });
+function setScopeLabel() { document.getElementById('scopeBtn').querySelector('.lbl').textContent = state.scope === 'dir' ? '当前目录' : '整个项目'; document.getElementById('scopeBtn').querySelector('.sl').textContent = state.scope === 'dir' ? '目录' : '全部'; }
+document.getElementById('filterBtn').addEventListener('click', e => { const pop = document.getElementById('pop'); const pr = document.getElementById('symPanel').getBoundingClientRect(); const br = e.currentTarget.getBoundingClientRect(); pop.style.left = (br.left - pr.left) + 'px'; pop.style.top = (br.bottom - pr.top + 4) + 'px'; pop.classList.toggle('open'); });
+document.getElementById('pubBtn').addEventListener('click', e => { state.pub = !state.pub; e.currentTarget.setAttribute('aria-pressed', state.pub); render(); });
+document.getElementById('scopeBtn').addEventListener('click', () => { state.scope = state.scope === 'dir' ? 'project' : 'dir'; document.querySelector(`input[name=scope][value=${state.scope}]`).checked = true; document.getElementById('scopeBtn').setAttribute('aria-pressed', state.scope === 'dir'); setScopeLabel(); render(); });
+// locate
+function locate() {
+  const s = caretSym; if (!s) { showHint('没有当前符号'); return; }
+  render();
+  // expand the path to the node holding this symbol in the current mode, then select
+  const want = ':' + s.id;
+  const roots = state.mode === 'kind' ? buildKindTree() : buildModuleTree();
+  let found = null;
+  const walk = (n, trail) => { if (found) return; if (n.sym === s && n.selfOk) { found = trail.concat(n); return; } n.children.forEach(c => walk(c, trail.concat(n))); };
+  roots.forEach(r => walk(r, []));
+  if (!found) { showHint('当前符号被过滤隐藏'); return; }
+  found.slice(0, -1).forEach(n => { expanded.add(n.key); collapsedUnderFilter.delete(n.key); });
+  render(); select(found[found.length - 1].key, { preview: false }); treeEl.focus(); showContext(s);
+}
+document.getElementById('locate').addEventListener('click', locate);
+document.getElementById('helpBtn').addEventListener('click', () => showHint('不会出现：Rust 枚举变体与宏、Python 模块级变量、TS interface/type/enum（D1 前）', 3500));
+let hintTimer; function showHint(t, ms = 1800) { const h = document.getElementById('hint'); h.textContent = t; h.classList.add('on'); clearTimeout(hintTimer); hintTimer = setTimeout(() => h.classList.remove('on'), ms); }
+
+/* ---------------- Page controls ---------------- */
+document.getElementById('themeSeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; [...e.currentTarget.children].forEach(x => x.setAttribute('aria-pressed', x === b)); const th = b.dataset.th; const win = document.getElementById('win'); win.classList.toggle('th-dark', th === 'dark'); win.classList.toggle('th-si', th === 'si'); document.documentElement.dataset.theme = th === 'dark' ? 'dark' : 'light'; });
+document.getElementById('demoNarrow').addEventListener('click', e => { state.narrow = !state.narrow; document.getElementById('win').classList.toggle('narrow', state.narrow); e.currentTarget.setAttribute('aria-pressed', state.narrow); });
+document.getElementById('demoIndexing').addEventListener('click', () => { state.indexing = true; render(); setTimeout(() => { state.indexing = false; render(); showHint('首帧（缓存会话）已列出'); setTimeout(() => showHint('完整会话到达：静默替换，展开与选中保留'), 1200); }, 1200); });
+document.getElementById('demoStale').addEventListener('click', () => { state.stale = true; document.getElementById('banner').classList.add('on'); render(); setTimeout(() => { state.stale = false; document.getElementById('banner').classList.remove('on'); render(); showHint(selectedKey ? '已按 (path, contentID, nameRange) 恢复选中' : '重建完成'); }, 1600); });
+document.getElementById('demoLocate').addEventListener('click', () => { const s = SYMS.find(x => x.n === 'append' && x.k === 'method'); showFile(s.f, s); showContext(s); caretSym = s; setTimeout(locate, 400); });
+
+/* ---------------- Boot ---------------- */
+showFile('src/raft/log.rs', null);
+render();
+</script>
+</body>
+</html>
