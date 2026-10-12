@@ -4865,9 +4865,16 @@ extension MainWindowController: ProjectSymbolsPanelHost {
             navigate(to: file, byteOffset: nameRange.lowerBound, cause: .search, expectedContentID: contentID)
         }
         readerController.revealProjectSearchMatch(nameRange, expectedContentID: contentID)
-        // B4.1: programmatic opens do not report caret moves, so feed the
-        // declaration name to the Context (and to "locate") as a caret move.
-        if readerController.displayedContentID == contentID {
+        // B4.1: programmatic opens report no caret move, and a file not yet
+        // shown loads asynchronously, so hand the declaration name to the
+        // Context directly, as a reader click does, and remember it for "locate".
+        lastLensCaret = (nameRange.lowerBound, readerController)
+        if model.contextWindow.tracking == .symbol {
+            caretFollowTask?.cancel()
+            model.contextWindow.tokenClicked(file: path, offset: nameRange.lowerBound)
+        } else if readerController.displayedContentID == contentID {
+            // ponytail: the enclosing mode needs the shown document; a file
+            // still loading keeps the previous scope until the next caret move.
             handleReaderCaret(offset: nameRange.lowerBound, from: readerController)
         }
         if focusReader { readerController.focusText() }

@@ -1698,3 +1698,60 @@ func panelChangesAfterAClickDoNotRecordGeometry() async throws {
     #expect(controller.panelLayout.heights == before.heights)
     #expect(controller.panelLayout.zoneWidths == before.zoneWidths)
 }
+
+/// B4.1: previewing a project symbol shows it in the Context like a reader
+/// click — the hidden Context appears, with no "not on a symbol" note.
+@MainActor
+@Test
+func projectSymbolPreviewShowsTheSymbolInTheContext() async throws {
+    _ = NSApplication.shared
+    let log = "pub struct Log;\n\nimpl Log {\n    pub fn append(&self) {}\n    pub fn commit(&self) {}\n}\n"
+    let root = try mainWindowTemporaryProject([
+        "src/main.rs": "mod log;\nfn main() {}\n",
+        "src/log.rs": log,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    let main = root.appendingPathComponent("src/main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+    controller.renderForSelfTest()
+    #expect(controller.selfTestContextPaneCollapsed)
+
+    let (session, context) = try #require(model.querySessions.first)
+    let listing = try session.projectSymbols(context: context)
+    func preview(_ name: String) throws {
+        let symbol = try #require(listing.symbols.first { $0.name == name })
+        let file = listing.files[symbol.fileIndex]
+        controller.openProjectSymbol(
+            path: file.path, nameRange: symbol.nameRange, contentID: file.contentID, focusReader: false
+        )
+    }
+
+    // The file is not shown yet when the preview hands over the symbol.
+    try preview("append")
+    #expect(await mainWindowWaitUntil(model.contextWindow.displayedCandidate?.targetByteOffset == 39))
+    try await Task.sleep(for: .milliseconds(300))
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestContextPaneCollapsed, "the Context appears as for a reader click")
+    #expect(!model.contextWindow.isShowingPreviousToken)
+
+    // A caret on a blank line keeps the symbol and flags it; previewing
+    // the same symbol again clears the flag.
+    controller.selfTestFollowCaret(offset: 16)
+    #expect(await mainWindowWaitUntil(model.contextWindow.isShowingPreviousToken))
+    try preview("append")
+    #expect(await mainWindowWaitUntil(!model.contextWindow.isShowingPreviousToken))
+
+    try preview("commit")
+    #expect(await mainWindowWaitUntil(model.contextWindow.displayedCandidate?.targetByteOffset == 67))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(!model.contextWindow.isShowingPreviousToken)
+}
