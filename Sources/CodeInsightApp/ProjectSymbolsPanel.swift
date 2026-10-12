@@ -42,6 +42,9 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var items: [Int: NodeItem] = [:]
     private var renderedRevision: UInt64 = .max
+    /// B6.2: rows drop owner and path only near the 180pt minimum width.
+    private var isNarrow: Bool { view.bounds.width < 200 }
+    private var renderedNarrow: Bool?
     private var isSyncing = false
     private var filterTask: Task<Void, Never>?
     private var messageTask: Task<Void, Never>?
@@ -57,6 +60,20 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard renderedNarrow != isNarrow else { return }
+        let firstLayout = renderedNarrow == nil
+        renderedNarrow = isNarrow
+        guard !firstLayout else { return }
+        let visible = outlineView.rows(in: outlineView.visibleRect)
+        guard visible.length > 0 else { return }
+        outlineView.reloadData(
+            forRowIndexes: IndexSet(integersIn: visible.location..<NSMaxRange(visible)),
+            columnIndexes: [0]
+        )
+    }
 
     override func loadView() {
         let root = NSView()
@@ -485,7 +502,7 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         guard let item = item as? NodeItem, let node = model.node(item.node) else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("ProjectSymbolCell")
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self) as? SymbolCell ?? SymbolCell(identifier: identifier)
-        let narrow = outlineView.bounds.width < 240
+        let narrow = isNarrow
         cell.detail.isHidden = narrow
         cell.mark.isHidden = true
         cell.icon.isHidden = false
