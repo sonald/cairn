@@ -4865,6 +4865,11 @@ extension MainWindowController: ProjectSymbolsPanelHost {
             navigate(to: file, byteOffset: nameRange.lowerBound, cause: .search, expectedContentID: contentID)
         }
         readerController.revealProjectSearchMatch(nameRange, expectedContentID: contentID)
+        // B4.1: programmatic opens do not report caret moves, so feed the
+        // declaration name to the Context (and to "locate") as a caret move.
+        if readerController.displayedContentID == contentID {
+            handleReaderCaret(offset: nameRange.lowerBound, from: readerController)
+        }
         if focusReader { readerController.focusText() }
     }
 
