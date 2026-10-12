@@ -8,6 +8,7 @@
 | `ExactProbe` | 探查 LSP 定义、Safe 配置和历史快照物化。Safe 的服务器配置不构成安全隔离保证；测试结果只适用于被测工具版本。 |
 | `TextKitProbe` | 比较 viewport 惰性属性与全量属性，观察 Unicode 映射与原生排版。离屏计时不能代替真实窗口交互。 |
 | `ReadonlyChunkedContent` | 比较自然段分块与普通 TextKit 内容。当前方案改变几何，未采用；详见旁边的 [结论](ReadonlyChunkedContent/FINDINGS.md)。 |
+| `ReaderLayoutProbe` | 比较行内提示（字间距 / 附件）与行间卡片（段间距 / 附件段落）的交互，以及卡片逐帧改高度的成本。前两项是独立 `NSTextView`，成本另在真实阅读区测；详见旁边的 [结论](ReaderLayoutProbe/FINDINGS.md)。 |
 
 在对应 Swift package 目录构建并运行：
 
@@ -29,6 +30,11 @@ swift run TextKitProbe generate /tmp/cairn-probe.rs
 swift run TextKitProbe measure /tmp/cairn-probe.rs --lazy --font-delta 2 --comment-font
 swift run TextKitProbe measure /tmp/cairn-probe.rs --eager --font-delta 2 --comment-font
 swift run TextKitProbe view /tmp/cairn-probe.rs --lazy --font-delta 2 --comment-font
+
+# Prototypes/ReaderLayoutProbe（单文件，swiftc 编译）
+bash build.sh
+./reader-layout-probe all --out /tmp/cairn-layout-probe
+./reader-layout-probe demo --variant gap
 ```
 
 按实验需要安装相应 libgit2/语言服务器。只在相关机制有疑问时使用原型；不要把旧原型的重复测试加入主工程 CI。

@@ -1,0 +1,518 @@
+{
+  "animate": {
+    "attachment": {
+      "finalCardHeight": 240,
+      "frames": 18,
+      "intervalMaxMs": 17.94,
+      "intervalsOver20ms": 0,
+      "workMaxMs": 4,
+      "workMedianMs": 2.19
+    },
+    "gap": {
+      "finalCardHeight": 240,
+      "frames": 18,
+      "intervalMaxMs": 17.55,
+      "intervalsOver20ms": 0,
+      "workMaxMs": 4.33,
+      "workMedianMs": 2.35
+    }
+  },
+  "cards": {
+    "attachment": {
+      "focus": {
+        "controlOuterCaretMovedByArrow": false,
+        "firstResponderIsInnerText": true,
+        "hitIsInsideCard": true,
+        "hitView": "NSTextView",
+        "innerCaretMovedByArrow": false,
+        "outerSelectionUnchanged": true
+      },
+      "heightChange": {
+        "cardHeight": 320,
+        "cardOverlapsNextLine": false,
+        "expected": 120,
+        "ms": 2.39,
+        "nextLineShift": 120
+      },
+      "initial": {
+        "anchorFragmentHeight": 20.8,
+        "cardFrame": [
+          2552.5,
+          200
+        ],
+        "cardOverlapsNextLine": false,
+        "nextLineTop": 2763.89
+      },
+      "innerScroll": {
+        "innerMaxReached": 1060,
+        "innerMovedOnFirstWheel": true,
+        "outerMovedAfterInnerEnd": false,
+        "outerMovedOnFirstWheel": false,
+        "outerMovedWhileInnerScrolling": false,
+        "wheelTarget": "NSTextView"
+      },
+      "readingPosition": {
+        "anchorOffsetAfterRelocate": 2.97,
+        "anchorOffsetBefore": -5.03,
+        "cardHeightWhenBack": 200,
+        "cardOverlapsNextLineWhenBack": false,
+        "relocateMs": 1.3,
+        "shrinkMs": 0.87,
+        "topLineAfterRelocate": 174,
+        "topLineAfterShrink": 174,
+        "topLineBefore": 174
+      },
+      "scrollAwayAndBack": {
+        "cardViewInWindowWhileAway": false,
+        "cardViewsCreated": 1,
+        "innerOffsetAfter": 1060,
+        "innerOffsetBefore": 1060,
+        "providersCreated": 1,
+        "sameCardViewAfterReturn": true
+      },
+      "selectionAcross": {
+        "containsPlaceholder": true,
+        "selectionSegments": [
+          [
+            2512.65,
+            20.8
+          ],
+          [
+            2533.45,
+            211
+          ],
+          [
+            2744.45,
+            28.8
+          ]
+        ]
+      }
+    },
+    "gap": {
+      "focus": {
+        "controlOuterCaretMovedByArrow": false,
+        "firstResponderIsInnerText": true,
+        "hitIsInsideCard": true,
+        "hitView": "NSTextView",
+        "innerCaretMovedByArrow": false,
+        "outerSelectionUnchanged": true
+      },
+      "heightChange": {
+        "cardHeight": 320,
+        "cardOverlapsNextLine": false,
+        "expected": 120,
+        "ms": 2.27,
+        "nextLineShift": 120
+      },
+      "initial": {
+        "anchorFragmentHeight": 236.8,
+        "cardFrame": [
+          2552.89,
+          200
+        ],
+        "cardOverlapsNextLine": false,
+        "nextLineTop": 2760.89
+      },
+      "innerScroll": {
+        "innerMaxReached": 1061.11,
+        "innerMovedOnFirstWheel": true,
+        "outerMovedAfterInnerEnd": false,
+        "outerMovedOnFirstWheel": false,
+        "outerMovedWhileInnerScrolling": false,
+        "wheelTarget": "NSTextView"
+      },
+      "readingPosition": {
+        "anchorOffsetAfterRelocate": -13.53,
+        "anchorOffsetBefore": -5.03,
+        "cardHeightWhenBack": 200,
+        "cardOverlapsNextLineWhenBack": false,
+        "relocateMs": 2.08,
+        "shrinkMs": 3.77,
+        "topLineAfterRelocate": 174,
+        "topLineAfterShrink": 190,
+        "topLineBefore": 174
+      },
+      "scrollAwayAndBack": {
+        "cardViewInWindowWhileAway": true,
+        "cardViewsCreated": 1,
+        "innerOffsetAfter": 1061.11,
+        "innerOffsetBefore": 1061.11,
+        "providersCreated": 0,
+        "sameCardViewAfterReturn": true
+      },
+      "selectionAcross": {
+        "containsPlaceholder": false,
+        "selectionSegments": [
+          [
+            2504,
+            20.8
+          ],
+          [
+            2524.8,
+            236.8
+          ]
+        ]
+      }
+    }
+  },
+  "environment": {
+    "date": "2026-10-12T03:15:51Z",
+    "font": ".AppleSystemUIFontMonospaced-Regular",
+    "lineHeightMultiple": 1.3,
+    "os": "Version 27.0.1 (Build 26A434)"
+  },
+  "inline": {
+    "attachment": {
+      "afterFontSize16": {
+        "anchorSegmentWidth": 54,
+        "kernStillPresent": false
+      },
+      "anchorSegmentWidth": 54,
+      "boundary": {
+        "after": 60,
+        "before": 59,
+        "meaning": "source offsets: 59 is before `(`... 60 is `items`"
+      },
+      "clicks": [
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 10
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 30
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 50
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 70
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 90
+        }
+      ],
+      "drag": {
+        "displaySelection": [
+          56,
+          15
+        ],
+        "nativeString": "pute(<U+FFFC>items, <U+FFFC>4",
+        "sourceMappedString": "pute(items, 4"
+      },
+      "hintBox": [
+        254.87,
+        49.6,
+        54,
+        21.54
+      ],
+      "nextWordGlyphMinX": 308.87,
+      "nextWordRangeMinX": 308.87,
+      "withoutHitTestOverride": {
+        "hitView": "HintView"
+      },
+      "wrap": [
+        {
+          "hintFits": {
+            "anchorWordLine": 0,
+            "attachmentLine": 0,
+            "charAfterHintLine": 0,
+            "containerWidth": 162.49
+          }
+        },
+        {
+          "hintDoesNotFit": {
+            "anchorWordLine": 0,
+            "attachmentLine": 1,
+            "charAfterHintLine": 1,
+            "containerWidth": 131.47
+          }
+        }
+      ]
+    },
+    "kern": {
+      "afterFontSize16": {
+        "anchorSegmentWidth": 36.89,
+        "kernStillPresent": true
+      },
+      "anchorSegmentWidth": 35.04,
+      "boundary": {
+        "after": 60,
+        "before": 59,
+        "meaning": "source offsets: 59 is before `(`... 60 is `items`"
+      },
+      "clicks": [
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 59,
+          "x%": 10
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 30
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 50
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 60,
+          "x%": 70
+        },
+        {
+          "hitView": "ProbeTextView",
+          "insertionSource": 61,
+          "x%": 90
+        }
+      ],
+      "drag": {
+        "displaySelection": [
+          55,
+          13
+        ],
+        "nativeString": "pute(items, 4",
+        "sourceMappedString": "pute(items, 4"
+      },
+      "hintBox": [
+        254.87,
+        54.77,
+        54,
+        16.96
+      ],
+      "nextWordGlyphMinX": 308.87,
+      "nextWordRangeMinX": 281.87,
+      "wrap": [
+        {
+          "hintFits": {
+            "anchorWordLine": 0,
+            "charAfterHintLine": 0,
+            "containerWidth": 162.49,
+            "exceedsContainer": false,
+            "hintBoxMaxX": 158.47
+          }
+        },
+        {
+          "hintDoesNotFit": {
+            "anchorWordLine": 1,
+            "charAfterHintLine": 1,
+            "containerWidth": 131.47,
+            "exceedsContainer": false,
+            "hintBoxMaxX": 94.18
+          }
+        }
+      ]
+    }
+  },
+  "realReader": {
+    "runs": [
+      {
+        "fixture": "fold_perf.rs[..50001]",
+        "foldLines": 11,
+        "frameStep": {
+          "max": 0.94,
+          "median": 0.66,
+          "n": 60,
+          "p95": 0.73
+        },
+        "gapShiftErrorPt": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 30,
+          "p95": 0.0
+        },
+        "gapStep": {
+          "max": 2.74,
+          "median": 2.18,
+          "n": 30,
+          "p95": 2.71
+        },
+        "lines": 50002,
+        "toggleDeferred": {
+          "max": 11.87,
+          "median": 4.32,
+          "n": 20,
+          "p95": 7.33
+        },
+        "toggleSync": {
+          "max": 142.58,
+          "median": 51.41,
+          "n": 20,
+          "p95": 72.12
+        },
+        "wrap": false
+      },
+      {
+        "fixture": "fold_perf.rs[..3180]",
+        "foldLines": 12,
+        "frameStep": {
+          "max": 1.19,
+          "median": 0.68,
+          "n": 60,
+          "p95": 0.82
+        },
+        "gapShiftErrorPt": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 30,
+          "p95": 0.0
+        },
+        "gapStep": {
+          "max": 3.11,
+          "median": 2.51,
+          "n": 30,
+          "p95": 2.99
+        },
+        "lines": 3181,
+        "toggleDeferred": {
+          "max": 10.48,
+          "median": 1.81,
+          "n": 20,
+          "p95": 9.31
+        },
+        "toggleSync": {
+          "max": 34.68,
+          "median": 16.15,
+          "n": 20,
+          "p95": 22.94
+        },
+        "wrap": true
+      },
+      {
+        "fixture": "fold_perf.rs[..50001]",
+        "foldLines": 11,
+        "frameStep": {
+          "max": 0.81,
+          "median": 0.67,
+          "n": 60,
+          "p95": 0.72
+        },
+        "gapShiftErrorPt": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 30,
+          "p95": 0.0
+        },
+        "gapStep": {
+          "max": 2.8,
+          "median": 2.22,
+          "n": 30,
+          "p95": 2.6
+        },
+        "lines": 50002,
+        "toggleDeferred": {
+          "max": 10.56,
+          "median": 1.32,
+          "n": 20,
+          "p95": 5.57
+        },
+        "toggleSync": {
+          "max": 67.89,
+          "median": 50.0,
+          "n": 20,
+          "p95": 54.16
+        },
+        "wrap": true
+      },
+      {
+        "fixture": "fold_perf.rs[..3180]",
+        "foldLines": 12,
+        "frameStep": {
+          "max": 0.89,
+          "median": 0.65,
+          "n": 60,
+          "p95": 0.7
+        },
+        "gapShiftErrorPt": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 30,
+          "p95": 0.0
+        },
+        "gapStep": {
+          "max": 2.44,
+          "median": 1.95,
+          "n": 30,
+          "p95": 2.42
+        },
+        "lines": 3181,
+        "toggleDeferred": {
+          "max": 12.46,
+          "median": 6.93,
+          "n": 20,
+          "p95": 10.29
+        },
+        "toggleSync": {
+          "max": 21.09,
+          "median": 15.89,
+          "n": 20,
+          "p95": 16.48
+        },
+        "wrap": false
+      }
+    ],
+    "source": "RealReaderCardCostTests.swift, swift test debug build, main 757796f, 2026-10-12"
+  },
+  "scrollRoute": {
+    "attachment": {
+      "cardSubviewIndex": 2,
+      "hitIsInsideCard": true,
+      "hitView": "NSTextView",
+      "textViewSubviews": [
+        "_NSTextSelectionView",
+        "_NSTextRenderingSurfacesGroupView",
+        "_NSTextContentView"
+      ],
+      "wheelFromHitView": {
+        "innerDelta": 30,
+        "outerDelta": 0
+      }
+    },
+    "gap": {
+      "cardSubviewIndex": 3,
+      "hitIsInsideCard": true,
+      "hitView": "NSTextView",
+      "textViewSubviews": [
+        "_NSTextSelectionView",
+        "_NSTextRenderingSurfacesGroupView",
+        "_NSTextContentView",
+        "CardView"
+      ],
+      "wheelFromHitView": {
+        "innerDelta": 30,
+        "outerDelta": 0
+      }
+    }
+  },
+  "shouldEnumerate": {
+    "hide": {
+      "anchorToNextHidden": 20.8,
+      "anchorToNextShown": 41.6,
+      "delegateCalls": 951,
+      "insertionIndexInsideHidden": false,
+      "invalidateWholeDocMs": 2.88,
+      "selectionContainsHiddenText": true
+    },
+    "moveDownTwice": {
+      "landedInsideHidden": false,
+      "landedLine": 120,
+      "moved": false
+    },
+    "showAgain": {
+      "anchorToNext": 41.6,
+      "expected": 41.6,
+      "invalidateOnlyCardRangeMs": 1.43
+    },
+    "textViewHadContentStorageDelegate": false
+  }
+}
