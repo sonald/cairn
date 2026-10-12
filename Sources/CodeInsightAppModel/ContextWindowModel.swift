@@ -954,6 +954,8 @@ public final class ContextWindowModel {
            locatedToken.file == token.file,
            locatedToken.range.contains(token.offset)
         {
+            // Back on the located symbol: the "kept previous" note is stale.
+            isShowingPreviousToken = false
             return symbolCandidate
         }
         // Only a new token supersedes the displayed one. A miss (blank,
@@ -990,6 +992,7 @@ public final class ContextWindowModel {
            locatedToken.file == token.file,
            locatedToken.range == range
         {
+            isShowingPreviousToken = false
             return symbolCandidate
         }
         requestID &+= 1

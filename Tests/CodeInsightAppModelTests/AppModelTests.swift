@@ -1804,18 +1804,20 @@ func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
     #expect(model.candidateCount == 1)
     #expect(model.isShowingPreviousToken)
 
-    // Re-clicking the retained token is deduped (no re-resolve)…
+    // Re-clicking the retained token is deduped (no re-resolve) and clears
+    // the miss flag, since the caret is back on the shown symbol…
     model.tokenClicked(file: "main.rs", offset: tokenOffset)
     for _ in 0..<10 { await Task.yield() }
     #expect(model.candidateCount == 1)
     #expect(resolveCount == 1)
+    #expect(!model.isShowingPreviousToken)
     // …and a genuinely new token still resolves after the miss.
     model.tokenClicked(
         file: "main.rs",
         offset: byteOffset(of: "fn main() {", in: source) + 4
     )
-    #expect(await testWaitUntil("model.candidateCount == 1 && !model.isShowingPreviousToken") {
-        model.candidateCount == 1 && !model.isShowingPreviousToken
+    #expect(await testWaitUntil("resolveCount == 2 && model.candidateCount == 1") {
+        resolveCount == 2 && model.candidateCount == 1 && !model.isShowingPreviousToken
     })
     #expect(resolveCount == 2)
 }
