@@ -338,6 +338,11 @@ public final class LSPClient: @unchecked Sendable {
     private var stderr = Data()
     private var serverDiagnostics = ""
     private var serverIsQuiescent = false
+    /// Readiness signals in arrival order (`$/progress` begin/end,
+    /// `experimental/serverStatus`, `window/logMessage`) for confirming a
+    /// warm switch; `signalBase` counts the entries trimmed from the front.
+    private var signals: [(method: String, params: [String: Any])] = []
+    private var signalBase = 0
     private var readError: Error?
     private var reachedEOF = false
     private var closed = false
@@ -629,6 +634,50 @@ public final class LSPClient: @unchecked Sendable {
         throw LSPError.timeout(method)
     }
 
+    /// Position after the newest recorded signal; pass it to
+    /// `waitForSignal(after:)` to see only what arrives later.
+    var signalMark: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return signalBase + signals.count
+    }
+
+    /// Waits for the first signal after `mark` that `matches`, and returns
+    /// its params with the mark just past it; nil when `timeout` passes
+    /// first. Throws when the server goes away or `shouldContinue` stops.
+    func waitForSignal(
+        after mark: Int,
+        timeout: TimeInterval,
+        shouldContinue: @Sendable () -> Bool = { true },
+        matching matches: (String, [String: Any]) -> Bool
+    ) throws -> (mark: Int, params: [String: Any])? {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        var next = mark
+        while true {
+            next = max(next, signalBase)
+            while next < signalBase + signals.count {
+                let signal = signals[next - signalBase]
+                next += 1
+                if matches(signal.method, signal.params) {
+                    return (next, signal.params)
+                }
+            }
+            if let readError { throw readError }
+            if let process, !process.isRunning {
+                let detail = String(decoding: stderr, as: UTF8.self)
+                throw LSPError.processExited(process.terminationStatus, detail)
+            }
+            if reachedEOF || closed { throw LSPError.connectionClosed }
+            if !shouldContinue() { throw LSPError.cancelled("readiness signal") }
+            guard Date() < deadline else { return nil }
+            _ = condition.wait(
+                until: min(deadline, Date().addingTimeInterval(0.01))
+            )
+        }
+    }
+
     public func cancelOutstandingRequests() {
         condition.lock()
         let ids = Array(pendingRequestIDs)
@@ -766,6 +815,9 @@ public final class LSPClient: @unchecked Sendable {
                     {
                         serverIsQuiescent = quiescent
                     }
+                    if let params = message["params"] as? [String: Any] {
+                        recordSignal(method: method, params: params)
+                    }
                     if method == "window/showMessage"
                         || method == "window/logMessage"
                         || method.localizedCaseInsensitiveContains("status")
@@ -797,6 +849,32 @@ public final class LSPClient: @unchecked Sendable {
                 method: request.method,
                 params: request.params
             )
+        }
+    }
+
+    /// Called with `condition` held.
+    private func recordSignal(method: String, params: [String: Any]) {
+        let kind = (params["value"] as? [String: Any])?["kind"] as? String
+        switch method {
+        case "$/progress":
+            guard kind == "begin" || kind == "end" else { return }
+            // rust-analyzer starts a reload without sending quiescent=false
+            // (a manifest change never does), so the sticky value would
+            // still say ready; the next quiescent=true ends the reload.
+            if kind == "begin",
+               params["token"] as? String == "rustAnalyzer/Fetching"
+            {
+                serverIsQuiescent = false
+            }
+        case "experimental/serverStatus", "window/logMessage":
+            break
+        default:
+            return
+        }
+        signals.append((method, params))
+        if signals.count > 4_096 {
+            signals.removeFirst(2_048)
+            signalBase += 2_048
         }
     }
 

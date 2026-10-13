@@ -2,8 +2,9 @@ import CodeInsightCore
 import Foundation
 
 struct Sandbox: Sendable {
-    static let cpuTimeLimitSeconds: UInt64 = 60
-    // macOS maps the dyld shared cache into a large virtual address range.
+    // No CPU-time limit: language servers stay up across commit switches,
+    // and the coordinator restarts a session that does not become ready
+    // after a switch instead. macOS maps the dyld shared cache into a large virtual address range.
     static let addressSpaceLimitKiB: UInt64 = 512 * 1024 * 1024
 
     let executableURL = URL(fileURLWithPath: "/usr/bin/sandbox-exec")
@@ -58,7 +59,6 @@ struct Sandbox: Sendable {
         let prefix = [
             "-p", profile,
             "/bin/sh", "-c", Self.rlimitScript, "codeinsight-rlimit",
-            String(Self.cpuTimeLimitSeconds),
             String(Self.addressSpaceLimitKiB),
         ]
         arguments =
@@ -81,7 +81,6 @@ struct Sandbox: Sendable {
         process.arguments = [
             "-p", profile,
             "/bin/sh", "-c", Self.rlimitScript, "codeinsight-rlimit",
-            String(Self.cpuTimeLimitSeconds),
             String(Self.addressSpaceLimitKiB),
             "/usr/bin/true",
         ]
@@ -158,9 +157,8 @@ struct Sandbox: Sendable {
     }
 
     private static let rlimitScript = """
-        ulimit -S -t "$1" || exit 125
-        ulimit -S -v "$2" || exit 125
-        shift 2
+        ulimit -S -v "$1" || exit 125
+        shift
         exec "$@"
         """
 }
