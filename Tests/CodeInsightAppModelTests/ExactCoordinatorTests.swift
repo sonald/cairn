@@ -3148,15 +3148,16 @@ func coordinatorKeepsTypeDefinitionCacheSeparate() {
 
 @MainActor
 @Test
-func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirResultsAsDependencies()
+func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirDeclarationsAsDependencies()
     async throws
 {
     let root = try exactTemporaryProject([
         "package.json": "{}\n",
         "tsconfig.json": "{ \"compilerOptions\": {} }\n",
         "src/main.ts": "import { Tokenizer } from 'lib'\n",
+        "src/types.d.ts": "export declare const local: number\n",
         ".gitignore": "node_modules/\ncache/\n",
-        "node_modules/lib/index.ts": "export declare class Tokenizer {}\n",
+        "node_modules/lib/index.d.ts": "export declare class Tokenizer {}\n",
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     try exactGit(root, "init", "-q")
@@ -3168,11 +3169,15 @@ func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirResultsAsDependenci
     let profile = try ExactProfileKey(snapshot: snapshot, language: .typescript)
     let store = CheckoutStore(parentURL: root.appendingPathComponent("cache/checkouts"))
     let modules = root.appendingPathComponent("node_modules", isDirectory: true)
-    let dependency = modules.appendingPathComponent("lib/index.ts")
+    // Most npm packages ship only declarations: a `.d.ts` dependency is a
+    // jump target, a project `.d.ts` is still not a source.
+    let dependency = modules.appendingPathComponent("lib/index.d.ts")
     // tsserver answers with the workspace's real path, which lies under
     // the project root although no snapshot holds it.
-    let state = ExactProviderState { _, _, _ in
-        ExactLocation(file: dependency.path, byteOffset: 21, line: 1, column: 22)
+    let state = ExactProviderState { _, _, byteOffset in
+        byteOffset == 0
+            ? ExactLocation(file: "src/types.d.ts", byteOffset: 21, line: 1, column: 22)
+            : ExactLocation(file: dependency.path, byteOffset: 21, line: 1, column: 22)
     }
     let coordinator = ExactCoordinator(
         providerFactory: { _, language in
@@ -3211,6 +3216,16 @@ func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirResultsAsDependenci
         let file = try #require(exactCompletedEntry(result)?.location.file)
         #expect(file == dependency.path, "revision \(revision ?? "worktree")")
         #expect(exactLocationIsInDependency(file))
+        let local = await coordinator.definition(
+            file: "src/main.ts",
+            byteOffset: 0,
+            generation: generation
+        )
+        guard case .completed(let localEntries) = local else {
+            Issue.record("project .d.ts definition did not complete")
+            return
+        }
+        #expect(localEntries.isEmpty, "revision \(revision ?? "worktree")")
         #expect(coordinator.isDependencyFile(dependency))
         #expect(!coordinator.isDependencyFile(root.appendingPathComponent("src/main.ts")))
         if revision != nil {

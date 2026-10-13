@@ -17,6 +17,26 @@ public func exactLocationIsInDependency(_ file: String) -> Bool {
     file.hasPrefix("/")
 }
 
+/// A dependency file's language: what a project source would be, plus
+/// `.d.ts` (TypeScript) and `.pyi` (Python), which most packages ship in
+/// place of sources. Project language detection and source counts never
+/// use this; such files are read and highlighted, not indexed.
+package func dependencyFileLanguageMode(
+    path: String,
+    languages: [LanguageID]
+) -> LanguageMode? {
+    if let mode = LanguageMode.classify(path: path, languages: languages) {
+        return mode
+    }
+    if path.hasSuffix(".d.ts"), languages.contains(.typescript) {
+        return LanguageMode(language: .typescript)
+    }
+    if path.hasSuffix(".pyi"), languages.contains(.python) {
+        return LanguageMode(language: .python)
+    }
+    return nil
+}
+
 public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String
@@ -1959,10 +1979,9 @@ private func supportedTarget(
     file: String,
     language: LanguageID
 ) -> Bool {
-    LanguageMode.classify(
-        path: file,
-        language: language
-    ) != nil
+    exactLocationIsInDependency(file)
+        ? dependencyFileLanguageMode(path: file, languages: [language]) != nil
+        : LanguageMode.classify(path: file, language: language) != nil
 }
 
 private func validateProfile(

@@ -3148,7 +3148,9 @@ public final class AppModel {
         guard let root = projectRoot
         else { return nil }
         let file = file.standardizedFileURL
-        if let path = Self.relativePath(of: file, under: root) {
+        if !exactCoordinator.isDependencyFile(file),
+           let path = Self.relativePath(of: file, under: root)
+        {
             let classified = LanguageMode.classify(
                 path: path,
                 languages: projectLanguages
@@ -3169,13 +3171,10 @@ public final class AppModel {
             return classified
         }
         guard exactLocationIsInDependency(file.path) else { return nil }
-        if let classified = LanguageMode.classify(
+        return dependencyFileLanguageMode(
             path: file.path,
             languages: projectLanguages
-        ) {
-            return classified
-        }
-        return nil
+        )
     }
 
     private func trailJump(

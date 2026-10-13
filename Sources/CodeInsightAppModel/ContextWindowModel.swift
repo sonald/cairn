@@ -1894,7 +1894,7 @@ public final class ContextWindowModel {
     private func dependencyLanguageMode(path: String) -> LanguageMode? {
         guard case let .ready(session, _) = projectState else { return nil }
         let language = session.analysisProfile.language
-        return LanguageMode.classify(path: path, language: language)
+        return dependencyFileLanguageMode(path: path, languages: [language])
             ?? (URL(fileURLWithPath: path).pathExtension.isEmpty
                 ? LanguageMode(language: language)
                 : nil)
