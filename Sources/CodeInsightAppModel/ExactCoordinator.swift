@@ -280,6 +280,8 @@ public final class ExactCoordinator {
     /// rust-analyzer at 4–5 GB on codex). Constants, not settings.
     static let standbyIdleLimit: TimeInterval = 600
     static let standbyMemoryLimit: UInt64 = 2 << 30
+    /// Reads a server's resident memory; tests substitute their own.
+    @ObservationIgnored var residentMemory: (Int32) -> UInt64? = residentBytes(of:)
 
     public private(set) var readiness: Readiness = .off(localized("model.exact.noProject"))
     public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
@@ -567,7 +569,7 @@ public final class ExactCoordinator {
                 continue
             }
             let resident = parked.session.processIdentifier
-                .flatMap(residentBytes(of:)) ?? 0
+                .flatMap(residentMemory) ?? 0
             guard now.timeIntervalSince(since) > Self.standbyIdleLimit
                 || resident > Self.standbyMemoryLimit
             else { continue }

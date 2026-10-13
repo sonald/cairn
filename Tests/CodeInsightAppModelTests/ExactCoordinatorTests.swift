@@ -2575,6 +2575,9 @@ final class ExactStateSession: ExactSession, @unchecked Sendable {
         )
     }
 
+    /// The ordinal stands in for a pid; tests read memory through
+    /// `ExactCoordinator.residentMemory`.
+    var processIdentifier: Int32? { Int32(ordinal) }
     func cancel() {}
     func close() { state.close(ordinal: ordinal) }
 }
@@ -3413,6 +3416,38 @@ func exactReuseKeyIgnoresTheLockFileOnlyForRust() {
     #expect(key(.rust, environment: "lock-1").allowsWarmSwitch(to: key(.rust, environment: "lock-2")))
     #expect(!key(.python, environment: "uv-1").allowsWarmSwitch(to: key(.python, environment: "uv-2")))
     #expect(!key(.typescript, environment: "bun-1").allowsWarmSwitch(to: key(.typescript, environment: "bun-2")))
+}
+
+@MainActor
+@Test
+func exactCoordinatorReleasesAParkedSlotWhoseServerHoldsMoreThanTheMemoryLimit()
+    async throws
+{
+    let fixture = try WarmSwitchFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState(supportsSwitch: true)
+    let coordinator = fixture.coordinator(state: state)
+    var resident: [Int32: UInt64] = [:]
+    coordinator.residentMemory = { resident[$0] }
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await testWaitUntil("workspace ready") { coordinator.readiness == .ready })
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD", generation: 2)
+    #expect(await testWaitUntil("commit ready") {
+        coordinator.readiness == .ready && state.prepareCount == 2
+    })
+
+    // Session 1 (workspace) is parked, session 2 (checkout) is active.
+    resident = [1: ExactCoordinator.standbyMemoryLimit, 2: 8 << 30]
+    coordinator.releaseStandby(now: Date())
+    #expect(coordinator.hasSession(in: .worktree))
+    #expect(coordinator.hasSession(in: .checkout))
+
+    resident[1] = ExactCoordinator.standbyMemoryLimit + 1
+    coordinator.releaseStandby(now: Date())
+    #expect(!coordinator.hasSession(in: .worktree))
+    #expect(coordinator.hasSession(in: .checkout))
+    #expect(await testWaitUntil("parked server closed") { state.closedSessions == [1] })
 }
 
 @MainActor
