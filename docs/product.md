@@ -6,8 +6,6 @@ Cairn 是 macOS 原生只读代码阅读器；CodeInsight 是 Swift package 和�
 
 Cairn 不编辑源码，不改动用户工作区与仓库，也不替项目安装依赖。读取工作区时捕获源码，读取 commit 时直接读取 Git 对象；切换历史不会改变工作区。历史 commit 的精确分析在应用自有的检出目录中进行（每个窗口一份，通过 alternates 读取用户仓库的对象，关窗即删），用户仓库零写入。
 
-工具栏的版本选择器沿 HEAD 的第一父链列出提交，每页 500 条，列表到底后可“加载更早的提交”；搜索按 SHA 前缀、提交摘要、分支名和标签名匹配，不区分大小写。已加载的提交都不匹配时，输入按仓库解析（完整或短 SHA、分支、标签、`HEAD~N` 等 revision 表达式），能解析到 commit 就在列表顶部显示一条可选择的“解析结果”，解析不到则没有这条。
-
 Exact 分析由本机安装的 rust-analyzer、Pyright、typescript-language-server 提供。默认 Safe 模式禁止网络，Rust 构建脚本和 proc macros 关闭。缺少工具、离线依赖或沙箱时仍可语法阅读，并明确显示精确分析不可用的原因。
 
 用户显式信任项目后，Rust 分析可以开启构建脚本/proc macros；沙箱仍禁止网络，允许分析缓存及项目 `target` 目录写入。因此“只读”不是承诺所有受信任分析子进程完全没有写入。撤销信任会停止并重建受影响项目的分析；清理检出目录前停止所有窗口的 Exact 工作。
@@ -20,6 +18,7 @@ Exact 分析由本机安装的 rust-analyzer、Pyright、typescript-language-ser
 - 语言集合在捕获工作区时确定：首次打开，以及停在工作区时的 Refresh Index 与保存排除规则（停在 commit 时它们重新捕获该 commit，不改变集合）。切到 commit 沿用当前集合：commit 缺少的语言保留空索引，多出的语言只预览；切回工作区不重新探测。Refresh Index 失败时连同集合恢复。重新打开或恢复会话总是重新探测工作区，会话里保存的语言不再使用；因此恢复一个停在旧 commit 的会话时，工作区已不再包含的语言在该 commit 中只预览。
 - 每门语言按 marker 目录（Rust `Cargo.toml`，Python `pyproject.toml` 或 `pyrightconfig.json`，TypeScript `tsconfig.json`）划分分析单元。该语言在当前快照里没有源码时（如 commit 中缺少这门语言），保留一个项目根的空单元。没有 marker，或有 marker 目录包含该语言全部源码时，只有一个单元：根为包含全部源码的最浅 marker 目录，没有 marker 时为项目根；带根 workspace 清单的仓库因此仍是一个单元。其余情形（如没有 workspace 的多个 crate、多个互不包含的 `pyproject.toml` 或 `tsconfig.json`）按 marker 拆分：每个源码文件归入包含它的最深 marker 目录，没有 marker 祖先的源码归入项目根单元，嵌套单元里的文件不属于外层单元。选中文件时状态栏、profile 与 Exact 切到该文件所在的单元，Exact 在单元根启动；同一语言的单元之间切换与跨语言切换一样冷启动。两个单元目录同名、配置与环境也相同时无法区分身份，这门语言回退为一个项目根单元：源码照常可见、可搜索、有大纲和关系，但 Rust `crate::`、Python 包路径等跨单元模块身份按项目根近似，rust-analyzer 显示现有的“缺少配置”原因。
 - 不是 Git 仓库的目录（包括仓库的子目录，Git 不向上查找）按目录快照打开，没有提交历史，其余行为相同。
+- 工具栏的版本选择器沿 HEAD 的第一父链列出提交，每页 500 条，列表到底后可“加载更早的提交”；搜索按 SHA 前缀、提交摘要、分支名和标签名匹配，不区分大小写。已加载的提交都不匹配时，输入按仓库解析（完整或短 SHA、分支、标签、`HEAD~N` 等 revision 表达式），能解析到 commit 就在列表顶部显示一条可选择的“解析结果”，解析不到则没有这条。
 - 命令行一次只分析一门语言：`resolve` 按位置所在文件的后缀推断，其他命令未给 `--language` 时取源码文件最多的语言，并在 stderr 写明。
 - 一个项目对应一个窗口。再次打开同一实际路径（含符号链接或 `.`/`..` 别名）激活现有窗口；新项目优先使用空白窗口。
 - 每个窗口拥有自己的项目、索引、Exact 会话、检出目录、标签、导航历史和布局。信任与书签是应用共享资源。关一个窗口不应关闭其他项目。
@@ -201,6 +200,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 | 每语言多个分析单元 | 单元数没有上限：N 个 `pyproject.toml` 的 Python monorepo 产生 N 个单元，每个单元的活动视图都扫一遍 manifest（开销随文件数 × 单元数增长），分析配置菜单列 N 行；Exact 一次只在一个单元运行。同一语言两个单元的 `projectUnitName` 可能相同（TypeScript 有 `tsconfig.json` 时单元名固定为 `tsconfig.json`），工具栏与分析配置菜单头无法区分当前是哪个单元，只有菜单行列出单元根；单元名不能改成相对路径（Exact 用目录名重算 profile 校验），待后续在界面上补单元根。2026-10-10 在打包应用（分支 `multi-unit`，db1c1aa 构建，独立标识 `dev.cairn.Cairn.v2accept`）上验收 llm-tools HEAD bb6e992：无对话框打开；分析配置菜单 5 行（Rust 11 `crates/qrcode2txt`、Rust 22 `tools/semantic-json-viewer/src-tauri`、Python 8 `.`、TypeScript 49 `tools/model-files-web`、TypeScript 21 `tools/semantic-json-viewer`），Rust 两行之和等于仓库 `.rs` 数；打开 `crates/qrcode2txt/src/main.rs` 后 profile 为 qrcode2txt、精确分析就绪（安全模式离线依赖提示），hover `std::process` 得到 std 文档；切到 src-tauri 的文件时 profile 变为 semantic-json-viewer；切到两个 TypeScript 单元的文件时精确分析各重启一次后就绪，但工具栏与菜单头对两个 TypeScript 单元都显示 `tsconfig.json`，只能从菜单行的单元根区分；项目搜索 `"fn main("` 覆盖 111 个源码文件（33+8+70，不重复计数），结果同时来自两个 Rust 单元；Refresh 前后搜索范围（111）与命中数（8）不变，Refresh 后菜单 5 行；关闭最后一个窗口后应用退出，重新启动即恢复 llm-tools 并停在同一文件；版本选择器切到 457b66e 变为 3 行、切回工作区恢复 5 行；tokio 仍是一个单元。未验：TypeScript 单元内的 hover；`run-self-tests.sh` 的 typescript 通道在 main 上同样失败（fuzzy-relative 断言，与本功能无关），diff 通道一次挂起后重跑通过。 |
 | TypeScript 类型直达 | 句法联合类型当前取首个非 `null`/`undefined` 成员，不承诺 `A \| B` 全候选；interface、type alias、enum 是声明种类，但类型直达仍不以它们为句法目标，相关目标依赖 Exact。 |
 | 项目符号 | 列表只含索引记录的声明：Rust 枚举变体和宏、Python 模块级变量、TypeScript 接口里的方法签名不出现，大纲里可能仍能看到。可见性是声明处的句法修饰：私有模块里的 `pub` 项仍算公开，Python 不读 `__all__`。跨文件 impl 只按名称合并。打包应用原生验收（2026-10-12，toydb）：菜单打开、输入过滤、默认宽度显示所属与路径、单击预览且 Context 自动出现并跟随、种类/模块切换、定位当前符号、帮助、重启后偏好恢复、Dark 与 SI Classic 主题、180pt 窄面板经后台自动化 PASS；`⌃⌘S`、右键菜单、过滤下拉（仅公开、当前目录）、切换 commit 后过期与恢复因后台无法驱动菜单与弹出框，由用户手动 PASS。toydb（1,486 行）debug CLI 端到端（含索引）0.41s，5 万 facet 的构建目标未测。 |
+| 版本选择器定位 | 搜索匹配 SHA 前缀、摘要、分支与标签；已加载列表无匹配时才解析输入（完整/短 SHA、分支、标签、`HEAD~N`）；分页沿第一父链、每页 500。2026-10-13 打包应用（codex，8,274 commits）由用户手动验证：输入 tag 过滤命中、未加载的 tag 与 `HEAD~600` 直达并钉顶、加载第二页首条为 HEAD~500，均 PASS；后台自动化打不开弹出框，只有离屏渲染 PNG 作辅助证据。会话恢复到第一页之外的 commit 时工具栏只显示裸 SHA（既有限制）。 |
 | 依赖定义导航 | hover 能显示依赖文档不代表普通定义导航一定成功。无本地候选时，Context 的定义升级入口仍受候选要求限制。 |
 | 可组合查询验收范围 | 2026-10-06 的前轮打包应用已检查查询/颜色/导航、标签、历史恢复、刷新、窄窗口、主题与提示；该轮未覆盖排除上限、跨语言函数头与缓存格式断言，不能据此声明完整验收。反馈修复的相关回归和性能记录见[搜索性能证据](evidence/search-performance-2026-10.md#区域索引与组合查询2026-10-06)；反馈修复后已原生确认查询历史显式记录/重开恢复、编辑时旧结果可导航、中文标签与单短语匹配计数。刷新过期中间帧未作逐帧捕获，快照禁用旧结果由模型回归覆盖；后续原生连续两次刷新已确认 `conn.rs:21` 的列表选中、阅读位置与视口保持一致。 |
 | 原生交互证据 | 2026-10-03 已有快捷键页、按键搜索、类型直达和固定的真实应用观察；快捷键录制/冲突替换尚缺完整真实交互闭环。不是整个快捷键页都没验收。 |

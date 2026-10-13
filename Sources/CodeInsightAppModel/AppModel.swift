@@ -92,12 +92,6 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         }
     }
 
-    public static func loadCommitHistory(root: URL) async throws -> [CommitInfo] {
-        try await detachedValue {
-            try CommitLog(repositoryURL: root).commits
-        }
-    }
-
     public func captureSnapshot(
         root: URL,
         revision: String?
