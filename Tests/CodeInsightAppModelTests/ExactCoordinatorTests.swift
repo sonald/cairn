@@ -3351,7 +3351,7 @@ func exactCoordinatorSwitchesTheCheckoutSessionWarmAcrossCommits() async throws 
 
 @MainActor
 @Test
-func exactCoordinatorRestartsInsteadOfSwitchingWhenEnvironmentFeaturesOrTrustChange()
+func exactCoordinatorSwitchesWarmAcrossCargoLockButRestartsForFeaturesOrTrust()
     async throws
 {
     let fixture = try WarmSwitchFixture()
@@ -3362,12 +3362,13 @@ func exactCoordinatorRestartsInsteadOfSwitchingWhenEnvironmentFeaturesOrTrustCha
     coordinator.prepare(projectURL: fixture.root, revision: "HEAD~1", generation: 1)
     #expect(await testWaitUntil("HEAD~1 ready") { coordinator.readiness == .ready })
 
-    // HEAD adds Cargo.lock: a new environment fingerprint.
+    // HEAD adds Cargo.lock; rust-analyzer reloads it like the manifest.
     coordinator.prepare(projectURL: fixture.root, revision: "HEAD", generation: 2)
-    #expect(await testWaitUntil("environment restart") {
-        coordinator.readiness == .ready && state.prepareCount == 2
+    #expect(await testWaitUntil("Cargo.lock switch") {
+        coordinator.readiness == .ready && state.switches.count == 1
     })
-    #expect(state.closedSessions == [1])
+    #expect(state.prepareCount == 1)
+    #expect(state.closedSessions.isEmpty)
 
     coordinator.prepare(
         projectURL: fixture.root,
@@ -3376,9 +3377,9 @@ func exactCoordinatorRestartsInsteadOfSwitchingWhenEnvironmentFeaturesOrTrustCha
         generation: 3
     )
     #expect(await testWaitUntil("feature restart") {
-        coordinator.readiness == .ready && state.prepareCount == 3
+        coordinator.readiness == .ready && state.prepareCount == 2
     })
-    #expect(state.closedSessions == [1, 2])
+    #expect(state.closedSessions == [1])
 
     try await coordinator.grantTrust(fixture.root)
     coordinator.prepare(
@@ -3388,11 +3389,30 @@ func exactCoordinatorRestartsInsteadOfSwitchingWhenEnvironmentFeaturesOrTrustCha
         generation: 4
     )
     #expect(await testWaitUntil("trust restart") {
-        coordinator.readiness == .ready && state.prepareCount == 4
+        coordinator.readiness == .ready && state.prepareCount == 3
     })
-    #expect(state.closedSessions == [1, 2, 3])
+    #expect(state.closedSessions == [1, 2])
     #expect(state.trustModes.last == "trusted")
-    #expect(state.switches.isEmpty)
+    #expect(state.switches.count == 1)
+}
+
+@Test
+func exactReuseKeyIgnoresTheLockFileOnlyForRust() {
+    func key(_ language: LanguageID, environment: String) -> ExactOverlay.ReuseKey {
+        ExactOverlay.ReuseKey(
+            versionIdentity: environment,
+            language: language,
+            analysisProfileID: exactAnalysisProfile(language: language).id,
+            configFingerprint: "config",
+            environmentFingerprint: environment,
+            featureSelection: .defaultFeatures,
+            trustMode: .safe,
+            toolVersion: "fake-1"
+        )
+    }
+    #expect(key(.rust, environment: "lock-1").allowsWarmSwitch(to: key(.rust, environment: "lock-2")))
+    #expect(!key(.python, environment: "uv-1").allowsWarmSwitch(to: key(.python, environment: "uv-2")))
+    #expect(!key(.typescript, environment: "bun-1").allowsWarmSwitch(to: key(.typescript, environment: "bun-2")))
 }
 
 @MainActor

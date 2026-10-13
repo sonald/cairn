@@ -2179,6 +2179,105 @@ func rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb() throws {
     }
 }
 
+/// S0 evidence item 4 on the real corpus: toydb 69c46e5 ↔ 5b72c04 changes
+/// Cargo.toml and Cargo.lock (tokio 0.2 → 1.6). After each warm switch no
+/// answer may come from the old crate graph; `TcpListener` in
+/// `src/server.rs` must land in the tokio the target commit locks.
+@Test
+func rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb() throws {
+    let toydb = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("work/rust/toydb", isDirectory: true)
+    guard let executable = RustAnalyzerProvider.findExecutable(),
+          let old = try? CommitSnapshot(repositoryURL: toydb, revision: "69c46e5"),
+          let new = try? CommitSnapshot(repositoryURL: toydb, revision: "5b72c04")
+    else {
+        print("SKIP toydb manifest switch: rust-analyzer or ~/work/rust/toydb unavailable")
+        return
+    }
+    let file = "src/server.rs"
+    func listenerOffset(_ snapshot: CommitSnapshot) throws -> Int {
+        let source = try #require(String(
+            data: Data(snapshot.readBytes(path: file)),
+            encoding: .utf8
+        ))
+        let use = try #require(
+            source.range(of: "TcpListener::bind") ?? source.range(of: "TcpListener")
+        )
+        return source[..<use.lowerBound].utf8.count
+    }
+    let scratch = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let checkout = try CheckoutRoot(
+        directory: scratch.appendingPathComponent("checkout"),
+        source: toydb
+    )
+    defer { try? checkout.remove() }
+    /// Polls until the answer names a tokio; any answer naming `stale`
+    /// is recorded.
+    func tokio(
+        _ session: any ExactSession,
+        _ snapshot: CommitSnapshot,
+        stale: String?
+    ) throws -> (version: String?, seconds: Double) {
+        let offset = try listenerOffset(snapshot)
+        let start = Date()
+        while Date().timeIntervalSince(start) < 120 {
+            let location = try? onlyDefinitionLocation(
+                try session.definition(file: file, byteOffset: offset)
+            )
+            if let path = location?.file,
+               let version = path.split(separator: "/")
+                .first(where: { $0.hasPrefix("tokio-") })
+            {
+                if let stale, version == stale {
+                    Issue.record("answer from the old crate graph: \(path)")
+                }
+                return (String(version), Date().timeIntervalSince(start))
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return (nil, Date().timeIntervalSince(start))
+    }
+    do {
+        let session = try warmCheckoutSession(
+            snapshot: old,
+            checkout: checkout,
+            executable: executable,
+            cache: scratch.appendingPathComponent("ra-cache")
+        )
+        defer { session.close() }
+        let cold = try tokio(session, old, stale: nil)
+        guard cold.version == "tokio-0.2.19" else {
+            print(
+                "SKIP toydb manifest switch: cold start at 69c46e5 resolved "
+                    + "\(cold.version ?? "nothing") (registry lacks a locked crate offline)"
+            )
+            return
+        }
+        var timings: [String] = []
+        for (from, to, expected, stale) in [
+            (old, new, "tokio-1.6.2", "tokio-0.2.19"),
+            (new, old, "tokio-0.2.19", "tokio-1.6.2"),
+        ] {
+            let switchStart = Date()
+            try switchCheckoutSession(session, from: from, to: to, checkout: checkout)
+            let switched = Date().timeIntervalSince(switchStart)
+            let answer = try tokio(session, to, stale: stale)
+            #expect(answer.version == expected)
+            timings.append(String(
+                format: "%@: switchReturned=%.2fs firstAnswer=+%.2fs",
+                expected, switched, answer.seconds
+            ))
+        }
+        print("toydb-manifest-switch 69c46e5<->5b72c04 cold=\(String(format: "%.2fs", cold.seconds)) "
+            + timings.joined(separator: " "))
+    } catch ExactError.unavailable(let detail)
+        where detail.contains("sandbox-exec")
+    {
+        print("SKIP toydb manifest switch: \(detail)")
+    }
+}
+
 @Test
 func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
     let (exitEvents, exitContinuation) = AsyncStream<Void>.makeStream()

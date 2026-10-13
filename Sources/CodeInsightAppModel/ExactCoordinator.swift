@@ -50,12 +50,16 @@ public struct ExactOverlay: Sendable {
 
         /// Decision 6: a running session may follow `next` only when nothing
         /// but the version and the configuration content differ; those the
-        /// server reloads itself. `analysisProfileID` is derived from the
-        /// configuration fingerprint, so the unit is compared by the caller.
+        /// server reloads itself. Rust's environment fingerprint is the
+        /// Cargo.lock hash, which rust-analyzer reloads like Cargo.toml (S0
+        /// item 4), so it does not count. `analysisProfileID` is derived
+        /// from the configuration fingerprint, so the unit is compared by
+        /// the caller.
         func allowsWarmSwitch(to next: ReuseKey) -> Bool {
             language == next.language
                 && featureSelection == next.featureSelection
-                && environmentFingerprint == next.environmentFingerprint
+                && (language == .rust
+                    || environmentFingerprint == next.environmentFingerprint)
                 && trustMode == next.trustMode
                 && toolVersion == next.toolVersion
         }
