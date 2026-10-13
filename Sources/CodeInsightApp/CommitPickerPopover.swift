@@ -391,8 +391,9 @@ final class CommitPickerPopover: NSViewController,
             target: self,
             action: #selector(loadMore)
         )
-        button.bezelStyle = .inline
+        button.bezelStyle = .rounded
         button.controlSize = .small
+        button.font = .systemFont(ofSize: 11)
         button.isEnabled = !picker.isLoadingMore
         var views: [NSView] = [button]
         if let reason = picker.loadMoreError {
