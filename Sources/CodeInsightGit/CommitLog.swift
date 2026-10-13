@@ -50,11 +50,19 @@ public func currentBranchName(repositoryURL: URL) -> String? {
     }
 }
 
+/// One page of HEAD's first-parent history. Pass the last commit of a page as
+/// `after` to read the next one; `hasMore` says whether that page exists.
 public struct CommitLog: Sendable {
     public let commits: [CommitInfo]
+    public let hasMore: Bool
 
-    public init(repositoryURL: URL) throws {
-        commits = try LibGit2Executor.sync {
+    public init(commits: [CommitInfo], hasMore: Bool) {
+        self.commits = commits
+        self.hasMore = hasMore
+    }
+
+    public init(repositoryURL: URL, after: String? = nil, pageSize: Int = 500) throws {
+        (commits, hasMore) = try LibGit2Executor.sync {
             let repository = try GitRepository(url: repositoryURL)
             let references = try Self.referencesByCommit(in: repository)
 
@@ -68,17 +76,26 @@ public struct CommitLog: Sendable {
                 )
             }
             defer { git_revwalk_free(walk) }
-            try check(git_revwalk_push_head(walk), "git_revwalk_push_head")
+            if let after {
+                // Continue from the first parent of the last loaded commit.
+                guard let last = try Self.peelCommit(after, in: repository) else {
+                    return ([], false)
+                }
+                defer { git_commit_free(last) }
+                guard let parent = git_commit_parent_id(last, 0) else { return ([], false) }
+                try check(git_revwalk_push(walk, parent), "git_revwalk_push")
+            } else {
+                try check(git_revwalk_push_head(walk), "git_revwalk_push_head")
+            }
             try check(
                 git_revwalk_simplify_first_parent(walk),
                 "git_revwalk_simplify_first_parent"
             )
 
             var commits: [CommitInfo] = []
+            var hasMore = false
             var oid = git_oid()
-            // ponytail: M3 caps history at 500; add paged revwalk state only when
-            // repositories with deeper useful history require it.
-            while commits.count < 500 {
+            while commits.count < pageSize {
                 let code = git_revwalk_next(&oid, walk)
                 if code == GIT_ITEROVER.rawValue { break }
                 try check(code, "git_revwalk_next")
@@ -90,23 +107,53 @@ public struct CommitLog: Sendable {
                 )
                 guard let commit else { continue }
                 defer { git_commit_free(commit) }
-
-                let fullSHA = withUnsafePointer(to: &oid) { oidString($0).hex }
-                let labels = references[fullSHA] ?? (branches: [], tags: [])
-                commits.append(CommitInfo(
-                    shortSHA: String(fullSHA.prefix(7)),
-                    fullSHA: fullSHA,
-                    summary: git_commit_summary(commit).map(String.init(cString:)) ?? "",
-                    authorName: git_commit_author(commit).map {
-                        String(cString: $0.pointee.name)
-                    } ?? "",
-                    date: Date(timeIntervalSince1970: TimeInterval(git_commit_time(commit))),
-                    branchNames: labels.branches,
-                    tagNames: labels.tags
-                ))
+                commits.append(Self.info(of: commit, references: references))
+                hasMore = git_commit_parentcount(commit) > 0
             }
-            return commits
+            return (commits, hasMore)
         }
+    }
+
+    /// The commit a revision names (SHA, short SHA, branch, tag, `HEAD~N`, …),
+    /// or nil when the repository cannot resolve it to a commit.
+    public static func resolve(repositoryURL: URL, revision: String) -> CommitInfo? {
+        try? LibGit2Executor.sync {
+            let repository = try GitRepository(url: repositoryURL)
+            guard let commit = try peelCommit(revision, in: repository) else { return nil }
+            defer { git_commit_free(commit) }
+            return info(of: commit, references: try referencesByCommit(in: repository))
+        }
+    }
+
+    private static func peelCommit(
+        _ revision: String, in repository: GitRepository
+    ) throws -> OpaquePointer? {
+        var object: OpaquePointer?
+        let code = revision.withCString { git_revparse_single(&object, repository.raw, $0) }
+        guard code == 0, let object else { return nil }
+        defer { git_object_free(object) }
+        var commit: OpaquePointer?
+        guard git_object_peel(&commit, object, GIT_OBJECT_COMMIT) == 0 else { return nil }
+        return commit
+    }
+
+    private static func info(
+        of commit: OpaquePointer,
+        references: [String: (branches: [String], tags: [String])]
+    ) -> CommitInfo {
+        let fullSHA = oidString(git_commit_id(commit)).hex
+        let labels = references[fullSHA] ?? (branches: [], tags: [])
+        return CommitInfo(
+            shortSHA: String(fullSHA.prefix(7)),
+            fullSHA: fullSHA,
+            summary: git_commit_summary(commit).map(String.init(cString:)) ?? "",
+            authorName: git_commit_author(commit).map {
+                String(cString: $0.pointee.name)
+            } ?? "",
+            date: Date(timeIntervalSince1970: TimeInterval(git_commit_time(commit))),
+            branchNames: labels.branches,
+            tagNames: labels.tags
+        )
     }
 
     private static func referencesByCommit(

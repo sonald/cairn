@@ -295,7 +295,11 @@
 "panel.commit.empty" = "没有匹配的提交。";
 "panel.commit.loading" = "正在加载历史…";
 "panel.commit.onDisk" = "磁盘上的当前文件";
-"panel.commit.search" = "搜索提交";
+"panel.commit.loadMore" = "加载更早的提交";
+"panel.commit.loadMore.failed" = "无法加载更早的提交：%@";
+"panel.commit.loadingMore" = "正在加载更早的提交…";
+"panel.commit.resolved" = "解析结果";
+"panel.commit.search" = "搜索提交、分支、标签，或输入 revision";
 "panel.commit.tag" = "标签 %@";
 "panel.commit.unavailable" = "提交历史不可用。";
 "panel.commit.worktree" = "工作区";

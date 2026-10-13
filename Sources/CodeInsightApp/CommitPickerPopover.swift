@@ -112,6 +112,7 @@ final class CommitPickerPopover: NSViewController,
     func show(relativeTo anchor: NSView) {
         loadViewIfNeeded()
         input.stringValue = ""
+        keepSelectionOnRender = false
         appModel.commitPicker.setQuery("")
         render()
         popover.show(
@@ -125,8 +126,36 @@ final class CommitPickerPopover: NSViewController,
         }
     }
 
+    private enum Row {
+        case worktree
+        case resolved(CommitInfo)
+        case commit(CommitInfo)
+        case loadMore
+    }
+
+    /// Rebuilt on every render; the data source reads only this.
+    private var rows: [Row] = []
+
+    private func makeRows() -> [Row] {
+        let picker = appModel.commitPicker
+        return (allowsWorktree ? [.worktree] : [])
+            + (picker.resolvedCommit.map { [Row.resolved($0)] } ?? [])
+            + picker.filteredCommits.map(Row.commit)
+            + (picker.hasMore ? [.loadMore] : [])
+    }
+
+    private func rowIndex(ofRevision revision: String) -> Int? {
+        rows.firstIndex {
+            switch $0 {
+            case .commit(let commit), .resolved(let commit):
+                commit.fullSHA == revision || commit.shortSHA == revision
+            default: false
+            }
+        }
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int {
-        (allowsWorktree ? 1 : 0) + appModel.commitPicker.filteredCommits.count
+        rows.count
     }
 
     func tableView(
@@ -134,15 +163,22 @@ final class CommitPickerPopover: NSViewController,
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
-        if allowsWorktree, row == 0 { return worktreeCell() }
-        let commits = appModel.commitPicker.filteredCommits
-        let index = row - (allowsWorktree ? 1 : 0)
-        guard commits.indices.contains(index) else { return nil }
-        return commitCell(commits[index])
+        guard rows.indices.contains(row) else { return nil }
+        switch rows[row] {
+        case .worktree: return worktreeCell()
+        case .resolved(let commit): return commitCell(commit, resolved: true)
+        case .commit(let commit): return commitCell(commit)
+        case .loadMore: return loadMoreCell()
+        }
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        allowsWorktree && row == 0 ? 48 : 58
+        guard rows.indices.contains(row) else { return 58 }
+        return switch rows[row] {
+        case .worktree: 48
+        case .loadMore: appModel.commitPicker.loadMoreError == nil ? 44 : 58
+        case .resolved, .commit: 58
+        }
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -177,7 +213,7 @@ final class CommitPickerPopover: NSViewController,
     }
 
     private func moveSelection(by delta: Int) {
-        let count = numberOfRows(in: tableView)
+        let count = rows.count
         guard count > 0 else { return }
         let current = tableView.selectedRow >= 0 ? tableView.selectedRow : 0
         let next = (current + delta + count) % count
@@ -187,16 +223,20 @@ final class CommitPickerPopover: NSViewController,
 
     private func chooseSelection() {
         let row = tableView.selectedRow
-        guard row >= 0 else { return }
-        if allowsWorktree, row == 0 {
-            choose(nil)
-        } else {
-            let commits = appModel.commitPicker.filteredCommits
-            let index = row - (allowsWorktree ? 1 : 0)
-            guard commits.indices.contains(index) else { return }
-            choose(commits[index])
+        guard rows.indices.contains(row) else { return }
+        switch rows[row] {
+        case .worktree: choose(nil)
+        case .resolved(let commit), .commit(let commit): choose(commit)
+        case .loadMore:
+            loadMore()
+            return
         }
         popover.performClose(nil)
+    }
+
+    @objc private func loadMore() {
+        keepSelectionOnRender = true
+        appModel.commitPicker.loadMore()
     }
 
     /// Closes the popover when its owning window goes away (§7.1).
@@ -224,9 +264,9 @@ final class CommitPickerPopover: NSViewController,
     ) {
         let firstCommitRow = allowsWorktree ? 1 : 0
         let commitRowCount = min(2, appModel.commitPicker.filteredCommits.count)
-        let rows = (firstCommitRow..<(firstCommitRow + commitRowCount))
+        let commitRows = (firstCommitRow..<(firstCommitRow + commitRowCount))
         let viewport = tableView.visibleRect
-        let frames = rows.map(tableView.rect(ofRow:))
+        let frames = commitRows.map(tableView.rect(ofRow:))
         let visibleRows = frames.filter {
             let intersection = $0.intersection(viewport)
             return !$0.isEmpty
@@ -244,8 +284,8 @@ final class CommitPickerPopover: NSViewController,
 
     /// Badge texts on one commit's row, only when the row is actually shown.
     func selfTestVisibleBadges(forCommit fullSHA: String) -> [String] {
-        guard let index = appModel.commitPicker.filteredCommits.firstIndex(where: { $0.fullSHA == fullSHA }),
-              let cell = tableView.view(atColumn: 0, row: index + (allowsWorktree ? 1 : 0), makeIfNecessary: true),
+        guard let row = rowIndex(ofRevision: fullSHA),
+              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true),
               cell.window != nil
         else { return [] }
         cell.layoutSubtreeIfNeeded()
@@ -263,46 +303,60 @@ final class CommitPickerPopover: NSViewController,
 
     private func render() {
         guard isViewLoaded else { return }
+        let previousRow = tableView.selectedRow
+        rows = makeRows()
         tableView.reloadData()
         let picker = appModel.commitPicker
+        let firstCommitRow = rows.firstIndex {
+            if case .worktree = $0 { false } else { true }
+        }
         let row: Int
-        if !picker.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            row = picker.filteredCommits.isEmpty
-                ? (allowsWorktree ? 0 : -1)
-                : (allowsWorktree ? 1 : 0)
+        if keepSelectionOnRender, rows.indices.contains(previousRow) {
+            // A page is being appended: stay where the user was (the former
+            // load-more row becomes the first new commit).
+            row = previousRow
+            if !picker.isLoadingMore { keepSelectionOnRender = false }
+        } else if !picker.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            row = firstCommitRow ?? (allowsWorktree ? 0 : -1)
         } else if let revision = selectedRevision(),
-                  let index = picker.filteredCommits.firstIndex(where: {
-                      $0.fullSHA == revision || $0.shortSHA == revision
-                  })
+                  let index = rowIndex(ofRevision: revision)
         {
-            row = index + (allowsWorktree ? 1 : 0)
+            row = index
         } else {
-            row = allowsWorktree ? 0 : (picker.filteredCommits.isEmpty ? -1 : 0)
+            row = allowsWorktree ? 0 : (firstCommitRow ?? -1)
         }
         if row >= 0 {
             tableView.selectRowIndexes([row], byExtendingSelection: false)
-            tableView.scrollRowToVisible(row)
+            if row != previousRow { tableView.scrollRowToVisible(row) }
         } else {
             tableView.deselectAll(nil)
         }
 
+        let listed = picker.filteredCommits.count + (picker.resolvedCommit == nil ? 0 : 1)
         if picker.isLoading {
             statusLabel.stringValue = localized("panel.commit.loading")
         } else if picker.errorMessage != nil {
             statusLabel.stringValue = localized("panel.commit.unavailable")
-        } else if !picker.query.isEmpty && picker.filteredCommits.isEmpty {
+        } else if !picker.query.isEmpty && listed == 0 {
             statusLabel.stringValue = localized("panel.commit.empty")
         } else {
-            statusLabel.stringValue = localizedFormat("panel.commit.count", Int64(picker.filteredCommits.count))
+            statusLabel.stringValue = localizedFormat("panel.commit.count", Int64(listed))
         }
     }
+
+    /// Set while a page is being appended so render() keeps the user's row.
+    private var keepSelectionOnRender = false
 
     private func observe() {
         withObservationTracking {
             _ = appModel.commitPicker.filteredCommits
+            _ = appModel.commitPicker.resolvedCommit
             _ = appModel.commitPicker.currentCommit
             _ = appModel.commitPicker.isLoading
             _ = appModel.commitPicker.errorMessage
+            _ = appModel.commitPicker.hasMore
+            _ = appModel.commitPicker.isLoadingMore
+            _ = appModel.commitPicker.loadMoreError
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -330,7 +384,32 @@ final class CommitPickerPopover: NSViewController,
         )
     }
 
-    private func commitCell(_ commit: CommitInfo) -> NSView {
+    private func loadMoreCell() -> NSView {
+        let picker = appModel.commitPicker
+        let button = NSButton(
+            title: localized(picker.isLoadingMore ? "panel.commit.loadingMore" : "panel.commit.loadMore"),
+            target: self,
+            action: #selector(loadMore)
+        )
+        button.bezelStyle = .inline
+        button.controlSize = .small
+        button.isEnabled = !picker.isLoadingMore
+        var views: [NSView] = [button]
+        if let reason = picker.loadMoreError {
+            let error = NSTextField(labelWithString: localizedFormat("panel.commit.loadMore.failed", reason))
+            error.font = .systemFont(ofSize: 10)
+            error.textColor = theme.chromeSecondaryColor
+            error.lineBreakMode = .byTruncatingTail
+            views.append(error)
+        }
+        let labels = NSStackView(views: views)
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 3
+        return rowCell(checkmarked: false, content: labels, historical: false)
+    }
+
+    private func commitCell(_ commit: CommitInfo, resolved: Bool = false) -> NSView {
         let sha = NSTextField(labelWithString: commit.shortSHA)
         let selected = selectedRevision().map {
             $0 == commit.fullSHA || $0 == commit.shortSHA
@@ -357,7 +436,10 @@ final class CommitPickerPopover: NSViewController,
         metadata.textColor = theme.chromeSecondaryColor
         metadata.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let badges = commit.branchNames.map {
+        let resolvedBadge = resolved
+            ? [badge(localized("panel.commit.resolved"), color: theme.accentColor, fill: theme.histSoftColor)]
+            : []
+        let badges = resolvedBadge + commit.branchNames.map {
             badge("⎇ \($0)", color: theme.verifiedColor, fill: theme.mossSoftColor)
         } + commit.tagNames.map {
             badge(localizedFormat("panel.commit.tag", $0), color: theme.histColor, fill: theme.histSoftColor)

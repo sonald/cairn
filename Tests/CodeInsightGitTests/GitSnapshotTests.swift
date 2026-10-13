@@ -127,6 +127,47 @@ func commitLogReadsHeadFirstWithBranchLabels() throws {
 }
 
 @Test
+func commitLogPagesAlongTheFirstParentChainAndResolvesRevisions() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    try fixture.git("config", "user.name", "CodeInsight")
+    try fixture.git("config", "user.email", "codeinsight@example.com")
+    let file = fixture.root.appendingPathComponent("main.rs")
+    for index in 1...5 {
+        try Data("fn v\(index)() {}\n".utf8).write(to: file)
+        try fixture.git("add", "main.rs")
+        try fixture.commit("mainline \(index)")
+    }
+    // A merged side branch must not leak into the first-parent pages.
+    try fixture.git("checkout", "-q", "-b", "side", "HEAD~1")
+    try Data("fn side() {}\n".utf8).write(to: fixture.root.appendingPathComponent("side.rs"))
+    try fixture.git("add", "side.rs")
+    try fixture.commit("side work")
+    try fixture.git("checkout", "-q", "-")
+    try fixture.git("merge", "-q", "--no-ff", "--no-edit", "side")
+    try fixture.git("tag", "-a", "v1.0", "-m", "release", "HEAD~2")
+    let expected = try fixture.git("rev-parse", "HEAD", "HEAD~1", "HEAD~2", "HEAD~3", "HEAD~4", "HEAD~5")
+        .split(separator: "\n").map(String.init)
+
+    let first = try CommitLog(repositoryURL: fixture.root, pageSize: 4)
+    #expect(first.commits.map(\.fullSHA) == Array(expected.prefix(4)))
+    #expect(first.hasMore)
+    let second = try CommitLog(repositoryURL: fixture.root, after: first.commits.last?.fullSHA, pageSize: 4)
+    #expect(second.commits.map(\.fullSHA) == Array(expected.dropFirst(4)))
+    #expect(!second.hasMore)
+    #expect(first.commits[2].tagNames == ["v1.0"])
+
+    let short = String(expected[3].prefix(8))
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "HEAD~3")?.fullSHA == expected[3])
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: short)?.fullSHA == expected[3])
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "v1.0")?.fullSHA == expected[2])
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "side")?.summary == "side work")
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "no-such-ref") == nil)
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "HEAD:main.rs") == nil)
+    #expect(CommitLog.resolve(repositoryURL: fixture.root, revision: "") == nil)
+}
+
+@Test
 func currentBranchNameReadsTheCheckedOutBranch() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }

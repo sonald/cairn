@@ -295,7 +295,11 @@
 "panel.commit.empty" = "No matching commits.";
 "panel.commit.loading" = "Loading history…";
 "panel.commit.onDisk" = "Current files on disk";
-"panel.commit.search" = "Search commits";
+"panel.commit.loadMore" = "Load earlier commits";
+"panel.commit.loadMore.failed" = "Could not load earlier commits: %@";
+"panel.commit.loadingMore" = "Loading earlier commits…";
+"panel.commit.resolved" = "Resolved";
+"panel.commit.search" = "Search commits, branches, tags, or type a revision";
 "panel.commit.tag" = "tag %@";
 "panel.commit.unavailable" = "Commit history unavailable.";
 "panel.commit.worktree" = "Working Tree";
