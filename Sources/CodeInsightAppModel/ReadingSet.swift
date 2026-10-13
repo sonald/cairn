@@ -88,6 +88,7 @@ package func makeInspectorDisplay(
                 case .buildScriptsDisabled: localized("model.limitation.buildScripts", language: language)
                 case .procMacrosDisabled: localized("model.limitation.procMacros", language: language)
                 case .dependenciesUnavailableOffline: localized("model.limitation.offline", language: language)
+                case .dependenciesBorrowedFromWorkspace: localized("model.limitation.borrowed", language: language)
                 }
             }
         let trust = switch value.trustMode {

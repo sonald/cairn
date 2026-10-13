@@ -200,7 +200,7 @@ public final class ExactCoordinator {
         let projectRootName: String
         let configurationPaths: [String]
         let languages: [LanguageID]
-        private let wrapped: any Snapshot
+        let wrapped: any Snapshot
         private let prefix: String
 
         init?(_ wrapped: any Snapshot, prefix: String) {
@@ -239,6 +239,7 @@ public final class ExactCoordinator {
     }
 
     private struct Prepared: Sendable {
+        let dependencyRoots: [URL]
         let active: Active
     }
 
@@ -248,7 +249,22 @@ public final class ExactCoordinator {
     public private(set) var trustedRepositories: [TrustedRepository] = []
     public var attribution: ExactAttribution? { active?.session.attribution }
 
-    @ObservationIgnored private let providerFactory: ProviderFactory
+    /// Where the provider finds dependencies: the interpreter Pyright is
+    /// told to use, and whether a commit borrows the workspace's.
+    private struct DependencyContext: Sendable {
+        let pythonPath: URL?
+        let borrowedFromWorkspace: Bool
+    }
+
+    @ObservationIgnored private let providerFactory: @Sendable (
+        URL,
+        LanguageID,
+        DependencyContext
+    ) throws -> any ExactProvider
+    /// Workspace directories the active analysis reads dependencies from
+    /// (borrowed `node_modules`, the virtual environment). Files under
+    /// them are dependency files even though they sit under the project.
+    @ObservationIgnored private var dependencyRoots: [URL] = []
     @ObservationIgnored private let snapshotFactory: SnapshotFactory?
     @ObservationIgnored private let sandboxAvailable: @Sendable () -> Bool
     /// The registry this coordinator consults; application-owned shared
@@ -284,80 +300,95 @@ public final class ExactCoordinator {
         trustRegistry: TrustRegistry = TrustRegistry(),
         checkoutStore: CheckoutStore = CheckoutStore()
     ) {
-        self.providerFactory = providerFactory ?? { projectURL, language in
-            switch language {
-            case .python:
-                guard let executable = PyrightProvider.findExecutable(
-                    projectURL: projectURL
-                ) else {
-                    throw ExactError.unavailable(
-                        localized("model.exact.pyrightMissing")
-                    )
-                }
-                return try PyrightProvider(
-                    projectURL: projectURL,
-                    executableURL: executable
-                )
-            case .rust:
-                break
-            case .typescript:
-                guard let node = TypeScriptLanguageServerProvider
-                    .findExecutable(
-                        named: "node",
-                        projectURL: projectURL
-                    ),
-                    let languageServer = TypeScriptLanguageServerProvider
-                        .findExecutable(
-                            named: "typescript-language-server",
-                            projectURL: projectURL
-                        )
-                else {
-                    throw ExactError.unavailable(
-                        localized("model.exact.typescriptMissing")
-                    )
-                }
-                let tsserver = TypeScriptLanguageServerProvider
-                    .findExecutable(
-                        named: "tsserver.js",
-                        projectURL: projectURL
-                    )
-                    ?? TypeScriptLanguageServerProvider.tsserverURL(
-                        fromLanguageServer: languageServer
-                    )
-                    ?? [
-                        "/opt/homebrew/lib/node_modules/typescript/lib/tsserver.js",
-                        "/usr/local/lib/node_modules/typescript/lib/tsserver.js",
-                    ].first { FileManager.default.isReadableFile(atPath: $0) }
-                    .map(URL.init(fileURLWithPath:))
-                guard let tsserver else {
-                    throw ExactError.unavailable(
-                        localized("model.exact.typescriptMissing")
-                    )
-                }
-                return try TypeScriptLanguageServerProvider(
-                    projectURL: projectURL,
-                    nodeURL: node,
-                    languageServerURL: languageServer,
-                    tsserverURL: tsserver
-                )
-            case .javascript:
-                throw CocoaError(.featureUnsupported, userInfo: [
-                    NSLocalizedFailureReasonErrorKey:
-                        localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
-                ])
+        if let providerFactory {
+            self.providerFactory = { projectURL, language, _ in
+                try providerFactory(projectURL, language)
             }
-            guard let executable = RustAnalyzerProvider.findExecutable() else {
-                throw ExactError.unavailable(localized("model.exact.rustMissing"))
-            }
-            return try RustAnalyzerProvider(
-                projectURL: projectURL,
-                executableURL: executable
-            )
+        } else {
+            self.providerFactory = Self.defaultProviderFactory
         }
         self.snapshotFactory = snapshotFactory
         self.sandboxAvailable = sandboxAvailable
         self.trustRegistry = trustRegistry
         self.checkoutStore = checkoutStore
+    }
+
+    private static let defaultProviderFactory: @Sendable (
+        URL,
+        LanguageID,
+        DependencyContext
+    ) throws -> any ExactProvider = { projectURL, language, dependencies in
+        switch language {
+        case .python:
+            guard let executable = PyrightProvider.findExecutable(
+                projectURL: projectURL
+            ) else {
+                throw ExactError.unavailable(
+                    localized("model.exact.pyrightMissing")
+                )
+            }
+            return try PyrightProvider(
+                projectURL: projectURL,
+                executableURL: executable,
+                pythonPath: dependencies.pythonPath,
+                borrowedFromWorkspace: dependencies.borrowedFromWorkspace
+            )
+        case .rust:
+            break
+        case .typescript:
+            guard let node = TypeScriptLanguageServerProvider
+                .findExecutable(
+                    named: "node",
+                    projectURL: projectURL
+                ),
+                let languageServer = TypeScriptLanguageServerProvider
+                    .findExecutable(
+                        named: "typescript-language-server",
+                        projectURL: projectURL
+                    )
+            else {
+                throw ExactError.unavailable(
+                    localized("model.exact.typescriptMissing")
+                )
+            }
+            let tsserver = TypeScriptLanguageServerProvider
+                .findExecutable(
+                    named: "tsserver.js",
+                    projectURL: projectURL
+                )
+                ?? TypeScriptLanguageServerProvider.tsserverURL(
+                    fromLanguageServer: languageServer
+                )
+                ?? [
+                    "/opt/homebrew/lib/node_modules/typescript/lib/tsserver.js",
+                    "/usr/local/lib/node_modules/typescript/lib/tsserver.js",
+                ].first { FileManager.default.isReadableFile(atPath: $0) }
+                .map(URL.init(fileURLWithPath:))
+            guard let tsserver else {
+                throw ExactError.unavailable(
+                    localized("model.exact.typescriptMissing")
+                )
+            }
+            return try TypeScriptLanguageServerProvider(
+                projectURL: projectURL,
+                nodeURL: node,
+                languageServerURL: languageServer,
+                tsserverURL: tsserver,
+                borrowedFromWorkspace: dependencies.borrowedFromWorkspace
+            )
+        case .javascript:
+            throw CocoaError(.featureUnsupported, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
+            ])
+        }
+        guard let executable = RustAnalyzerProvider.findExecutable() else {
+            throw ExactError.unavailable(localized("model.exact.rustMissing"))
+        }
+        return try RustAnalyzerProvider(
+            projectURL: projectURL,
+            executableURL: executable
+        )
     }
 
     public convenience init(
@@ -409,6 +440,7 @@ public final class ExactCoordinator {
             closeTask = nil
         }
         active = nil
+        dependencyRoots = []
         readiness = .preparing
         analysisEnvironment = nil
         trustMode = nil
@@ -587,6 +619,26 @@ public final class ExactCoordinator {
                     let providerRoot: URL
                     let checkoutRoot: URL?
                     let versionIdentity: String
+                    // Both modes answer Pyright the workspace unit's
+                    // interpreter; links exist only in a commit checkout.
+                    let pythonPath = language == .python
+                        ? DependencyBorrowing.pythonInterpreter(
+                            unitRoot: profileRootURL(workspaceRoot: root, prefix: profilePrefix)
+                        )
+                        : nil
+                    let links = DependencyBorrowing.links(
+                        language: language,
+                        snapshot: snapshot,
+                        workspaceRoot: root,
+                        unitPrefix: profilePrefix
+                    )
+                    var dependencyRoots = Array(links.values)
+                    if let pythonPath {
+                        dependencyRoots.append(
+                            pythonPath.deletingLastPathComponent().deletingLastPathComponent()
+                        )
+                    }
+                    var borrowedFromWorkspace = false
                     if let commit = snapshot as? CommitSnapshot {
                         profile = try ExactProfileKey(
                             snapshot: commit,
@@ -608,7 +660,9 @@ public final class ExactCoordinator {
                             owner: checkoutOwner,
                             source: root
                         )
-                        try checkout.checkout(commit: commit.commitOID)
+                        try checkout.checkout(commit: commit.commitOID, links: links)
+                        borrowedFromWorkspace = !checkout.borrowedLinks.isEmpty
+                            || pythonPath != nil
                         checkoutRoot = checkout.url
                         providerRoot = profileRootURL(
                             workspaceRoot: checkout.url,
@@ -637,7 +691,14 @@ public final class ExactCoordinator {
                         versionIdentity =
                             "worktree:\(providerRoot.resolvingSymlinksInPath().path)"
                     }
-                    let provider = try providerFactory(providerRoot, language)
+                    let provider = try providerFactory(
+                        providerRoot,
+                        language,
+                        DependencyContext(
+                            pythonPath: pythonPath,
+                            borrowedFromWorkspace: borrowedFromWorkspace
+                        )
+                    )
                     guard provider.language == language else {
                         throw ExactError.unavailable(
                             "exact provider language "
@@ -664,7 +725,7 @@ public final class ExactCoordinator {
                         profile: profile,
                         trustMode: trustMode
                     )
-                    return Prepared(active: Active(
+                    return Prepared(dependencyRoots: dependencyRoots, active: Active(
                         generation: generation,
                         key: key,
                         provider: provider,
@@ -687,6 +748,7 @@ public final class ExactCoordinator {
                     return
                 }
                 self.active = prepared.active
+                self.dependencyRoots = prepared.dependencyRoots
                 self.observeEnvironment(from: prepared.active)
                 self.analysisEnvironment = prepared.active.session.attribution.environment
                 switch prepared.active.session.readiness {
@@ -830,6 +892,16 @@ public final class ExactCoordinator {
             try checkoutStore.release(owner: checkoutOwner)
             try checkoutStore.removeAll()
         }.value
+    }
+
+    /// True for a file under a workspace directory the active analysis
+    /// borrows dependencies from: it is read from disk, never from the
+    /// project snapshot, although it lies under the project root.
+    public func isDependencyFile(_ file: URL) -> Bool {
+        let components = file.standardizedFileURL.pathComponents
+        return dependencyRoots.contains {
+            components.starts(with: $0.standardizedFileURL.pathComponents)
+        }
     }
 
     func isTrusted(_ repositoryURL: URL) -> Bool {
@@ -1523,6 +1595,11 @@ public final class ExactCoordinator {
     ) -> ExactLocation? {
         let file: String
         if location.file.hasPrefix("/") {
+            // A path under the checkout or workspace is a project file only
+            // when the snapshot holds it; anything else there (a borrowed
+            // `node_modules`, the venv) stays an absolute dependency path.
+            let snapshot = (source.providerSnapshot as? ProfileSnapshot)?.wrapped
+                ?? source.providerSnapshot
             var mappedUnderWorkspace: String?
             let roots = [
                 source.checkoutRoot,
@@ -1532,7 +1609,7 @@ public final class ExactCoordinator {
                 if let path = snapshotPath(
                     for: URL(fileURLWithPath: location.file),
                     under: root
-                ) {
+                ), (try? snapshot.readBytes(path: path)) != nil {
                     mappedUnderWorkspace = path
                     break
                 }

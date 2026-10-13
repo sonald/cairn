@@ -3187,7 +3187,8 @@ public final class AppModel {
         let captured: (contentID: ContentID, bytes: [UInt8])?
         let isDependency: Bool
         if let root = fileTree?.root,
-           let relative = Self.relativePath(of: file, under: root)
+           let relative = Self.relativePath(of: file, under: root),
+           !exactCoordinator.isDependencyFile(file)
         {
             path = relative
             captured = capturedProjectSource(at: relative)

@@ -829,15 +829,14 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         guard let url = URL(string: item.uri), url.isFileURL else {
             throw ExactError.invalidDefinitionResponse(item.uri)
         }
+        // Dependency items (outside the project, or under it through a
+        // borrowed link) are not snapshot files; the server reads them.
         guard let path = projectRelativePath(
             of: url,
             projectURL: projectURL
-        ) else { return }
-        try open(
-            path: path,
-            bytes: snapshot.readBytes(path: path),
-            client: client
-        )
+        ), let bytes = try? snapshot.readBytes(path: path)
+        else { return }
+        try open(path: path, bytes: bytes, client: client)
     }
 
     private func requestCallRelations(

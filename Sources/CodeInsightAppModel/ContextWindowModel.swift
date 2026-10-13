@@ -2043,6 +2043,7 @@ package func localizedLimitation(_ limitation: ExactAnalysisLimitation) -> Strin
     case .buildScriptsDisabled: localized("model.limitation.buildScripts")
     case .procMacrosDisabled: localized("model.limitation.procMacros")
     case .dependenciesUnavailableOffline: localized("model.limitation.offline")
+    case .dependenciesBorrowedFromWorkspace: localized("model.limitation.borrowed")
     }
 }
 

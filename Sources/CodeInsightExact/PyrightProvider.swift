@@ -19,16 +19,26 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
     private let cacheURL: URL
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
+    private let pythonPath: URL?
+    private let borrowedFromWorkspace: Bool
 
+    /// `pythonPath` is answered to the server's `python` configuration
+    /// section and is the interpreter `toolVersion` names; nil leaves the
+    /// server to find one on PATH. `borrowedFromWorkspace` marks a commit
+    /// whose dependencies come from the user's workspace.
     public init(
         projectURL: URL,
         executableURL: URL,
         cacheURL: URL? = nil,
         requestTimeout: TimeInterval = 30,
-        closeGrace: TimeInterval = 1
+        closeGrace: TimeInterval = 1,
+        pythonPath: URL? = nil,
+        borrowedFromWorkspace: Bool = false
     ) throws {
         let project = projectURL.standardizedFileURL
         self.projectURL = project
+        self.pythonPath = pythonPath?.standardizedFileURL
+        self.borrowedFromWorkspace = borrowedFromWorkspace
         self.executableURL = executableURL.standardizedFileURL
         self.cacheURL = cacheURL ?? Self.defaultCacheURL
         self.requestTimeout = requestTimeout
@@ -59,7 +69,8 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
         let interpreter = Self.interpreterIdentity(
             projectURL: project,
             cacheURL: self.cacheURL,
-            environment: ProcessInfo.processInfo.environment
+            environment: ProcessInfo.processInfo.environment,
+            pythonPath: self.pythonPath
         )
         toolVersion = [
             version.isEmpty ? "pyright unknown" : version,
@@ -146,11 +157,28 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
+    /// Names the interpreter the server analyses with. An answered
+    /// `pythonPath` lives in the user's project, so it is identified by its
+    /// path, link target and `pyvenv.cfg` version without being run outside
+    /// the sandbox; a PATH interpreter reports `--version`.
     static func interpreterIdentity(
         projectURL: URL,
         cacheURL: URL,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        pythonPath: URL? = nil
     ) -> String {
+        if let pythonPath {
+            let configuration = pythonPath.deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("pyvenv.cfg")
+            let version = (try? String(contentsOf: configuration, encoding: .utf8))?
+                .split(whereSeparator: \.isNewline)
+                .first { $0.hasPrefix("version") }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            return "interpreter=\(pythonPath.path)"
+                + " -> \(pythonPath.resolvingSymlinksInPath().path)"
+                + (version.map { " \($0)" } ?? "")
+        }
         let directories = executableSearchDirectories(
             environment: environment,
             projectRoot: projectURL
@@ -217,11 +245,23 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
         )
     }
 
-    static func baseEnvironment(trustMode: TrustMode) -> ExactAnalysisEnvironment {
+    /// Without an interpreter or a borrowed environment the server sees
+    /// no installed packages.
+    static func baseEnvironment(
+        trustMode: TrustMode,
+        pythonPath: URL? = nil,
+        borrowedFromWorkspace: Bool = false
+    ) -> ExactAnalysisEnvironment {
         ExactAnalysisEnvironment(
             trustMode: trustMode,
-            limitations: [.dependenciesUnavailableOffline]
+            limitations: borrowedFromWorkspace
+                ? [.dependenciesBorrowedFromWorkspace]
+                : pythonPath == nil ? [.dependenciesUnavailableOffline] : []
         )
+    }
+
+    private var serverConfiguration: [String: Any] {
+        pythonPath.map { ["python": ["pythonPath": $0.path]] } ?? [:]
     }
 
     public func prepare(
@@ -235,7 +275,11 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
                     + "profile language \(String(describing: profile.language))"
             )
         }
-        let environment = Self.baseEnvironment(trustMode: trustMode)
+        let environment = Self.baseEnvironment(
+            trustMode: trustMode,
+            pythonPath: pythonPath,
+            borrowedFromWorkspace: borrowedFromWorkspace
+        )
         let launch = try safeLaunch(
             helperURL: executableURL,
             helperArguments: ["--stdio"]
@@ -247,7 +291,8 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
             environment: sanitizedChildEnvironment(
                 launch.environment,
                 projectRoot: projectURL
-            )
+            ),
+            configuration: serverConfiguration
         )
         do {
             return try LSPLanguageSession.start(
@@ -264,7 +309,8 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
                         environment: sanitizedChildEnvironment(
                             restart.environment,
                             projectRoot: self.projectURL
-                        )
+                        ),
+                        configuration: self.serverConfiguration
                     )
                 },
                 projectURL: projectURL,

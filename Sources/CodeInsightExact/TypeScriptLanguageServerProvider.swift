@@ -24,7 +24,10 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
     private let cacheURL: URL
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
+    private let borrowedFromWorkspace: Bool
 
+    /// `borrowedFromWorkspace` marks a commit checkout whose `node_modules`
+    /// are links into the user's workspace.
     public init(
         projectURL: URL,
         nodeURL: URL,
@@ -33,10 +36,12 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
         typescriptPackageURL: URL? = nil,
         cacheURL: URL? = nil,
         requestTimeout: TimeInterval = 30,
-        closeGrace: TimeInterval = 1
+        closeGrace: TimeInterval = 1,
+        borrowedFromWorkspace: Bool = false
     ) throws {
         let project = projectURL.standardizedFileURL
         self.projectURL = project
+        self.borrowedFromWorkspace = borrowedFromWorkspace
         let resolvedNode = nodeURL.resolvingSymlinksInPath()
             .standardizedFileURL
         let resolvedLanguageServer = languageServerURL.resolvingSymlinksInPath()
@@ -337,7 +342,9 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
         }
         let environment = ExactAnalysisEnvironment(
             trustMode: trustMode,
-            limitations: [.dependenciesUnavailableOffline]
+            limitations: borrowedFromWorkspace
+                ? [.dependenciesBorrowedFromWorkspace]
+                : [.dependenciesUnavailableOffline]
         )
         let launch = try safeLaunch()
         let client = try Self.client(for: launch, projectURL: projectURL)

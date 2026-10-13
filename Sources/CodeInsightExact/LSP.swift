@@ -117,15 +117,20 @@ func parseExactLocation(
         throw ExactError.invalidDefinitionResponse(String(describing: object))
     }
 
-    let targetURL = url.standardizedFileURL
-    let relative = projectRelativePath(
+    var targetURL = url.standardizedFileURL
+    var relative = projectRelativePath(
         of: targetURL,
         projectURL: projectURL
     )
     let bytes: [UInt8]
-    if let relative, let captured = try? snapshot.readBytes(path: relative) {
+    if let path = relative, let captured = try? snapshot.readBytes(path: path) {
         bytes = captured
     } else {
+        // Not a snapshot file: a dependency, possibly reached through a
+        // link borrowed from the workspace. Report and read its real path,
+        // never a project-relative one the snapshot cannot serve.
+        relative = nil
+        targetURL = targetURL.resolvingSymlinksInPath()
         bytes = [UInt8](try Data(contentsOf: targetURL, options: .mappedIfSafe))
     }
     guard let map = LSPPositionMap(utf8: bytes) else {
@@ -340,6 +345,8 @@ public final class LSPClient: @unchecked Sendable {
     private var handlesReleased = false
     private var terminationObserver: (@Sendable (Int32) -> Void)?
     private var diagnosticObserver: (@Sendable (String) -> Void)?
+    /// `workspace/configuration` answers by section; other sections get null.
+    private let configuration: [String: Any]
 
     public private(set) var didForceKill = false
     public private(set) var didReap = false
@@ -384,8 +391,10 @@ public final class LSPClient: @unchecked Sendable {
         executableURL: URL,
         arguments: [String] = [],
         workingDirectory: URL? = nil,
-        environment: [String: String]? = nil
+        environment: [String: String]? = nil,
+        configuration: [String: Any] = [:]
     ) throws {
+        self.configuration = configuration
         let process = Process()
         let input = Pipe()
         let output = Pipe()
@@ -446,8 +455,10 @@ public final class LSPClient: @unchecked Sendable {
     init(
         readHandle: FileHandle,
         writeHandle: FileHandle,
-        errorReadHandle: FileHandle? = nil
+        errorReadHandle: FileHandle? = nil,
+        configuration: [String: Any] = [:]
     ) {
+        self.configuration = configuration
         process = nil
         inputHandle = writeHandle
         outputHandle = readHandle
@@ -793,9 +804,12 @@ public final class LSPClient: @unchecked Sendable {
         let result: Any
         switch method {
         case "workspace/configuration":
-            let count = ((params as? [String: Any])?["items"] as? [Any])?.count
-                ?? 0
-            result = Array(repeating: NSNull(), count: count)
+            let items = ((params as? [String: Any])?["items"] as? [Any]) ?? []
+            result = items.map { item -> Any in
+                (item as? [String: Any])?["section"]
+                    .flatMap { $0 as? String }
+                    .flatMap { configuration[$0] } ?? NSNull()
+            }
         case "workspace/workspaceFolders":
             result = []
         case "client/registerCapability", "window/workDoneProgress/create":

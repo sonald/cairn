@@ -508,6 +508,8 @@ public func symbolDocNoteText(_ note: SymbolDoc.Note) -> String {
         localized("reader.hover.note.procMacros")
     case .limitation("buildScriptsDisabled"):
         localized("reader.hover.note.buildScripts")
+    case .limitation("dependenciesBorrowedFromWorkspace"):
+        localized("reader.hover.note.borrowed")
     case .limitation("dependenciesUnavailableOffline"), .dependencySourceMissing:
         localized("reader.hover.note.dependencySource")
     case .limitation(let other):

@@ -25,4 +25,5 @@
 "reader.hover.note.unavailable" = "精确分析不可用：%@";
 "reader.hover.note.procMacros" = "过程宏已关闭（Safe 模式）：宏生成的内容可能缺失";
 "reader.hover.note.buildScripts" = "构建脚本已关闭（Safe 模式）：生成的代码可能缺失";
+"reader.hover.note.borrowed" = "依赖来自当前工作区，可能与该 commit 不一致";
 "reader.hover.note.dependencySource" = "依赖源码不在本地缓存（不会联网下载）";

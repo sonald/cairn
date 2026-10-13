@@ -4837,7 +4837,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func readerSource(
         for file: URL?
     ) -> DocumentLoader.ContentSource? {
-        guard let file, projectPath(for: file) != nil else { return nil }
+        // A borrowed dependency (workspace `node_modules`, venv) lies under
+        // the project root but is no snapshot file: read it from disk.
+        guard let file, projectPath(for: file) != nil,
+              !model.exactCoordinator.isDependencyFile(file)
+        else { return nil }
         return model.documentSource
     }
 }

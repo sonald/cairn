@@ -63,12 +63,16 @@ public enum ExactAnalysisLimitation: String, Hashable, Sendable {
     case buildScriptsDisabled
     case procMacrosDisabled
     case dependenciesUnavailableOffline
+    /// A commit's dependencies come from the user's current workspace
+    /// (`node_modules`, the virtual environment) and may not match it.
+    case dependenciesBorrowedFromWorkspace
 
     public var displayName: String {
         switch self {
         case .buildScriptsDisabled: "build scripts disabled"
         case .procMacrosDisabled: "proc macros disabled"
         case .dependenciesUnavailableOffline: "dependencies unavailable offline"
+        case .dependenciesBorrowedFromWorkspace: "dependencies borrowed from the workspace"
         }
     }
 }

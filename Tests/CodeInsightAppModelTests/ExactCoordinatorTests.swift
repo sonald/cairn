@@ -3099,3 +3099,80 @@ func coordinatorKeepsTypeDefinitionCacheSeparate() {
     overlay.storeTypeDefinition([], for: key, file: "main.rs", byteOffset: 0)
     #expect(overlay.definition(for: key, file: "main.rs", byteOffset: 0) != nil)
 }
+
+@MainActor
+@Test
+func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirResultsAsDependencies()
+    async throws
+{
+    let root = try exactTemporaryProject([
+        "package.json": "{}\n",
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "src/main.ts": "import { Tokenizer } from 'lib'\n",
+        ".gitignore": "node_modules/\ncache/\n",
+        "node_modules/lib/index.ts": "export declare class Tokenizer {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let snapshot = try CommitSnapshot(repositoryURL: root)
+    let profile = try ExactProfileKey(snapshot: snapshot, language: .typescript)
+    let store = CheckoutStore(parentURL: root.appendingPathComponent("cache/checkouts"))
+    let modules = root.appendingPathComponent("node_modules", isDirectory: true)
+    let dependency = modules.appendingPathComponent("lib/index.ts")
+    // tsserver answers with the workspace's real path, which lies under
+    // the project root although no snapshot holds it.
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(file: dependency.path, byteOffset: 21, line: 1, column: 22)
+    }
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: { root, revision in
+            if let revision {
+                try CommitSnapshot(repositoryURL: root, revision: revision)
+            } else {
+                try WorktreeSnapshot(repositoryURL: root)
+            }
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
+        checkoutStore: store
+    )
+    let analysisProfile = exactTypeScriptProfile(
+        language: .typescript,
+        configFingerprint: profile.configFingerprint,
+        environmentFingerprint: profile.environmentFingerprint
+    )
+
+    for (generation, revision) in [(UInt64(1), "HEAD" as String?), (2, nil)] {
+        try coordinator.prepare(
+            projectURL: root,
+            revision: revision,
+            analysisProfile: analysisProfile,
+            generation: generation
+        )
+        #expect(await testWaitUntil("ready") { coordinator.readiness == .ready })
+        let result = await coordinator.definition(
+            file: "src/main.ts",
+            byteOffset: 9,
+            generation: generation
+        )
+        let file = try #require(exactCompletedEntry(result)?.location.file)
+        #expect(file == dependency.path, "revision \(revision ?? "worktree")")
+        #expect(exactLocationIsInDependency(file))
+        #expect(coordinator.isDependencyFile(dependency))
+        #expect(!coordinator.isDependencyFile(root.appendingPathComponent("src/main.ts")))
+        if revision != nil {
+            let checkout = try #require(store.liveDirectories().first)
+            #expect(try FileManager.default.destinationOfSymbolicLink(
+                atPath: checkout.appendingPathComponent("node_modules").path
+            ) == modules.standardizedFileURL.path)
+        }
+    }
+    await coordinator.shutdownAndWait()
+}

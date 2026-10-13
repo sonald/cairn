@@ -141,6 +141,7 @@
 "model.inspector.unavailableCaptured" = "Exact provider was unavailable at capture: %@";
 "model.inspector.verification" = "VERIFICATION";
 "model.inspector.worktreeCaptured" = "worktree captured";
+"model.limitation.borrowed" = "dependencies come from the current workspace and may not match this commit";
 "model.limitation.buildScripts" = "build scripts disabled";
 "model.limitation.offline" = "dependencies unavailable offline";
 "model.limitation.procMacros" = "proc macros disabled";
