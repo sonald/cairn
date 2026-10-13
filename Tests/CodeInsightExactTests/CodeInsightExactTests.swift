@@ -2062,38 +2062,120 @@ func rustAnalyzerUsesEachCheckedOutCommitWhenInstalled() throws {
         repositoryURL: fixture.root,
         revision: "HEAD~1"
     )
-    // One window's checkout directory follows the commit, as the
-    // coordinator drives it: HEAD first, then HEAD~1 in the same directory.
+    // One window's checkout directory follows the commit, and one warm
+    // session follows it: HEAD first, then HEAD~1 in the same directory.
     let checkout = try CheckoutRoot(
         directory: fixture.root.deletingLastPathComponent()
             .appendingPathComponent("checkout-\(fixture.root.lastPathComponent)"),
         source: fixture.root
     )
     defer { try? checkout.remove() }
+    func answerCall(_ snapshot: CommitSnapshot) throws -> Int {
+        let source = try #require(String(
+            data: Data(snapshot.readBytes(path: "src/main.rs")),
+            encoding: .utf8
+        ))
+        let call = try #require(source.range(of: "answer();"))
+        return source[..<call.lowerBound].utf8.count
+    }
     do {
-        let headLocation = try checkoutDefinition(
+        let session = try warmCheckoutSession(
             snapshot: head,
             checkout: checkout,
             executable: executable,
-            cache: fixture.root.appendingPathComponent("ra-head")
+            cache: fixture.root.appendingPathComponent("ra-cache")
         )
-        let previousLocation = try checkoutDefinition(
-            snapshot: previous,
-            checkout: checkout,
-            executable: executable,
-            cache: fixture.root.appendingPathComponent("ra-previous")
-        )
+        defer { session.close() }
+        let headLocation = try onlyDefinitionLocation(try session.definition(
+            file: "src/main.rs",
+            byteOffset: answerCall(head)
+        ))
+        try switchCheckoutSession(session, from: head, to: previous, checkout: checkout)
+        let previousLocation = try onlyDefinitionLocation(try session.definition(
+            file: "src/main.rs",
+            byteOffset: answerCall(previous)
+        ))
         #expect(headLocation.line == 3)
         #expect(previousLocation.line == 1)
-        #expect(headLocation.line != previousLocation.line)
         print(
-            "historical-exact HEAD=\(headLocation.line):\(headLocation.column)"
+            "historical-exact warm HEAD=\(headLocation.line):\(headLocation.column)"
                 + " HEAD~1=\(previousLocation.line):\(previousLocation.column)"
         )
     } catch ExactError.unavailable(let detail)
         where detail.contains("sandbox-exec")
     {
         print("SKIP historical exact: \(detail); noBareExecution=true")
+    }
+}
+
+/// S0 evidence item 2 on the real corpus: after a warm switch of toydb
+/// from 46308de to babe5de, `src/sql/execution/mod.rs:40:79` resolves to
+/// the `HashJoin` declared in `join.rs` by the target commit. Reads the
+/// user's clone only through the checkout's alternates.
+@Test
+func rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb() throws {
+    let toydb = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("work/rust/toydb", isDirectory: true)
+    guard let executable = RustAnalyzerProvider.findExecutable(),
+          FileManager.default.fileExists(atPath: toydb.appendingPathComponent(".git").path),
+          let from = try? CommitSnapshot(repositoryURL: toydb, revision: "46308de"),
+          let to = try? CommitSnapshot(repositoryURL: toydb, revision: "babe5de")
+    else {
+        print("SKIP toydb warm switch: rust-analyzer or ~/work/rust/toydb unavailable")
+        return
+    }
+    let scratch = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let checkout = try CheckoutRoot(
+        directory: scratch.appendingPathComponent("checkout"),
+        source: toydb
+    )
+    defer { try? checkout.remove() }
+    let file = "src/sql/execution/mod.rs"
+    let source = try #require(String(data: Data(to.readBytes(path: file)), encoding: .utf8))
+    // Line 40, UTF-16 column 79 (1-based), as the probe addressed it.
+    let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
+    let lineStart = lines[..<39].reduce(0) { $0 + $1.utf8.count + 1 }
+    let column = String(decoding: Array(lines[39].utf16.prefix(78)), as: UTF16.self)
+    let offset = lineStart + column.utf8.count
+    do {
+        let coldStart = Date()
+        let session = try warmCheckoutSession(
+            snapshot: from,
+            checkout: checkout,
+            executable: executable,
+            cache: scratch.appendingPathComponent("ra-cache")
+        )
+        defer { session.close() }
+        // Warm: wait until the server answers at the old commit.
+        _ = try session.definition(file: file, byteOffset: 0)
+        let cold = Date().timeIntervalSince(coldStart)
+
+        let switchStart = Date()
+        try switchCheckoutSession(session, from: from, to: to, checkout: checkout)
+        let switched = Date().timeIntervalSince(switchStart)
+        var location: ExactLocation?
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            location = try? onlyDefinitionLocation(
+                try session.definition(file: file, byteOffset: offset)
+            )
+            if location?.file == "src/sql/execution/join.rs" { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        let firstCorrect = Date().timeIntervalSince(switchStart)
+        #expect(location?.file == "src/sql/execution/join.rs")
+        #expect(location?.line == 142)
+        print(String(
+            format: "toydb-warm-switch 46308de->babe5de coldReady=%.2fs"
+                + " switchReturned=%.2fs firstCorrectDefinition=%.2fs target=%@:%d",
+            cold, switched, firstCorrect,
+            location?.file ?? "nil", location?.line ?? -1
+        ))
+    } catch ExactError.unavailable(let detail)
+        where detail.contains("sandbox-exec")
+    {
+        print("SKIP toydb warm switch: \(detail)")
     }
 }
 
@@ -4249,36 +4331,44 @@ private func runDefinition(
     return location
 }
 
-private func checkoutDefinition(
+/// A sandboxed rust-analyzer session over `checkout` at `snapshot`.
+private func warmCheckoutSession(
     snapshot: CommitSnapshot,
     checkout: CheckoutRoot,
     executable: URL,
     cache: URL
-) throws -> ExactLocation {
-    let profile = try ExactProfileKey(snapshot: snapshot)
+) throws -> any ExactSession {
     try checkout.checkout(commit: snapshot.commitOID)
     let provider = try RustAnalyzerProvider(
         projectURL: checkout.url,
         executableURL: executable,
         cacheURL: cache,
-        requestTimeout: 30,
+        requestTimeout: 60,
         closeGrace: 30
     )
-    let session = try provider.prepare(
+    return try provider.prepare(
         snapshot: snapshot,
-        profile: profile,
+        profile: try ExactProfileKey(snapshot: snapshot),
         trustMode: .safe
     )
-    defer { session.close() }
-    let source = try #require(String(
-        data: Data(snapshot.readBytes(path: "src/main.rs")),
-        encoding: .utf8
-    ))
-    let call = try #require(source.range(of: "answer();"))
-    return try onlyDefinitionLocation(try session.definition(
-        file: "src/main.rs",
-        byteOffset: source[..<call.lowerBound].utf8.count
-    ))
+}
+
+/// The coordinator's warm path: diff, check out inside the switch.
+private func switchCheckoutSession(
+    _ session: any ExactSession,
+    from old: CommitSnapshot,
+    to new: CommitSnapshot,
+    checkout: CheckoutRoot
+) throws {
+    let oldProfile = try ExactProfileKey(snapshot: old)
+    let newProfile = try ExactProfileKey(snapshot: new)
+    try session.switchSnapshot(
+        to: new,
+        profile: newProfile,
+        changes: ExactFileChange.changes(from: old, to: new, under: checkout.url),
+        configChanged: oldProfile.configFingerprint != newProfile.configFingerprint,
+        prepareFiles: { try checkout.checkout(commit: new.commitOID) }
+    )
 }
 
 private func onlyDefinitionLocation(
