@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     let startedAt: ContinuousClock.Instant
     /// Model injected by self-test entry points; production launches pass
     /// none and every window gets its own model assembled from the shared
-    /// trust registry / materializer / bookmark store (§4).
+    /// trust registry / checkout store / bookmark store (§4).
     private let injectedModel: AppModel?
     let exactSelfTestProviderState: ExactSelfTestProviderState?
     let relationTimingTemporaryRoot: URL?
