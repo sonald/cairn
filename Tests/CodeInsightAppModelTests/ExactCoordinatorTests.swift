@@ -539,8 +539,13 @@ func exactCoordinatorFiltersPythonStubTargets() async throws {
         "main.py": "def target():\n    pass\n\ntarget()\n",
     ])
     defer { try? FileManager.default.removeItem(at: root) }
-    let state = ExactProviderState{ _, _, _ in
-        ExactLocation(file: "typeshed/foo.pyi", byteOffset: 0, line: 1, column: 1)
+    // A relative stub is not a project source; an absolute one is a
+    // dependency (an installed package's .pyi) and stays a jump target.
+    let stub = "/opt/site-packages/torch/__init__.pyi"
+    let state = ExactProviderState { _, _, byteOffset in
+        byteOffset == 0
+            ? ExactLocation(file: "typeshed/foo.pyi", byteOffset: 0, line: 1, column: 1)
+            : ExactLocation(file: stub, byteOffset: 0, line: 1, column: 1)
     }
     let expectedProfile = try ExactProfileKey(
         projectURL: root,
@@ -582,6 +587,12 @@ func exactCoordinatorFiltersPythonStubTargets() async throws {
         return
     }
     #expect(entries.isEmpty)
+    let dependency = await coordinator.definition(
+        file: "main.py",
+        byteOffset: 4,
+        generation: 1
+    )
+    #expect(exactCompletedEntry(dependency)?.location.file == stub)
 }
 
 @MainActor
