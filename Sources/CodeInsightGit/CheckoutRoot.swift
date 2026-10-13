@@ -32,6 +32,10 @@ public final class CheckoutRoot: @unchecked Sendable {
     public let sourceRepositoryURL: URL
     private let sourceObjectsPath: String
     private let repository: GitRepository
+    /// Held (flock) for the life of this object so another Cairn process
+    /// — a packaged self-test beside the running app — never mistakes the
+    /// directory for a leftover and deletes it.
+    private var lockDescriptor: Int32 = -1
 
     public init(directory: URL, source: URL) throws {
         let url = directory.standardizedFileURL
@@ -105,6 +109,29 @@ public final class CheckoutRoot: @unchecked Sendable {
             to: info.appendingPathComponent("attributes")
         )
         repository = try GitRepository(url: url)
+        lockDescriptor = open(Self.lockPath(for: url), O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard lockDescriptor >= 0, flock(lockDescriptor, LOCK_EX | LOCK_NB) == 0 else {
+            if lockDescriptor >= 0 { close(lockDescriptor) }
+            lockDescriptor = -1
+            throw CheckoutError.directoriesInUse([url.path])
+        }
+    }
+
+    deinit {
+        if lockDescriptor >= 0 { close(lockDescriptor) }
+    }
+
+    static func lockPath(for directory: URL) -> String {
+        directory.appendingPathComponent(".git/cairn.lock").path
+    }
+
+    /// True while a live `CheckoutRoot` (this process or another) holds the
+    /// directory's lock.
+    static func isHeld(_ directory: URL) -> Bool {
+        let descriptor = open(lockPath(for: directory), O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        return flock(descriptor, LOCK_EX | LOCK_NB) != 0
     }
 
     /// Makes the directory hold exactly `commit`'s regular files. The
@@ -189,6 +216,10 @@ public final class CheckoutRoot: @unchecked Sendable {
 
     /// Deletes the directory. The libgit2 handle is released on deinit.
     public func remove() throws {
+        if lockDescriptor >= 0 {
+            close(lockDescriptor)
+            lockDescriptor = -1
+        }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         try FileManager.default.removeItem(at: url)
     }
@@ -261,29 +292,32 @@ public final class CheckoutStore: @unchecked Sendable {
         return roots.values.map(\.url).sorted { $0.path < $1.path }
     }
 
-    /// Deletes every checkout directory. Refused while any owner still
-    /// holds one: its language server may be reading it.
+    /// Deletes every checkout directory. Refused while any live root — in
+    /// this process or another — still holds one: its language server may
+    /// be reading it.
     public func removeAll() throws {
         lock.lock()
         defer { lock.unlock() }
-        let inUse = roots.values.map(\.url.path).sorted()
+        let inUse = children().filter(CheckoutRoot.isHeld).map(\.path).sorted()
         guard inUse.isEmpty else { throw CheckoutError.directoriesInUse(inUse) }
         guard FileManager.default.fileExists(atPath: parentURL.path) else { return }
         try FileManager.default.removeItem(at: parentURL)
     }
 
-    /// Launch cleanup: deletes directories no owner in this process holds.
+    /// Launch cleanup: deletes directories no live root holds.
     public func removeUnowned() {
         lock.lock()
         defer { lock.unlock() }
-        let owned = Set(roots.values.map(\.url.path))
-        let children = (try? FileManager.default.contentsOfDirectory(
-            at: parentURL,
-            includingPropertiesForKeys: nil
-        )) ?? []
-        for child in children where !owned.contains(child.standardizedFileURL.path) {
+        for child in children() where !CheckoutRoot.isHeld(child) {
             try? FileManager.default.removeItem(at: child)
         }
+    }
+
+    private func children() -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(
+            at: parentURL,
+            includingPropertiesForKeys: nil
+        )) ?? []).map(\.standardizedFileURL)
     }
 
     /// Bytes on disk under the parent, for the settings page.

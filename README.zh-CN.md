@@ -7,7 +7,7 @@
 
 <p align="center"><a href="README.md">English</a> · 简体中文</p>
 
-**Cairn** 是 macOS 原生只读代码阅读器，用来理解陌生项目。CodeInsight 保留为 Swift package 和模块名。可以阅读源码、追踪符号与关系、比较 Git 快照，不编辑文件，也不 checkout 另一个提交。
+**Cairn** 是 macOS 原生只读代码阅读器，用来理解陌生项目。CodeInsight 保留为 Swift package 和模块名。可以阅读源码、追踪符号与关系、比较 Git 快照，不编辑文件，也不改动你的工作区与仓库。
 
 - Rust、Python、TypeScript/TSX 语法索引、符号与可组合项目查询。
 - 跟随符号或所在函数的 Context 窗口，支持值绑定的类型预览与固定。

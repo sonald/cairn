@@ -7,7 +7,7 @@
 
 <p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
 
-**Cairn** is a native, read-only macOS code reader for understanding unfamiliar projects. CodeInsight remains the Swift package and module name. Browse source, follow symbols and relations, and compare Git snapshots without editing files or checking out another commit.
+**Cairn** is a native, read-only macOS code reader for understanding unfamiliar projects. CodeInsight remains the Swift package and module name. Browse source, follow symbols and relations, and compare Git snapshots without editing files or changing your working tree or repository.
 
 - Rust, Python, and TypeScript/TSX syntax indexing, symbol search, and composable project queries.
 - A Context window that follows symbols or the enclosing function, previews binding types, and can be pinned.

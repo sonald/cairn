@@ -96,7 +96,9 @@ func checkoutRootMirrorsEachCommitsRegularFilesWithoutTouchingTheUserRepository(
         atPath: fixture.root.appendingPathComponent(".git/objects/info/alternates").path
     ))
 
-    for commit in [first, second, first] {
+    // Checking the same commit out twice in a row covers FORCE recreating
+    // the symlink and gitlink entries the previous cleanup removed.
+    for commit in [first, second, second, first] {
         let snapshot = try CommitSnapshot(repositoryURL: fixture.root, revision: commit)
         try root.checkout(commit: snapshot.commitOID)
         #expect(try filesOnDisk(root.url) == expectedFiles(snapshot), "commit \(commit.prefix(7))")
@@ -228,7 +230,14 @@ func checkoutStoreLaunchCleanupRemovesOnlyUnownedDirectories() throws {
 
     #expect(!FileManager.default.fileExists(atPath: stale.path))
     #expect(FileManager.default.fileExists(atPath: live.url.appendingPathComponent("main.rs").path))
+    // A second store over the same parent (another Cairn process) sees the
+    // live directory as held and leaves it alone, in both cleanup paths.
+    let otherProcess = CheckoutStore(parentURL: store.parentURL)
+    otherProcess.removeUnowned()
+    #expect(FileManager.default.fileExists(atPath: live.url.appendingPathComponent("main.rs").path))
+    #expect(throws: CheckoutError.directoriesInUse([live.url.path])) { try otherProcess.removeAll() }
     try store.release(owner: owner)
+    try otherProcess.removeAll()
 }
 
 /// A checkout parent beside (not inside) the repository, so it never shows
