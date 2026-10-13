@@ -1727,7 +1727,7 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     #expect(model.displayedCandidate?.exactAttribution?.environment.limitations
         == [.buildScriptsDisabled, .procMacrosDisabled])
     #expect(model.displayedCandidate?.exactOrigin == .worktree)
-    #expect(model.displayedCandidate?.provenanceBadge.contains("materialized") == false)
+    #expect(model.displayedCandidate?.provenanceBadge.contains("(checkout)") == false)
     #expect(model.displayedCandidate?.provenanceBadge.contains(
         "features: default"
     ) == true)
@@ -1750,7 +1750,7 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     #expect(model.displayedCandidate?.exactOrigin == .materialized(
         commitOID: commitOID
     ))
-    #expect(model.displayedCandidate?.provenanceBadge.contains("materialized") == true)
+    #expect(model.displayedCandidate?.provenanceBadge.contains("(checkout)") == true)
 }
 
 @MainActor
