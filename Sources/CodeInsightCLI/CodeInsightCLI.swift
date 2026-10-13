@@ -297,51 +297,131 @@ extension CodeInsight {
         @Option(name: .long, help: "One-based UTF-8 byte column.")
         var column: Int
 
+        @Option(name: .long, help: "Commit to analyse in a temporary checkout that borrows the workspace's dependencies; defaults to the worktree.")
+        var revision: String?
+
+        @Option(name: .long, help: "Project-relative root of the analysis unit (default: the project root).")
+        var unit: String = ""
+
+        @Flag(name: .long, help: "Also print definition targets.")
+        var definition = false
+
         func run() throws {
             let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
-            let snapshot = try WorktreeSnapshot(repositoryURL: root)
+            let languageID: LanguageID = switch language {
+            case "rust": .rust
+            case "python": .python
+            case "typescript": .typescript
+            default: throw ValidationError("--language must be rust, python or typescript.")
+            }
+            let prefix = unit.split(separator: "/").joined(separator: "/")
+            let unitFile = prefix.isEmpty ? file : String(file.dropFirst(prefix.count + 1))
+            guard prefix.isEmpty || file.hasPrefix(prefix + "/") else {
+                throw ValidationError("--file must lie inside --unit.")
+            }
+            let snapshot: any Snapshot = if let revision {
+                try CommitSnapshot(repositoryURL: root, revision: revision)
+            } else {
+                try WorktreeSnapshot(repositoryURL: root)
+            }
             let bytes = try snapshot.readBytes(path: file)
             guard let line = UInt32(exactly: line),
                   let column = UInt32(exactly: column),
                   let byteOffset = LineTable(bytes: bytes).byteOffset(line: line, column: column)
             else { throw ValidationError("Position is outside \(file).") }
-            let session = try prepareHoverSession(root: root, snapshot: snapshot)
+
+            func under(_ base: URL) -> URL {
+                prefix.split(separator: "/").reduce(base) { $0.appendingPathComponent(String($1)) }
+            }
+            // The same dependency rules the app's Exact coordinator applies.
+            let pythonPath = languageID == .python
+                ? DependencyBorrowing.pythonInterpreter(unitRoot: under(root)) : nil
+            var analysisRoot = root
+            var borrowed = false
+            let store = CheckoutStore(
+                parentURL: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("codeinsight-cli-checkouts", isDirectory: true)
+            )
+            let owner = UUID()
+            defer { try? store.release(owner: owner) }
+            if let commit = snapshot as? CommitSnapshot {
+                let checkout = try store.root(owner: owner, source: root)
+                try checkout.checkout(
+                    commit: commit.commitOID,
+                    links: DependencyBorrowing.links(
+                        language: languageID,
+                        snapshot: commit,
+                        workspaceRoot: root,
+                        unitPrefix: prefix
+                    )
+                )
+                for (path, target) in checkout.borrowedLinks.sorted(by: { $0.key < $1.key }) {
+                    print("borrowed \(path) -> \(target.path)")
+                }
+                borrowed = !checkout.borrowedLinks.isEmpty || pythonPath != nil
+                analysisRoot = checkout.url
+            }
+            if let pythonPath { print("pythonPath \(pythonPath.path)") }
+            let unitSnapshot = prefix.isEmpty ? snapshot : UnitSnapshot(wrapped: snapshot, prefix: prefix)
+            let session = try prepareSession(
+                root: under(analysisRoot),
+                language: languageID,
+                snapshot: unitSnapshot,
+                profile: ExactProfileKey(snapshot: snapshot, language: languageID, pathPrefix: prefix),
+                pythonPath: pythonPath,
+                borrowed: borrowed
+            )
             defer { session.close() }
-            switch try session.hover(file: file, byteOffset: Int(byteOffset), batch: ExactRequestBatch()) {
+            switch try session.hover(file: unitFile, byteOffset: Int(byteOffset), batch: ExactRequestBatch()) {
             case nil: print("hover unsupported")
             case .cancelled: print("hover cancelled")
             case .completed(nil): print("hover empty")
             case .completed(let markdown?): print(markdown)
             }
-            let limitations = session.attribution.environment.limitations
+            if definition {
+                switch try session.definition(file: unitFile, byteOffset: Int(byteOffset)) {
+                case .completed(let targets):
+                    if targets.isEmpty { print("definition none") }
+                    for target in targets {
+                        let location = target.location
+                        print("definition \(location.file):\(location.line):\(location.column)")
+                    }
+                case .cancelled: print("definition cancelled")
+                case .unavailable(let reason): print("definition unavailable: \(reason)")
+                }
+            }
+            let attribution = session.attribution
+            let limitations = attribution.environment.limitations
                 .map(\.rawValue).sorted().joined(separator: ",")
+            print("toolVersion=\(attribution.toolVersion)")
             print("limitations=\(limitations.isEmpty ? "none" : limitations)")
         }
 
-        private func prepareHoverSession(
+        private func prepareSession(
             root: URL,
-            snapshot: any Snapshot
+            language: LanguageID,
+            snapshot: any Snapshot,
+            profile: ExactProfileKey,
+            pythonPath: URL?,
+            borrowed: Bool
         ) throws -> any ExactSession {
             switch language {
-            case "rust":
+            case .rust:
                 guard let executableURL = RustAnalyzerProvider.findExecutable()
                 else { throw ValidationError("rust-analyzer not found") }
                 return try RustAnalyzerProvider(projectURL: root, executableURL: executableURL)
-                    .prepare(
-                        snapshot: snapshot,
-                        profile: ExactProfileKey(projectURL: root, language: .rust),
-                        trustMode: .safe
-                    )
-            case "python":
+                    .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
+            case .python:
                 guard let executableURL = PyrightProvider.findExecutable(projectURL: root)
                 else { throw ValidationError("pyright-langserver not found") }
-                return try PyrightProvider(projectURL: root, executableURL: executableURL)
-                    .prepare(
-                        snapshot: snapshot,
-                        profile: ExactProfileKey(projectURL: root, language: .python),
-                        trustMode: .safe
-                    )
-            case "typescript":
+                return try PyrightProvider(
+                    projectURL: root,
+                    executableURL: executableURL,
+                    pythonPath: pythonPath,
+                    borrowedFromWorkspace: borrowed
+                )
+                .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
+            case .typescript:
                 guard let node = TypeScriptLanguageServerProvider.findExecutable(
                     named: "node", projectURL: root
                 ),
@@ -365,16 +445,32 @@ extension CodeInsight {
                     projectURL: root,
                     nodeURL: node,
                     languageServerURL: languageServer,
-                    tsserverURL: tsserver
+                    tsserverURL: tsserver,
+                    borrowedFromWorkspace: borrowed
                 )
-                    .prepare(
-                        snapshot: snapshot,
-                        profile: ExactProfileKey(projectURL: root, language: .typescript),
-                        trustMode: .safe
-                    )
-            default:
+                .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
+            case .javascript:
                 throw ValidationError("--language must be rust, python or typescript.")
             }
+        }
+    }
+
+    /// A snapshot seen from inside one analysis unit, as the app's
+    /// coordinator hands it to a provider.
+    private struct UnitSnapshot: Snapshot {
+        let wrapped: any Snapshot
+        let prefix: String
+        var snapshotID: SnapshotID { wrapped.snapshotID }
+        var objectFormat: GitObjectFormat { wrapped.objectFormat }
+        var sourceKind: SourceKind { wrapped.sourceKind }
+
+        func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+            wrapped.listFiles().filter { $0.path.hasPrefix(prefix + "/") }
+                .map { (String($0.path.dropFirst(prefix.count + 1)), $0.contentID, $0.fileMode) }
+        }
+
+        func readBytes(path: String) throws -> [UInt8] {
+            try wrapped.readBytes(path: "\(prefix)/\(path)")
         }
     }
 

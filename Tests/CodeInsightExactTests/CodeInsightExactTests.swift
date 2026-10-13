@@ -3700,6 +3700,44 @@ func sandboxAllowsPrivateCacheWrites() throws {
 }
 
 @Test
+func sandboxReadsBorrowedDependenciesThroughLinksButNeverWritesThem() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("checkout", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    let modules = root.appendingPathComponent("workspace/node_modules", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: modules, withIntermediateDirectories: true)
+    try Data("export {}\n".utf8).write(to: modules.appendingPathComponent("index.d.ts"))
+    try FileManager.default.createSymbolicLink(
+        at: project.appendingPathComponent("node_modules"),
+        withDestinationURL: modules
+    )
+    guard
+        let sandbox = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                "cat \"$1/index.d.ts\" && ! printf x > \"$1/linked\" 2>/dev/null"
+                    + " && ! printf x > \"$2/real\" 2>/dev/null",
+                "probe",
+                project.appendingPathComponent("node_modules").path,
+                modules.path,
+            ]
+        )
+    else { return }
+
+    let result = try run(sandbox)
+
+    #expect(result.status == 0, "\(result.output)")
+    #expect(result.output.contains("export {}"))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: modules.path) == ["index.d.ts"])
+}
+
+@Test
 func sandboxDeniesNetworkToLocalListener() throws {
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
