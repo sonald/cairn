@@ -91,7 +91,7 @@
 "model.context.interface" = "接口";
 "model.context.limitations" = "限制：%@";
 "model.context.macro" = "宏生成";
-"model.context.materialized" = " · @%@（已物化）";
+"model.context.materialized" = " · @%@（检出目录）";
 "model.context.noDefault" = "无默认特性";
 "model.context.possible" = "可能";
 "model.context.probable" = "较可能";
@@ -154,7 +154,7 @@
 "model.narrative.import" = "匹配到导入绑定，没有其他源码匹配。";
 "model.narrative.inconclusive" = "无法可靠比较源码候选与精确分析服务的目标。";
 "model.narrative.lexical" = "匹配到词法绑定。";
-"model.narrative.materialized" = "物化提交 %@";
+"model.narrative.materialized" = "检出的提交 %@";
 "model.narrative.method" = "仅按方法名称匹配。";
 "model.narrative.name" = "仅按名称匹配。";
 "model.narrative.notApplicable" = "此精确关系查询不适用于当前根节点。";

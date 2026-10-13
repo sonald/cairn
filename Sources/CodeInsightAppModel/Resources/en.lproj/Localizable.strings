@@ -91,7 +91,7 @@
 "model.context.interface" = "interface";
 "model.context.limitations" = "limitations: %@";
 "model.context.macro" = "macroGenerated";
-"model.context.materialized" = " · @%@ (materialized)";
+"model.context.materialized" = " · @%@ (checkout)";
 "model.context.noDefault" = "no-default";
 "model.context.possible" = "Possible";
 "model.context.probable" = "Probable";
@@ -154,7 +154,7 @@
 "model.narrative.import" = "Matched an import binding with no competing source match.";
 "model.narrative.inconclusive" = "The source candidate and exact provider target could not be compared reliably.";
 "model.narrative.lexical" = "Matched a lexical binding.";
-"model.narrative.materialized" = "materialized commit %@";
+"model.narrative.materialized" = "checked-out commit %@";
 "model.narrative.method" = "Matched by method name only.";
 "model.narrative.name" = "Matched by name only.";
 "model.narrative.notApplicable" = "The exact relation query does not apply to this root.";
