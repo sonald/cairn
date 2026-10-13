@@ -2348,15 +2348,29 @@ final class ExactProviderState: @unchecked Sendable {
     private var storedPrepareSnapshot: (any Snapshot)?
     private var closed: Set<Int> = []
     private weak var latestSession: ExactStateSession?
+    /// Sessions switch warm only when set; otherwise the protocol default
+    /// refuses and the coordinator starts a new one.
+    let supportsSwitch: Bool
+    private var recordedSwitches: [(ordinal: Int, changes: [ExactFileChange], configChanged: Bool)] = []
 
     init(
         behavior: @escaping Behavior = { _, _, _ in
             ExactLocation(file: "main.rs", byteOffset: 0, line: 1, column: 1)
         },
-        references: [ExactLocation]? = nil
+        references: [ExactLocation]? = nil,
+        supportsSwitch: Bool = false
     ) {
         self.behavior = behavior
         referencesValue = references
+        self.supportsSwitch = supportsSwitch
+    }
+
+    var switches: [(ordinal: Int, changes: [ExactFileChange], configChanged: Bool)] {
+        locked { recordedSwitches }
+    }
+
+    func recordSwitch(ordinal: Int, changes: [ExactFileChange], configChanged: Bool) {
+        locked { recordedSwitches.append((ordinal, changes, configChanged)) }
     }
 
     var prepareCount: Int { locked { prepares } }
@@ -2530,6 +2544,35 @@ final class ExactStateSession: ExactSession, @unchecked Sendable {
         let observer = environmentObserver
         lock.unlock()
         observer?(environment)
+    }
+
+    func switchSnapshot(
+        to snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        changes: [ExactFileChange],
+        configChanged: Bool,
+        prepareFiles: () throws -> Void
+    ) throws {
+        guard state.supportsSwitch else {
+            throw ExactError.unavailable("warm switch unsupported")
+        }
+        try prepareFiles()
+        lock.lock()
+        storedAttribution = ExactAttribution(
+            provider: storedAttribution.provider,
+            toolVersion: storedAttribution.toolVersion,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint,
+            featureSelection: storedAttribution.featureSelection,
+            environment: storedAttribution.environment,
+            generatedAt: storedAttribution.generatedAt
+        )
+        lock.unlock()
+        state.recordSwitch(
+            ordinal: ordinal,
+            changes: changes,
+            configChanged: configChanged
+        )
     }
 
     func cancel() {}
@@ -3175,4 +3218,240 @@ func exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirResultsAsDependenci
         }
     }
     await coordinator.shutdownAndWait()
+}
+
+// MARK: S2 — warm switch and the two slots
+
+/// A repository with three commits: `HEAD~2`, `HEAD~1` (`src/lib.rs`
+/// changes, `src/new.rs` appears) and `HEAD` (adds `Cargo.lock`), plus a
+/// checkout store outside it.
+private struct WarmSwitchFixture {
+    let root: URL
+    let store: CheckoutStore
+    let trustFile: URL
+    let trustRegistry: TrustRegistry
+
+    init() throws {
+        root = try exactTemporaryProject([
+            "src/lib.rs": "pub fn target() {}\n",
+            "src/main.rs": "use exact_test::target;\nfn main() { target(); }\n",
+        ])
+        try exactGit(root, "init", "-q")
+        try exactGit(root, "config", "user.name", "CodeInsight Tests")
+        try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+        try exactGit(root, "add", "-A")
+        try exactGit(root, "commit", "-q", "-m", "first")
+        try "// moved\npub fn target() {}\n".write(
+            to: root.appendingPathComponent("src/lib.rs"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "pub fn added() {}\n".write(
+            to: root.appendingPathComponent("src/new.rs"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try exactGit(root, "add", "-A")
+        try exactGit(root, "commit", "-q", "-m", "second")
+        try "version = 3\n".write(
+            to: root.appendingPathComponent("Cargo.lock"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try exactGit(root, "add", "-A")
+        try exactGit(root, "commit", "-q", "-m", "lock")
+        store = CheckoutStore(
+            parentURL: root.deletingLastPathComponent()
+                .appendingPathComponent("\(root.lastPathComponent)-checkouts")
+        )
+        trustFile = root.deletingLastPathComponent()
+            .appendingPathComponent("\(root.lastPathComponent)-trust.json")
+        trustRegistry = TrustRegistry(fileURL: trustFile)
+    }
+
+    @MainActor
+    func coordinator(state: ExactProviderState) -> ExactCoordinator {
+        ExactCoordinator(
+            providerFactory: { _ in ExactTestProvider(state: state) },
+            snapshotFactory: { root, revision in
+                if let revision {
+                    return try CommitSnapshot(repositoryURL: root, revision: revision)
+                }
+                return try WorktreeSnapshot(repositoryURL: root)
+            },
+            sandboxAvailable: { true },
+            trustRegistry: trustRegistry,
+            checkoutStore: store
+        )
+    }
+
+    func oid(_ revision: String) throws -> String {
+        try CommitSnapshot(repositoryURL: root, revision: revision).commitOID.hex
+    }
+
+    func remove() {
+        try? store.removeAll()
+        try? FileManager.default.removeItem(at: store.parentURL)
+        try? FileManager.default.removeItem(at: trustFile)
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+@MainActor
+@Test
+func exactCoordinatorSwitchesTheCheckoutSessionWarmAcrossCommits() async throws {
+    let fixture = try WarmSwitchFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState(
+        behavior: { _, _, _ in
+            ExactLocation(file: "src/lib.rs", byteOffset: 0, line: 1, column: 1)
+        },
+        supportsSwitch: true
+    )
+    let coordinator = fixture.coordinator(state: state)
+
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD~2", generation: 1)
+    #expect(await testWaitUntil("first commit ready") {
+        coordinator.readiness == .ready
+    })
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD~1", generation: 2)
+    #expect(await testWaitUntil("second commit ready") {
+        coordinator.readiness == .ready && state.switches.count == 1
+    })
+
+    // One server followed both commits; nothing closed.
+    #expect(state.prepareCount == 1)
+    #expect(state.closedSessions.isEmpty)
+    let checkout = try #require(fixture.store.liveDirectories().first)
+    let changes = try #require(state.switches.first).changes
+    #expect(changes == [
+        ExactFileChange(url: checkout.appendingPathComponent("src/lib.rs"), kind: .changed),
+        ExactFileChange(url: checkout.appendingPathComponent("src/new.rs"), kind: .created),
+    ])
+    #expect(try String(
+        contentsOf: checkout.appendingPathComponent("src/lib.rs"),
+        encoding: .utf8
+    ) == "// moved\npub fn target() {}\n")
+
+    let result = await coordinator.definition(
+        file: "src/main.rs",
+        byteOffset: 0,
+        generation: 2
+    )
+    #expect(exactCompletedEntry(result)?.origin == .materialized(
+        commitOID: try fixture.oid("HEAD~1")
+    ))
+    // A request from before the switch is turned away.
+    #expect(await coordinator.definition(
+        file: "src/main.rs",
+        byteOffset: 0,
+        generation: 1
+    ) == nil)
+}
+
+@MainActor
+@Test
+func exactCoordinatorRestartsInsteadOfSwitchingWhenEnvironmentFeaturesOrTrustChange()
+    async throws
+{
+    let fixture = try WarmSwitchFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState(supportsSwitch: true)
+    let coordinator = fixture.coordinator(state: state)
+
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD~1", generation: 1)
+    #expect(await testWaitUntil("HEAD~1 ready") { coordinator.readiness == .ready })
+
+    // HEAD adds Cargo.lock: a new environment fingerprint.
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD", generation: 2)
+    #expect(await testWaitUntil("environment restart") {
+        coordinator.readiness == .ready && state.prepareCount == 2
+    })
+    #expect(state.closedSessions == [1])
+
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: "HEAD",
+        featureSelection: .allFeatures,
+        generation: 3
+    )
+    #expect(await testWaitUntil("feature restart") {
+        coordinator.readiness == .ready && state.prepareCount == 3
+    })
+    #expect(state.closedSessions == [1, 2])
+
+    try await coordinator.grantTrust(fixture.root)
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: "HEAD",
+        featureSelection: .allFeatures,
+        generation: 4
+    )
+    #expect(await testWaitUntil("trust restart") {
+        coordinator.readiness == .ready && state.prepareCount == 4
+    })
+    #expect(state.closedSessions == [1, 2, 3])
+    #expect(state.trustModes.last == "trusted")
+    #expect(state.switches.isEmpty)
+}
+
+@MainActor
+@Test
+func exactCoordinatorReactivatesTheParkedWorkspaceSessionThroughASwitch()
+    async throws
+{
+    let fixture = try WarmSwitchFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState(supportsSwitch: true)
+    let coordinator = fixture.coordinator(state: state)
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await testWaitUntil("workspace ready") { coordinator.readiness == .ready })
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD", generation: 2)
+    #expect(await testWaitUntil("commit ready") {
+        coordinator.readiness == .ready && state.prepareCount == 2
+    })
+    // The workspace session waits in its slot.
+    #expect(state.closedSessions.isEmpty)
+    #expect(coordinator.hasSession(in: .worktree))
+
+    try "pub fn target() {}\npub fn edited() {}\n".write(
+        to: fixture.root.appendingPathComponent("src/lib.rs"),
+        atomically: true,
+        encoding: .utf8
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 3)
+    #expect(await testWaitUntil("workspace reactivated") {
+        coordinator.readiness == .ready && state.switches.count == 1
+    })
+    // Coming back is a switch of session 1 over what changed on disk
+    // meanwhile, not a new server.
+    #expect(state.prepareCount == 2)
+    let reactivation = try #require(state.switches.first)
+    #expect(reactivation.ordinal == 1)
+    #expect(reactivation.changes == [ExactFileChange(
+        url: fixture.root.appendingPathComponent("src/lib.rs"),
+        kind: .changed
+    )])
+    #expect(coordinator.hasSession(in: .checkout))
+
+    // The parked checkout session closes after the idle limit; the active
+    // one stays.
+    coordinator.releaseStandby(now: Date())
+    #expect(coordinator.hasSession(in: .checkout))
+    coordinator.releaseStandby(
+        now: Date().addingTimeInterval(ExactCoordinator.standbyIdleLimit + 1)
+    )
+    #expect(!coordinator.hasSession(in: .checkout))
+    #expect(await testWaitUntil("standby closed") { state.closedSessions == [2] })
+
+    // Revoking trust closes both slots.
+    coordinator.prepare(projectURL: fixture.root, revision: "HEAD", generation: 4)
+    #expect(await testWaitUntil("commit again") {
+        coordinator.readiness == .ready && state.prepareCount == 3
+    })
+    await coordinator.stopWorkspaces(rootedAt: fixture.root)
+    #expect(state.closedSessions == [1, 2, 3])
+    #expect(!coordinator.hasSession(in: .worktree))
+    #expect(!coordinator.hasSession(in: .checkout))
 }

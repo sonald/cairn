@@ -1,6 +1,7 @@
 import CodeInsightCore
 import CodeInsightExact
 import CodeInsightGit
+import Darwin
 import Foundation
 import Observation
 
@@ -45,6 +46,18 @@ public struct ExactOverlay: Sendable {
             self.featureSelection = featureSelection
             self.trustMode = trustMode
             self.toolVersion = toolVersion
+        }
+
+        /// Decision 6: a running session may follow `next` only when nothing
+        /// but the version and the configuration content differ; those the
+        /// server reloads itself. `analysisProfileID` is derived from the
+        /// configuration fingerprint, so the unit is compared by the caller.
+        func allowsWarmSwitch(to next: ReuseKey) -> Bool {
+            language == next.language
+                && featureSelection == next.featureSelection
+                && environmentFingerprint == next.environmentFingerprint
+                && trustMode == next.trustMode
+                && toolVersion == next.toolVersion
         }
     }
 
@@ -180,17 +193,32 @@ public final class ExactCoordinator {
         case locations([ExactLocation])
     }
 
+    /// Decision 7: one session per root the window reads — its workspace
+    /// and its checkout directory.
+    enum Slot: Sendable {
+        case worktree
+        case checkout
+    }
+
     private struct Active: Sendable {
         let generation: UInt64
         let key: ExactOverlay.ReuseKey
         let provider: any ExactProvider
-        let session: any ExactSession
+        var session: any ExactSession
         let providerSnapshot: any Snapshot
         let profile: ExactProfileKey
         let trustMode: TrustMode
         let workspaceRoot: URL
         let profilePrefix: String
         let checkoutRoot: URL?
+        let slot: Slot
+        /// The whole project snapshot, the base of the next switch's diff.
+        let snapshot: any Snapshot
+        let unitName: String
+        let dependencies: DependencyContext
+
+        /// The directory the server reads, whose files a switch rewrites.
+        var serverDirectory: URL { checkoutRoot ?? workspaceRoot }
     }
 
     private struct ProfileSnapshot: Snapshot {
@@ -243,6 +271,12 @@ public final class ExactCoordinator {
         let active: Active
     }
 
+    /// A parked slot closes after this long without use, or once its server
+    /// holds more than `standbyMemoryLimit` (decision 7; S0 measured
+    /// rust-analyzer at 4–5 GB on codex). Constants, not settings.
+    static let standbyIdleLimit: TimeInterval = 600
+    static let standbyMemoryLimit: UInt64 = 2 << 30
+
     public private(set) var readiness: Readiness = .off(localized("model.exact.noProject"))
     public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
     public private(set) var trustMode: TrustMode?
@@ -251,7 +285,7 @@ public final class ExactCoordinator {
 
     /// Where the provider finds dependencies: the interpreter Pyright is
     /// told to use, and whether a commit borrows the workspace's.
-    private struct DependencyContext: Sendable {
+    private struct DependencyContext: Equatable, Sendable {
         let pythonPath: URL?
         let borrowedFromWorkspace: Bool
     }
@@ -276,6 +310,16 @@ public final class ExactCoordinator {
     @ObservationIgnored private let checkoutOwner = UUID()
     @ObservationIgnored private var overlay = ExactOverlay()
     private var active: Active?
+    /// Every live session by root; `active` is one of them, the other waits
+    /// for the window to come back to its root.
+    @ObservationIgnored private var slots: [Slot: Active] = [:]
+    @ObservationIgnored private var standbySince: [Slot: Date] = [:]
+    /// Sessions a prepare took out of their slot to switch them.
+    @ObservationIgnored private var takenSessions: [any ExactSession] = []
+    /// Advances whenever every slot closes, so a prepare finishing later
+    /// closes the session it took instead of parking it again.
+    @ObservationIgnored private var slotEpoch: UInt64 = 0
+    @ObservationIgnored private var standbyMonitor: Task<Void, Never>?
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
     /// Project root the in-flight prepare targets; lets an app-level trust
     /// revoke stop only the affected project's preparation (§8.2).
@@ -418,23 +462,25 @@ public final class ExactCoordinator {
         )
     }
 
+    /// Retires the current generation. The active session is parked in its
+    /// slot, not closed: in-flight requests are cancelled, and a later
+    /// `prepare` either switches it warm or closes it.
     public func invalidate(generation: UInt64) {
         epoch &+= 1
         expectedGeneration = generation
         let previousClose = closeTask
         let previousPrepare = prepareTask
-        let oldSession = active?.session
-        oldSession?.cancel()
+        if let parked = active {
+            parked.session.cancel()
+            park(parked.slot)
+        }
         prepareTask?.cancel()
         prepareTask = nil
         prepareRoot = nil
-        if previousClose != nil || previousPrepare != nil || oldSession != nil {
+        if previousClose != nil || previousPrepare != nil {
             closeTask = Task.detached(priority: .utility) {
                 await previousClose?.value
                 await previousPrepare?.value
-                if let oldSession {
-                    oldSession.close()
-                }
             }
         } else {
             closeTask = nil
@@ -455,15 +501,15 @@ public final class ExactCoordinator {
         prepareRoot = nil
         closeTask = nil
         let oldSession = active?.session
+        let parkedSessions = takeAllSessions()
         let checkoutStore = checkoutStore
         let checkoutOwner = checkoutOwner
         active = nil
-        oldSession?.cancel()
         // The active session closes synchronously (existing contract); the
-        // cancelled prepare and the prior close chain finish in the
-        // background with a completion handle nobody loses (§7.1). The
-        // checkout directory is deleted only after both, so no language
-        // server still reads it.
+        // cancelled prepare, the parked slot and the prior close chain
+        // finish in the background with a completion handle nobody loses
+        // (§7.1). The checkout directory is deleted only after all of them,
+        // so no language server still reads it.
         oldSession?.close()
         readiness = .off(localized("model.exact.terminating"))
         analysisEnvironment = nil
@@ -471,9 +517,65 @@ public final class ExactCoordinator {
         closeTask = Task.detached(priority: .utility) {
             await previousClose?.value
             await previousPrepare?.value
+            for session in parkedSessions { session.close() }
             try? checkoutStore.release(owner: checkoutOwner)
         }
     }
+
+    /// Empties both slots and stops any switch in progress (decision 7:
+    /// trust revocation, closing, clearing checkouts). The caller closes
+    /// the returned sessions after the prepare that may hold one finished.
+    private func takeAllSessions() -> [any ExactSession] {
+        slotEpoch &+= 1
+        let sessions = slots.values.map(\.session) + takenSessions
+        slots.removeAll()
+        standbySince.removeAll()
+        takenSessions.removeAll()
+        standbyMonitor?.cancel()
+        standbyMonitor = nil
+        for session in sessions { session.cancel() }
+        return sessions
+    }
+
+    private func park(_ slot: Slot) {
+        guard slots[slot] != nil, standbySince[slot] == nil else { return }
+        standbySince[slot] = Date()
+        guard standbyMonitor == nil else { return }
+        standbyMonitor = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                guard let self, !Task.isCancelled else { return }
+                self.releaseStandby(now: Date())
+                if self.standbySince.isEmpty {
+                    self.standbyMonitor = nil
+                    return
+                }
+            }
+        }
+    }
+
+    /// Closes parked slots idle past `standbyIdleLimit` or whose server
+    /// holds more than `standbyMemoryLimit`; the next visit starts cold.
+    func releaseStandby(now: Date) {
+        for (slot, since) in standbySince {
+            guard let parked = slots[slot] else {
+                standbySince[slot] = nil
+                continue
+            }
+            let resident = parked.session.processIdentifier
+                .flatMap(residentBytes(of:)) ?? 0
+            guard now.timeIntervalSince(since) > Self.standbyIdleLimit
+                || resident > Self.standbyMemoryLimit
+            else { continue }
+            slots[slot] = nil
+            standbySince[slot] = nil
+            let session = parked.session
+            Task.detached(priority: .utility) { session.close() }
+        }
+    }
+
+    /// Whether `slot` holds a session, for tests.
+    func hasSession(in slot: Slot) -> Bool { slots[slot] != nil }
 
     /// Awaitable, idempotent shutdown used by explicit window/project
     /// close: waits until cancelled prepare work, the previous close chain,
@@ -588,6 +690,8 @@ public final class ExactCoordinator {
         prepareRoot = root
 
         let priorClose = closeTask
+        let slot: Slot = revision == nil ? .worktree : .checkout
+        let unitName = analysisProfile.projectUnitName
         prepareTask = Task { [weak self] in
             await priorClose?.value
             guard let self else { return }
@@ -608,17 +712,36 @@ public final class ExactCoordinator {
                 return
             }
 
+            // Decision 7: this prepare owns its root's slot; the other one
+            // stays parked unless it serves another project, language,
+            // unit, feature selection or trust mode.
+            var retired: [any ExactSession] = []
+            for (other, parked) in self.slots where other != slot
+                && !(parked.workspaceRoot == root
+                    && parked.key.language == language
+                    && parked.profilePrefix == profilePrefix
+                    && parked.unitName == unitName
+                    && parked.key.featureSelection == featureSelection
+                    && parked.key.trustMode == trustMode)
+            {
+                self.slots[other] = nil
+                self.standbySince[other] = nil
+                retired.append(parked.session)
+            }
+            let candidate = self.slots.removeValue(forKey: slot)
+            self.standbySince[slot] = nil
+            let takenEpoch = self.slotEpoch
+            self.takenSessions = candidate.map { [$0.session] } ?? []
+
             do {
                 let prepared = try await Task.detached(priority: .utility) {
+                    for session in retired { session.close() }
                     let snapshot: any Snapshot = if let snapshotFactory {
                         try snapshotFactory(root, revision)
                     } else {
                         try makeSnapshot(root: root, revision: revision)
                     }
-                    let profile: ExactProfileKey
-                    let providerRoot: URL
-                    let checkoutRoot: URL?
-                    let versionIdentity: String
+                    let commit = snapshot as? CommitSnapshot
                     // Both modes answer Pyright the workspace unit's
                     // interpreter; links exist only in a commit checkout.
                     let pythonPath = language == .python
@@ -638,66 +761,155 @@ public final class ExactCoordinator {
                             pythonPath.deletingLastPathComponent().deletingLastPathComponent()
                         )
                     }
-                    var borrowedFromWorkspace = false
-                    if let commit = snapshot as? CommitSnapshot {
-                        profile = try ExactProfileKey(
-                            snapshot: commit,
-                            language: language,
-                            featureSelection: featureSelection,
-                            pathPrefix: profilePrefix
+                    let profile = try ExactProfileKey(
+                        snapshot: snapshot,
+                        language: language,
+                        featureSelection: featureSelection,
+                        pathPrefix: profilePrefix
+                    )
+                    if verifyProfileMatches {
+                        try validateProfile(
+                            profile,
+                            matches: analysisProfile,
+                            language: language
                         )
-                        if verifyProfileMatches {
-                            try validateProfile(
-                                profile,
-                                matches: analysisProfile,
-                                language: language
-                            )
-                        }
-                        // The window's own checkout follows the commit; the
-                        // previous session already closed (the close chain
-                        // ran before this prepare), so nothing reads it.
-                        let checkout = try checkoutStore.root(
-                            owner: checkoutOwner,
-                            source: root
-                        )
-                        try checkout.checkout(commit: commit.commitOID, links: links)
-                        borrowedFromWorkspace = !checkout.borrowedLinks.isEmpty
-                            || pythonPath != nil
-                        checkoutRoot = checkout.url
-                        providerRoot = profileRootURL(
-                            workspaceRoot: checkout.url,
-                            prefix: profilePrefix
-                        )
-                        versionIdentity = commit.commitOID.hex
-                    } else {
-                        profile = try ExactProfileKey(
-                            snapshot: snapshot,
-                            language: language,
-                            featureSelection: featureSelection,
-                            pathPrefix: profilePrefix
-                        )
-                        if verifyProfileMatches {
-                            try validateProfile(
-                                profile,
-                                matches: analysisProfile,
-                                language: language
-                            )
-                        }
-                        providerRoot = profileRootURL(
-                            workspaceRoot: root,
-                            prefix: profilePrefix
-                        )
-                        checkoutRoot = nil
-                        versionIdentity =
-                            "worktree:\(providerRoot.resolvingSymlinksInPath().path)"
                     }
+                    let providerSnapshot = ProfileSnapshot(
+                        snapshot,
+                        prefix: profilePrefix
+                    ) ?? snapshot
+                    func reuseKey(
+                        versionIdentity: String,
+                        toolVersion: String
+                    ) -> ExactOverlay.ReuseKey {
+                        ExactOverlay.ReuseKey(
+                            versionIdentity: versionIdentity,
+                            language: language,
+                            analysisProfileID: analysisProfile.id,
+                            configFingerprint: profile.configFingerprint,
+                            environmentFingerprint: profile.environmentFingerprint,
+                            featureSelection: profile.featureSelection,
+                            trustMode: trustMode,
+                            toolVersion: toolVersion
+                        )
+                    }
+                    let worktreeIdentity = "worktree:" + profileRootURL(
+                        workspaceRoot: root,
+                        prefix: profilePrefix
+                    ).resolvingSymlinksInPath().path
+                    let versionIdentity = commit?.commitOID.hex
+                        ?? worktreeIdentity
+
+                    // Decision 6. The slot's provider is reused, so its tool
+                    // version is the one the key compares.
+                    var warm: Active?
+                    if let candidate {
+                        let key = reuseKey(
+                            versionIdentity: versionIdentity,
+                            toolVersion: candidate.provider.toolVersion
+                        )
+                        if candidate.workspaceRoot == root,
+                           candidate.profilePrefix == profilePrefix,
+                           candidate.unitName == unitName,
+                           (candidate.checkoutRoot != nil) == (commit != nil),
+                           candidate.dependencies.pythonPath == pythonPath,
+                           candidate.key.allowsWarmSwitch(to: key)
+                        {
+                            warm = candidate
+                        } else {
+                            candidate.session.close()
+                        }
+                    }
+
+                    // The window's own checkout follows the commit; only a
+                    // session switched below, or none, reads it.
+                    let checkout = try commit.map { _ in
+                        try checkoutStore.root(owner: checkoutOwner, source: root)
+                    }
+                    let checkOut: () throws -> Void = {
+                        if let checkout, let commit {
+                            try checkout.checkout(commit: commit.commitOID, links: links)
+                        }
+                    }
+                    // Read after the checkout: links the commit's own
+                    // content displaces are not borrowed.
+                    func dependencies() -> DependencyContext {
+                        DependencyContext(
+                            pythonPath: pythonPath,
+                            borrowedFromWorkspace: checkout.map {
+                                !$0.borrowedLinks.isEmpty || pythonPath != nil
+                            } ?? false
+                        )
+                    }
+                    let providerRoot = profileRootURL(
+                        workspaceRoot: checkout?.url ?? root,
+                        prefix: profilePrefix
+                    )
+                    func active(
+                        provider: any ExactProvider,
+                        session: any ExactSession,
+                        key: ExactOverlay.ReuseKey,
+                        dependencies: DependencyContext
+                    ) -> Prepared {
+                        Prepared(dependencyRoots: dependencyRoots, active: Active(
+                            generation: generation,
+                            key: key,
+                            provider: provider,
+                            session: session,
+                            providerSnapshot: providerSnapshot,
+                            profile: profile,
+                            trustMode: trustMode,
+                            workspaceRoot: root,
+                            profilePrefix: profilePrefix,
+                            checkoutRoot: checkout?.url,
+                            slot: slot,
+                            snapshot: snapshot,
+                            unitName: unitName,
+                            dependencies: dependencies
+                        ))
+                    }
+
+                    if let warm {
+                        do {
+                            try warm.session.switchSnapshot(
+                                to: providerSnapshot,
+                                profile: profile,
+                                changes: ExactFileChange.changes(
+                                    from: warm.snapshot,
+                                    to: snapshot,
+                                    under: warm.serverDirectory
+                                ),
+                                configChanged: warm.profile.configFingerprint
+                                    != profile.configFingerprint,
+                                prepareFiles: checkOut
+                            )
+                            // The provider labels borrowed dependencies at
+                            // start; a commit that starts or stops
+                            // borrowing needs a new one.
+                            if dependencies() == warm.dependencies {
+                                return active(
+                                    provider: warm.provider,
+                                    session: warm.session,
+                                    key: reuseKey(
+                                        versionIdentity: versionIdentity,
+                                        toolVersion: warm.provider.toolVersion
+                                    ),
+                                    dependencies: warm.dependencies
+                                )
+                            }
+                            warm.session.close()
+                        } catch {
+                            // Checkout or confirmation failed: the session
+                            // is unavailable; a fresh one replaces it.
+                            warm.session.close()
+                        }
+                    }
+
+                    try checkOut()
                     let provider = try providerFactory(
                         providerRoot,
                         language,
-                        DependencyContext(
-                            pythonPath: pythonPath,
-                            borrowedFromWorkspace: borrowedFromWorkspace
-                        )
+                        dependencies()
                     )
                     guard provider.language == language else {
                         throw ExactError.unavailable(
@@ -706,62 +918,48 @@ public final class ExactCoordinator {
                                 + "analysis profile language \(String(describing: language))"
                         )
                     }
-                    let key = ExactOverlay.ReuseKey(
-                        versionIdentity: versionIdentity,
-                        language: language,
-                        analysisProfileID: analysisProfile.id,
-                        configFingerprint: profile.configFingerprint,
-                        environmentFingerprint: profile.environmentFingerprint,
-                        featureSelection: profile.featureSelection,
-                        trustMode: trustMode,
-                        toolVersion: provider.toolVersion
-                    )
-                    let providerSnapshot = ProfileSnapshot(
-                        snapshot,
-                        prefix: profilePrefix
-                    ) ?? snapshot
                     let session = try provider.prepare(
                         snapshot: providerSnapshot,
                         profile: profile,
                         trustMode: trustMode
                     )
-                    return Prepared(dependencyRoots: dependencyRoots, active: Active(
-                        generation: generation,
-                        key: key,
+                    return active(
                         provider: provider,
                         session: session,
-                        providerSnapshot: providerSnapshot,
-                        profile: profile,
-                        trustMode: trustMode,
-                        workspaceRoot: root,
-                        profilePrefix: profilePrefix,
-                        checkoutRoot: checkoutRoot
-                    ))
+                        key: reuseKey(
+                            versionIdentity: versionIdentity,
+                            toolVersion: provider.toolVersion
+                        ),
+                        dependencies: dependencies()
+                    )
                 }.value
-                guard self.epoch == currentEpoch,
-                      self.expectedGeneration == generation,
-                      !Task.isCancelled
-                else {
+                self.takenSessions = []
+                guard self.slotEpoch == takenEpoch else {
+                    // Every slot closed meanwhile (trust, close, clearing).
                     await Task.detached {
                         prepared.active.session.close()
                     }.value
                     return
                 }
-                self.active = prepared.active
-                self.dependencyRoots = prepared.dependencyRoots
-                self.observeEnvironment(from: prepared.active)
-                self.analysisEnvironment = prepared.active.session.attribution.environment
-                switch prepared.active.session.readiness {
-                case .unavailable(let reason):
-                    self.readiness = .unavailable(reason)
-                case .closed:
-                    self.readiness = .unavailable(localized("model.exact.closed"))
-                case .preparing, .ready:
-                    self.readiness = .ready
+                self.slots[slot] = prepared.active
+                guard self.epoch == currentEpoch,
+                      self.expectedGeneration == generation,
+                      !Task.isCancelled
+                else {
+                    // Superseded: the session waits in its slot for the
+                    // next prepare.
+                    self.park(slot)
+                    return
                 }
-            } catch is CancellationError {
-                return
+                self.activate(prepared.active)
+                self.dependencyRoots = prepared.dependencyRoots
             } catch {
+                self.takenSessions = []
+                if let candidate {
+                    let session = candidate.session
+                    Task.detached(priority: .utility) { session.close() }
+                }
+                if error is CancellationError { return }
                 guard self.epoch == currentEpoch,
                       self.expectedGeneration == generation
                 else { return }
@@ -773,6 +971,23 @@ public final class ExactCoordinator {
                 self.prepareTask = nil
                 self.prepareRoot = nil
             }
+        }
+    }
+
+    private func activate(_ next: Active) {
+        active = next
+        slots[next.slot] = next
+        standbySince[next.slot] = nil
+        for other in slots.keys where other != next.slot { park(other) }
+        observeEnvironment(from: next)
+        analysisEnvironment = next.session.attribution.environment
+        switch next.session.readiness {
+        case .unavailable(let reason):
+            readiness = .unavailable(reason)
+        case .closed:
+            readiness = .unavailable(localized("model.exact.closed"))
+        case .preparing, .ready:
+            readiness = .ready
         }
     }
 
@@ -828,17 +1043,29 @@ public final class ExactCoordinator {
     /// runs for `repositoryURL`. Safe to call for unrelated roots.
     public func stopWorkspaces(rootedAt repositoryURL: URL) async {
         let target = Self.canonicalRepositoryPath(repositoryURL)
-        let affectsActive = active.map {
+        let affectsSession = slots.values.contains {
             Self.canonicalRepositoryPath($0.workspaceRoot) == target
-        } ?? false
+        }
         let affectsPrepare = prepareRoot.map {
             Self.canonicalRepositoryPath($0) == target
         } ?? false
-        guard affectsActive || affectsPrepare else { return }
+        guard affectsSession || affectsPrepare else { return }
         let stoppedGeneration = expectedGeneration
         invalidate(generation: stoppedGeneration)
+        closeAllSessions()
         await closeTask?.value
         readiness = .off(localized("model.exact.revoked"))
+    }
+
+    /// Adds closing both slots to the close chain.
+    private func closeAllSessions() {
+        let sessions = takeAllSessions()
+        guard !sessions.isEmpty else { return }
+        let previousClose = closeTask
+        closeTask = Task.detached(priority: .utility) {
+            await previousClose?.value
+            for session in sessions { session.close() }
+        }
     }
 
     nonisolated private static func canonicalRepositoryPath(
@@ -853,6 +1080,7 @@ public final class ExactCoordinator {
     public func stopAllWorkForCacheClear() async {
         let stoppedGeneration = expectedGeneration
         invalidate(generation: stoppedGeneration)
+        closeAllSessions()
         await closeTask?.value
         let checkoutStore = checkoutStore
         let checkoutOwner = checkoutOwner
@@ -875,9 +1103,8 @@ public final class ExactCoordinator {
         prepareTask?.cancel()
         prepareTask = nil
         prepareRoot = nil
-        let oldSession = active?.session
+        let sessions = takeAllSessions()
         active = nil
-        oldSession?.cancel()
         readiness = .off(localized("model.exact.cacheCleared"))
         analysisEnvironment = nil
         trustMode = nil
@@ -886,9 +1113,7 @@ public final class ExactCoordinator {
         await previousClose?.value
         await previousPrepare?.value
         try await Task.detached(priority: .utility) {
-            if let oldSession {
-                oldSession.close()
-            }
+            for session in sessions { session.close() }
             try checkoutStore.release(owner: checkoutOwner)
             try checkoutStore.removeAll()
         }.value
@@ -1149,19 +1374,10 @@ public final class ExactCoordinator {
                 await Task.detached { newSession.close() }.value
                 return batch?.isCurrent == false ? .cancelled : nil
             }
-            let restarted = Active(
-                generation: previous.generation,
-                key: previous.key,
-                provider: previous.provider,
-                session: newSession,
-                providerSnapshot: previous.providerSnapshot,
-                profile: previous.profile,
-                trustMode: previous.trustMode,
-                workspaceRoot: previous.workspaceRoot,
-                profilePrefix: previous.profilePrefix,
-                checkoutRoot: previous.checkoutRoot
-            )
+            var restarted = previous
+            restarted.session = newSession
             active = restarted
+            slots[restarted.slot] = restarted
             observeEnvironment(from: restarted)
             analysisEnvironment = newSession.attribution.environment
             Task.detached { previous.session.close() }
@@ -1358,19 +1574,10 @@ public final class ExactCoordinator {
                 await Task.detached { newSession.close() }.value
                 return nil
             }
-            let restarted = Active(
-                generation: previous.generation,
-                key: previous.key,
-                provider: previous.provider,
-                session: newSession,
-                providerSnapshot: previous.providerSnapshot,
-                profile: previous.profile,
-                trustMode: previous.trustMode,
-                workspaceRoot: previous.workspaceRoot,
-                profilePrefix: previous.profilePrefix,
-                checkoutRoot: previous.checkoutRoot
-            )
+            var restarted = previous
+            restarted.session = newSession
             active = restarted
+            slots[restarted.slot] = restarted
             observeEnvironment(from: restarted)
             analysisEnvironment = newSession.attribution.environment
             Task.detached { previous.session.close() }
@@ -1723,6 +1930,16 @@ private func snapshotPath(for file: URL, under root: URL) -> String? {
           components.count > rootComponents.count
     else { return nil }
     return components.dropFirst(rootComponents.count).joined(separator: "/")
+}
+
+/// Resident memory of a process, for the standby limit; nil when unknown.
+private func residentBytes(of pid: Int32) -> UInt64? {
+    var info = proc_taskinfo()
+    let size = Int32(MemoryLayout<proc_taskinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else {
+        return nil
+    }
+    return info.pti_resident_size
 }
 
 private func makeSnapshot(root: URL, revision: String?) throws -> any Snapshot {
