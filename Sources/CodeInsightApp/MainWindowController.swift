@@ -4840,7 +4840,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // A borrowed dependency (workspace `node_modules`, venv) lies under
         // the project root but is no snapshot file: read it from disk.
         guard let file, projectPath(for: file) != nil,
-              !model.exactCoordinator.isDependencyFile(file)
+              !model.isDependencyFile(file)
         else { return nil }
         return model.documentSource
     }

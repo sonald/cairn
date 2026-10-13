@@ -609,6 +609,54 @@ func mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() async throw
 
 @MainActor
 @Test
+func aDependencyDeclarationUnderTheProjectRootSurvivesSaveAndRestore() async throws {
+    // A borrowed node_modules file lies under the root but is no snapshot
+    // file: it is saved by absolute path and read from disk on restore,
+    // whether or not the analysis has named its directory yet.
+    let root = try sessionRestoreProject([
+        "app.ts": "import { Tokenizer } from 'lib'\n",
+        "tsconfig.json": "{}",
+        "node_modules/lib/index.d.ts": "export declare class Tokenizer {}\n",
+    ])
+    let sessionURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightDependencyTab-\(UUID().uuidString)")
+        .appendingPathComponent("session.json")
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: sessionURL.deletingLastPathComponent())
+    }
+    let declaration = root.appendingPathComponent("node_modules/lib/index.d.ts")
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        languages: [.typescript],
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(path: "app.ts", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)),
+            .file(.init(path: declaration.path, anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)),
+        ]
+    )
+    let model = AppModel(sessionURL: sessionURL, indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.tabStrip.activeTab?.fileURL?.standardizedFileURL == declaration.standardizedFileURL)
+    #expect(model.isDependencyFile(declaration))
+    #expect(model.languageMode(for: declaration)?.language == .typescript)
+    #expect(!model.isDependencyFile(root.appendingPathComponent("app.ts")))
+
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    let saved = try #require(model.loadSessionSnapshot(forProject: root).snapshot)
+    let paths = saved.tabs.compactMap { tab -> String? in
+        guard case .file(let file) = tab else { return nil }
+        return file.path
+    }
+    #expect(paths == ["app.ts", declaration.standardizedFileURL.path])
+}
+
+@MainActor
+@Test
 func midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() async throws {
     let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
     // A large regular-tier dependency file keeps the restore loop busy in

@@ -340,6 +340,10 @@ public final class AppModel {
     public var highlightedNames = HighlightedNames()
     /// The open project's exclusion rules, from application data.
     public private(set) var pathRules = ProjectPathRules()
+    /// Dependency files under the project root that a restored session
+    /// reopened; the analysis that names its dependency directories may
+    /// still be preparing.
+    private var restoredDependencyFiles: Set<URL> = []
     /// The split reference pane beside the reader: a project file and the
     /// position being read there. Nil when the window shows one reader.
     public var referencePane: ReferencePaneState?
@@ -705,7 +709,9 @@ public final class AppModel {
             switch tab.content {
             case .file(let file):
                 let path: String
-                if let relative = Self.relativePath(of: file, under: root) {
+                if !isDependencyFile(file),
+                   let relative = Self.relativePath(of: file, under: root)
+                {
                     path = relative
                 } else if exactLocationIsInDependency(file.path) {
                     path = file.path
@@ -934,6 +940,7 @@ public final class AppModel {
         sessionRestoreWriteSuspension = nil
         endIndexRefresh()
         tabStrip.reset()
+        restoredDependencyFiles.removeAll()
         contextWindow.cancelExactUpgrade()
         await exactCoordinator.shutdownAndWait()
     }
@@ -948,7 +955,10 @@ public final class AppModel {
         let openGeneration = generation
         bookmarkModel.workspaceDidChange(to: openGeneration)
         exactCoordinator.invalidate(generation: openGeneration)
-        if projectRoot != root { projectSearch.clearSession() }
+        if projectRoot != root {
+            projectSearch.clearSession()
+            restoredDependencyFiles.removeAll()
+        }
         projectRoot = root
         projectLanguages = []
         pathRules = pathRulesStore?.load(forProject: root) ?? ProjectPathRules()
@@ -1138,6 +1148,7 @@ public final class AppModel {
                     file.pathComponents.starts(with: root.pathComponents)
                         && file.pathComponents.count > root.pathComponents.count
                 ) else { continue }
+                if dependency { restoredDependencyFiles.insert(file) }
                 if !dependency,
                    let selectionPath = fileTree?.selectionPath(for: file),
                    let node = selectionPath.last,
@@ -3144,11 +3155,19 @@ public final class AppModel {
             .joined(separator: "/")
     }
 
+    /// A file read from disk, not from the project snapshot, although it
+    /// may lie under the project root: a borrowed `node_modules` or venv
+    /// file the analysis names, or one a restored session reopened.
+    public func isDependencyFile(_ file: URL) -> Bool {
+        exactCoordinator.isDependencyFile(file)
+            || restoredDependencyFiles.contains(file.standardizedFileURL)
+    }
+
     package func languageMode(for file: URL) -> LanguageMode? {
         guard let root = projectRoot
         else { return nil }
         let file = file.standardizedFileURL
-        if !exactCoordinator.isDependencyFile(file),
+        if !isDependencyFile(file),
            let path = Self.relativePath(of: file, under: root)
         {
             let classified = LanguageMode.classify(
@@ -3187,7 +3206,7 @@ public final class AppModel {
         let isDependency: Bool
         if let root = fileTree?.root,
            let relative = Self.relativePath(of: file, under: root),
-           !exactCoordinator.isDependencyFile(file)
+           !isDependencyFile(file)
         {
             path = relative
             captured = capturedProjectSource(at: relative)
