@@ -294,8 +294,6 @@
 "panel.commit.current" = "Current version";
 "panel.commit.empty" = "No matching commits.";
 "panel.commit.loading" = "Loading history…";
-"panel.commit.materialized" = "Materialized";
-"panel.commit.materialized.note" = "Materialized: source already cached locally (limit %@)";
 "panel.commit.onDisk" = "Current files on disk";
 "panel.commit.search" = "Search commits";
 "panel.commit.tag" = "tag %@";
@@ -419,11 +417,11 @@
 "relation.split.hint" = "Drag the divider to resize the relation list and inspector";
 "relation.title" = "Relations";
 "settings.advanced" = "Advanced typography";
-"settings.cache.clear" = "Clear Materialized Cache";
-"settings.cache.cleared" = "Materialized cache cleared.";
-"settings.cache.confirm" = "Clear Materialized Cache?";
-"settings.cache.description" = "Historical Exact snapshots use a 2 GB cache.";
-"settings.cache.warning" = "Deletes all historical Exact snapshots. They will be rebuilt on demand.";
+"settings.cache.clear" = "Clear Checkout Directories";
+"settings.cache.cleared" = "Checkout directories cleared.";
+"settings.cache.confirm" = "Clear Checkout Directories?";
+"settings.cache.description" = "Exact analysis of a commit checks its source out into Cairn's own directory, one per window (%@ in use).";
+"settings.cache.warning" = "Stops Exact analysis in every window and deletes their checkout directories. They are checked out again on demand.";
 "settings.cancel" = "Cancel";
 "settings.clear" = "Clear";
 "settings.comments" = "Serif comment font";

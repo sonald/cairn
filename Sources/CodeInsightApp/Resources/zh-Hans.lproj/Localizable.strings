@@ -294,8 +294,6 @@
 "panel.commit.current" = "当前版本";
 "panel.commit.empty" = "没有匹配的提交。";
 "panel.commit.loading" = "正在加载历史…";
-"panel.commit.materialized" = "已物化";
-"panel.commit.materialized.note" = "已物化：源码已在本地缓存（上限 %@）";
 "panel.commit.onDisk" = "磁盘上的当前文件";
 "panel.commit.search" = "搜索提交";
 "panel.commit.tag" = "标签 %@";
@@ -419,11 +417,11 @@
 "relation.split.hint" = "拖动分隔线调整关系列表和检查器的大小";
 "relation.title" = "关系";
 "settings.advanced" = "高级排版";
-"settings.cache.clear" = "清除实体化缓存";
-"settings.cache.cleared" = "实体化缓存已清除。";
-"settings.cache.confirm" = "清除实体化缓存？";
-"settings.cache.description" = "历史精确分析快照使用 2 GB 缓存。";
-"settings.cache.warning" = "删除所有历史精确分析快照。需要时会重新构建。";
+"settings.cache.clear" = "清除检出目录";
+"settings.cache.cleared" = "检出目录已清除。";
+"settings.cache.confirm" = "清除检出目录？";
+"settings.cache.description" = "commit 的精确分析把源码检出到 Cairn 自有目录，每个窗口一份（占用 %@）。";
+"settings.cache.warning" = "停止所有窗口的精确分析并删除它们的检出目录。需要时会重新检出。";
 "settings.cancel" = "取消";
 "settings.clear" = "清除";
 "settings.comments" = "注释使用衬线字体";

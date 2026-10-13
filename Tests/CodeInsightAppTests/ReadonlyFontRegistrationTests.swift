@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import CoreText
@@ -46,7 +47,7 @@ struct ReadonlyFontRegistrationTests {
         let delegate = AppDelegate(startedAt: .now, model: model, recentProjectsStore: recent,
                                    windowSessionURL: root.appendingPathComponent("session.json"),
                                    sharedTrustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
-                                   sharedMaterializer: Materializer(rootURL: root.appendingPathComponent("cache")))
+                                   sharedCheckoutStore: CheckoutStore(parentURL: root.appendingPathComponent("cache")))
         var registeredA = false, registeredB = false
         defer {
             // Any unsuccessful cleanup is reported; process scope never survives exit.
@@ -141,7 +142,7 @@ struct ReadonlyFontRegistrationTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let delegate = AppDelegate(startedAt: .now, windowSessionURL: root.appendingPathComponent("session.json"),
                                    sharedTrustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
-                                   sharedMaterializer: Materializer(rootURL: root.appendingPathComponent("cache")))
+                                   sharedCheckoutStore: CheckoutStore(parentURL: root.appendingPathComponent("cache")))
         let before = ReaderFontResolver.shared.fontEnvironmentRevision
         // Controlled distributed-center routing only, NOT a simulated font-replacement PASS.
         DistributedNotificationCenter.default().postNotificationName(

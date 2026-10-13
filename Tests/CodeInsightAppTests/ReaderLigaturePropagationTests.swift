@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Testing
@@ -183,7 +184,7 @@ func appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettin
         startedAt: .now, model: model, recentProjectsStore: recent,
         windowSessionURL: root.appendingPathComponent("session.json"),
         sharedTrustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
-        sharedMaterializer: Materializer(rootURL: root.appendingPathComponent("cache"))
+        sharedCheckoutStore: CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     )
     let savedPreferences = ReaderSettings(defaults: .standard)
     delegate.selfTestLaunchOffscreen()

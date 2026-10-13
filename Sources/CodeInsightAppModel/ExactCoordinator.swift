@@ -9,7 +9,7 @@ public enum ExactOrigin: Equatable, Sendable {
     case materialized(commitOID: String)
 }
 
-/// ExactCoordinator maps locations inside the project/materialized root to
+/// ExactCoordinator maps locations inside the project/checkout root to
 /// relative paths before models see them. RustAnalyzerProvider leaves
 /// dependency locations absolute. Review every caller if that convention changes.
 public func exactLocationIsInDependency(_ file: String) -> Bool {
@@ -190,7 +190,7 @@ public final class ExactCoordinator {
         let trustMode: TrustMode
         let workspaceRoot: URL
         let profilePrefix: String
-        let materializedRoot: URL?
+        let checkoutRoot: URL?
     }
 
     private struct ProfileSnapshot: Snapshot {
@@ -254,7 +254,10 @@ public final class ExactCoordinator {
     /// The registry this coordinator consults; application-owned shared
     /// instance in production (§8.2).
     public let trustRegistry: TrustRegistry
-    @ObservationIgnored private let materializer: Materializer
+    @ObservationIgnored private let checkoutStore: CheckoutStore
+    /// The window identity under which this coordinator's checkout
+    /// directory lives; released when the coordinator shuts down.
+    @ObservationIgnored private let checkoutOwner = UUID()
     @ObservationIgnored private var overlay = ExactOverlay()
     private var active: Active?
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
@@ -279,7 +282,7 @@ public final class ExactCoordinator {
             )
         },
         trustRegistry: TrustRegistry = TrustRegistry(),
-        materializer: Materializer = Materializer()
+        checkoutStore: CheckoutStore = CheckoutStore()
     ) {
         self.providerFactory = providerFactory ?? { projectURL, language in
             switch language {
@@ -354,7 +357,7 @@ public final class ExactCoordinator {
         self.snapshotFactory = snapshotFactory
         self.sandboxAvailable = sandboxAvailable
         self.trustRegistry = trustRegistry
-        self.materializer = materializer
+        self.checkoutStore = checkoutStore
     }
 
     public convenience init(
@@ -368,7 +371,7 @@ public final class ExactCoordinator {
             )
         },
         trustRegistry: TrustRegistry = TrustRegistry(),
-        materializer: Materializer = Materializer()
+        checkoutStore: CheckoutStore = CheckoutStore()
     ) {
         let providerFactory: ProviderFactory
         providerFactory = { projectURL, language in
@@ -380,7 +383,7 @@ public final class ExactCoordinator {
             snapshotFactory: snapshotFactory,
             sandboxAvailable: sandboxAvailable,
             trustRegistry: trustRegistry,
-            materializer: materializer
+            checkoutStore: checkoutStore
         )
     }
 
@@ -390,8 +393,6 @@ public final class ExactCoordinator {
         let previousClose = closeTask
         let previousPrepare = prepareTask
         let oldSession = active?.session
-        let oldMaterialized = active?.materializedRoot
-        let materializer = materializer
         oldSession?.cancel()
         prepareTask?.cancel()
         prepareTask = nil
@@ -402,9 +403,6 @@ public final class ExactCoordinator {
                 await previousPrepare?.value
                 if let oldSession {
                     oldSession.close()
-                }
-                if let oldMaterialized {
-                    materializer.release(oldMaterialized)
                 }
             }
         } else {
@@ -425,25 +423,23 @@ public final class ExactCoordinator {
         prepareRoot = nil
         closeTask = nil
         let oldSession = active?.session
-        let oldMaterialized = active?.materializedRoot
-        let materializer = materializer
+        let checkoutStore = checkoutStore
+        let checkoutOwner = checkoutOwner
         active = nil
         oldSession?.cancel()
         // The active session closes synchronously (existing contract); the
         // cancelled prepare and the prior close chain finish in the
-        // background with a completion handle nobody loses (§7.1).
+        // background with a completion handle nobody loses (§7.1). The
+        // checkout directory is deleted only after both, so no language
+        // server still reads it.
         oldSession?.close()
         readiness = .off(localized("model.exact.terminating"))
         analysisEnvironment = nil
         trustMode = nil
-        if previousClose != nil || previousPrepare != nil || oldMaterialized != nil {
-            closeTask = Task.detached(priority: .utility) {
-                await previousClose?.value
-                await previousPrepare?.value
-                if let oldMaterialized {
-                    materializer.release(oldMaterialized)
-                }
-            }
+        closeTask = Task.detached(priority: .utility) {
+            await previousClose?.value
+            await previousPrepare?.value
+            try? checkoutStore.release(owner: checkoutOwner)
         }
     }
 
@@ -540,7 +536,7 @@ public final class ExactCoordinator {
             readiness = .off(localized("model.exact.revoking"))
             return
         }
-        guard !materializer.isUnderMaintenance else {
+        guard !checkoutStore.isUnderMaintenance else {
             invalidate(generation: generation)
             readiness = .off(localized("model.exact.maintenance"))
             return
@@ -555,7 +551,8 @@ public final class ExactCoordinator {
         let snapshotFactory = snapshotFactory
         let sandboxAvailable = sandboxAvailable
         let trustRegistry = trustRegistry
-        let materializer = materializer
+        let checkoutStore = checkoutStore
+        let checkoutOwner = checkoutOwner
         prepareRoot = root
 
         let priorClose = closeTask
@@ -581,17 +578,6 @@ public final class ExactCoordinator {
 
             do {
                 let prepared = try await Task.detached(priority: .utility) {
-                    // A prepare that fails, is cancelled, or becomes stale
-                    // must give its materialized directory back; only a
-                    // successfully returned Prepared keeps the reference
-                    // (its release then follows the session lifecycle).
-                    var retainedDirectory: URL?
-                    var installed = false
-                    defer {
-                        if let retainedDirectory, !installed {
-                            materializer.release(retainedDirectory)
-                        }
-                    }
                     let snapshot: any Snapshot = if let snapshotFactory {
                         try snapshotFactory(root, revision)
                     } else {
@@ -599,7 +585,7 @@ public final class ExactCoordinator {
                     }
                     let profile: ExactProfileKey
                     let providerRoot: URL
-                    let materializedRoot: URL?
+                    let checkoutRoot: URL?
                     let versionIdentity: String
                     if let commit = snapshot as? CommitSnapshot {
                         profile = try ExactProfileKey(
@@ -615,15 +601,17 @@ public final class ExactCoordinator {
                                 language: language
                             )
                         }
-                        let resolvedWorkspaceRoot = try materializer
-                            .materializeAndRetain(
-                                commit,
-                                configFingerprint: profile.configFingerprint
-                            ).url
-                        retainedDirectory = resolvedWorkspaceRoot
-                        materializedRoot = resolvedWorkspaceRoot
+                        // The window's own checkout follows the commit; the
+                        // previous session already closed (the close chain
+                        // ran before this prepare), so nothing reads it.
+                        let checkout = try checkoutStore.root(
+                            owner: checkoutOwner,
+                            source: root
+                        )
+                        try checkout.checkout(commit: commit.commitOID)
+                        checkoutRoot = checkout.url
                         providerRoot = profileRootURL(
-                            workspaceRoot: resolvedWorkspaceRoot,
+                            workspaceRoot: checkout.url,
                             prefix: profilePrefix
                         )
                         versionIdentity = commit.commitOID.hex
@@ -645,7 +633,7 @@ public final class ExactCoordinator {
                             workspaceRoot: root,
                             prefix: profilePrefix
                         )
-                        materializedRoot = nil
+                        checkoutRoot = nil
                         versionIdentity =
                             "worktree:\(providerRoot.resolvingSymlinksInPath().path)"
                     }
@@ -676,7 +664,6 @@ public final class ExactCoordinator {
                         profile: profile,
                         trustMode: trustMode
                     )
-                    installed = true
                     return Prepared(active: Active(
                         generation: generation,
                         key: key,
@@ -687,7 +674,7 @@ public final class ExactCoordinator {
                         trustMode: trustMode,
                         workspaceRoot: root,
                         profilePrefix: profilePrefix,
-                        materializedRoot: materializedRoot
+                        checkoutRoot: checkoutRoot
                     ))
                 }.value
                 guard self.epoch == currentEpoch,
@@ -696,9 +683,6 @@ public final class ExactCoordinator {
                 else {
                     await Task.detached {
                         prepared.active.session.close()
-                        if let materialized = prepared.active.materializedRoot {
-                            materializer.release(materialized)
-                        }
                     }.value
                     return
                 }
@@ -802,20 +786,27 @@ public final class ExactCoordinator {
     }
 
     /// Stops and awaits every prepare/session this coordinator runs,
-    /// regardless of project — used by the app-level cache clear (§8.4).
+    /// regardless of project, and deletes its checkout directory — used by
+    /// the app-level clear (§8.4).
     public func stopAllWorkForCacheClear() async {
         let stoppedGeneration = expectedGeneration
         invalidate(generation: stoppedGeneration)
         await closeTask?.value
+        let checkoutStore = checkoutStore
+        let checkoutOwner = checkoutOwner
+        await Task.detached(priority: .utility) {
+            try? checkoutStore.release(owner: checkoutOwner)
+        }.value
         readiness = .off(localized("model.exact.cacheCleared"))
     }
 
-    /// Lowercased commit OIDs whose source is already materialized.
-    public func materializedCommitOIDs() -> Set<String> {
-        materializer.materializedCommitOIDs()
-    }
+    /// Bytes the checkout directories occupy, for the settings page.
+    public var checkoutDirectorySize: UInt64 { checkoutStore.totalSize() }
 
-    public func clearMaterializedCache() async throws {
+    /// Single-coordinator clear: stops this coordinator's work, then deletes
+    /// every checkout directory. Refused while another coordinator still
+    /// holds one.
+    public func clearCheckouts() async throws {
         epoch &+= 1
         let previousClose = closeTask
         let previousPrepare = prepareTask
@@ -823,23 +814,21 @@ public final class ExactCoordinator {
         prepareTask = nil
         prepareRoot = nil
         let oldSession = active?.session
-        let oldMaterialized = active?.materializedRoot
         active = nil
         oldSession?.cancel()
         readiness = .off(localized("model.exact.cacheCleared"))
         analysisEnvironment = nil
         trustMode = nil
-        let materializer = materializer
+        let checkoutStore = checkoutStore
+        let checkoutOwner = checkoutOwner
         await previousClose?.value
         await previousPrepare?.value
         try await Task.detached(priority: .utility) {
             if let oldSession {
                 oldSession.close()
             }
-            if let oldMaterialized {
-                materializer.release(oldMaterialized)
-            }
-            try materializer.clear()
+            try checkoutStore.release(owner: checkoutOwner)
+            try checkoutStore.removeAll()
         }.value
     }
 
@@ -1098,7 +1087,7 @@ public final class ExactCoordinator {
                 trustMode: previous.trustMode,
                 workspaceRoot: previous.workspaceRoot,
                 profilePrefix: previous.profilePrefix,
-                materializedRoot: previous.materializedRoot
+                checkoutRoot: previous.checkoutRoot
             )
             active = restarted
             observeEnvironment(from: restarted)
@@ -1307,7 +1296,7 @@ public final class ExactCoordinator {
                 trustMode: previous.trustMode,
                 workspaceRoot: previous.workspaceRoot,
                 profilePrefix: previous.profilePrefix,
-                materializedRoot: previous.materializedRoot
+                checkoutRoot: previous.checkoutRoot
             )
             active = restarted
             observeEnvironment(from: restarted)
@@ -1367,7 +1356,7 @@ public final class ExactCoordinator {
             return ExactOverlay.Entry(
                 location: workspaceLocation,
                 attribution: source.session.attribution,
-                origin: source.materializedRoot != nil
+                origin: source.checkoutRoot != nil
                     ? .materialized(commitOID: source.key.versionIdentity)
                     : .worktree
             )
@@ -1407,7 +1396,7 @@ public final class ExactCoordinator {
             return ExactOverlay.Entry(
                 location: workspaceLocation,
                 attribution: source.session.attribution,
-                origin: source.materializedRoot != nil
+                origin: source.checkoutRoot != nil
                     ? .materialized(commitOID: source.key.versionIdentity)
                     : .worktree
             )
@@ -1427,7 +1416,7 @@ public final class ExactCoordinator {
         let environment = analysisEnvironment
             ?? source.session.attribution.environment
         analysisEnvironment = environment
-        let origin: ExactOrigin = source.materializedRoot != nil
+        let origin: ExactOrigin = source.checkoutRoot != nil
             ? .materialized(commitOID: source.key.versionIdentity)
             : .worktree
         let value: RelationQueryResult
@@ -1536,11 +1525,11 @@ public final class ExactCoordinator {
         if location.file.hasPrefix("/") {
             var mappedUnderWorkspace: String?
             let roots = [
-                source.materializedRoot,
+                source.checkoutRoot,
                 source.workspaceRoot,
             ].compactMap { $0 }
             for root in roots {
-                if let path = try? Materializer.snapshotPath(
+                if let path = snapshotPath(
                     for: URL(fileURLWithPath: location.file),
                     under: root
                 ) {
@@ -1646,6 +1635,17 @@ private func profileRootURL(
     return prefix.split(separator: "/").reduce(workspaceRoot) {
         $0.appendingPathComponent(String($1))
     }
+}
+
+/// The snapshot-relative path of a file under `root`, or nil when the file
+/// lies outside it.
+private func snapshotPath(for file: URL, under root: URL) -> String? {
+    let rootComponents = root.standardizedFileURL.pathComponents
+    let components = file.standardizedFileURL.pathComponents
+    guard components.starts(with: rootComponents),
+          components.count > rootComponents.count
+    else { return nil }
+    return components.dropFirst(rootComponents.count).joined(separator: "/")
 }
 
 private func makeSnapshot(root: URL, revision: String?) throws -> any Snapshot {

@@ -1,6 +1,5 @@
 import AppKit
 import CodeInsightAppModel
-import CodeInsightExact
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import CodeInsightGit
@@ -18,13 +17,6 @@ final class CommitPickerPopover: NSViewController,
     private let input = NSTextField()
     private let tableView = NSTableView()
     private let statusLabel = NSTextField(labelWithString: "")
-    /// Explains the materialized badge; shown only when a listed commit has one.
-    private let materializedNote = NSTextField(labelWithString: localizedFormat(
-        "panel.commit.materialized.note",
-        ByteCountFormatter.string(
-            fromByteCount: Int64(Materializer.defaultQuotaBytes), countStyle: .memory
-        )
-    ))
     private let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -61,7 +53,6 @@ final class CommitPickerPopover: NSViewController,
         view.appearance = cairnAppearance(for: theme.variant)
         view.layer?.backgroundColor = theme.chromeColor.cgColor
         statusLabel.textColor = theme.chromeSecondaryColor
-        materializedNote.textColor = theme.chromeSecondaryColor
         tableView.reloadData()
     }
 
@@ -94,12 +85,6 @@ final class CommitPickerPopover: NSViewController,
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.textColor = theme.chromeSecondaryColor
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        materializedNote.font = .systemFont(ofSize: 11)
-        materializedNote.textColor = theme.chromeSecondaryColor
-        materializedNote.alignment = .right
-        materializedNote.lineBreakMode = .byTruncatingHead
-        materializedNote.isHidden = true
-        materializedNote.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
         content.wantsLayer = true
@@ -107,7 +92,6 @@ final class CommitPickerPopover: NSViewController,
         content.addSubview(input)
         content.addSubview(scrollView)
         content.addSubview(statusLabel)
-        content.addSubview(materializedNote)
         NSLayoutConstraint.activate([
             input.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
             input.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
@@ -118,9 +102,7 @@ final class CommitPickerPopover: NSViewController,
             scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -6),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: materializedNote.leadingAnchor, constant: -12),
-            materializedNote.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            materializedNote.centerYAnchor.constraint(equalTo: statusLabel.centerYAnchor),
+            statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: content.trailingAnchor, constant: -14),
             statusLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
             statusLabel.heightAnchor.constraint(equalToConstant: 16),
         ])
@@ -261,11 +243,6 @@ final class CommitPickerPopover: NSViewController,
     }
 
     /// Badge texts on one commit's row, only when the row is actually shown.
-    var selfTestMaterializedNote: String? {
-        materializedNote.isHiddenOrHasHiddenAncestor || materializedNote.frame.width <= 0
-            ? nil : materializedNote.stringValue
-    }
-
     func selfTestVisibleBadges(forCommit fullSHA: String) -> [String] {
         guard let index = appModel.commitPicker.filteredCommits.firstIndex(where: { $0.fullSHA == fullSHA }),
               let cell = tableView.view(atColumn: 0, row: index + (allowsWorktree ? 1 : 0), makeIfNecessary: true),
@@ -284,15 +261,8 @@ final class CommitPickerPopover: NSViewController,
         onChoose(commit)
     }
 
-    /// Commits whose source is already on disk; refreshed on each render.
-    private var materializedCommits: Set<String> = []
-
     private func render() {
         guard isViewLoaded else { return }
-        materializedCommits = appModel.exactCoordinator.materializedCommitOIDs()
-        materializedNote.isHidden = !appModel.commitPicker.filteredCommits.contains {
-            materializedCommits.contains($0.fullSHA.lowercased())
-        }
         tableView.reloadData()
         let picker = appModel.commitPicker
         let row: Int
@@ -387,10 +357,7 @@ final class CommitPickerPopover: NSViewController,
         metadata.textColor = theme.chromeSecondaryColor
         metadata.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let materialized = materializedCommits.contains(commit.fullSHA.lowercased())
-            ? [badge(localized("panel.commit.materialized"), color: theme.inferredColor, fill: theme.slateSoftColor)]
-            : []
-        let badges = materialized + commit.branchNames.map {
+        let badges = commit.branchNames.map {
             badge("⎇ \($0)", color: theme.verifiedColor, fill: theme.mossSoftColor)
         } + commit.tagNames.map {
             badge(localizedFormat("panel.commit.tag", $0), color: theme.histColor, fill: theme.histSoftColor)

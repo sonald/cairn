@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -47,12 +48,12 @@ func appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory: Bool) asy
     try appServicesMakeGitProject(at: project)
     try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
     let registry = TrustRegistry(fileURL: root.appendingPathComponent("trust.json"))
-    let materializer = Materializer(rootURL: cache)
+    let store = CheckoutStore(parentURL: cache)
     let coordinator = ExactCoordinator(
         providerFactory: { _ in throw CocoaError(.featureUnsupported) },
         sandboxAvailable: { false },
         trustRegistry: registry,
-        materializer: materializer
+        checkoutStore: store
     )
     let model = AppModel(
         sessionURL: root.appendingPathComponent("session.json"),
@@ -62,7 +63,7 @@ func appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory: Bool) asy
         startedAt: .now,
         model: model,
         sharedTrustRegistry: registry,
-        sharedMaterializer: materializer
+        sharedCheckoutStore: store
     )
     let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
     delegate.registerProjectWindow(controller)
@@ -75,16 +76,17 @@ func appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory: Bool) asy
     let expected = ExactCoordinator.Readiness.off("Safe exact disabled: sandbox-exec unavailable")
     #expect(await appServicesEventually { coordinator.readiness == expected })
 
-    // A live reference outside these windows forces the real clear() failure.
-    if retainedDirectory { materializer.retain(cache) }
-    defer { if retainedDirectory { materializer.release(cache) } }
-    let outcome = await delegate.clearMaterializedCacheAppLevel()
+    // A checkout owned outside these windows forces the real removeAll() failure.
+    let outsider = UUID()
+    if retainedDirectory { _ = try store.root(owner: outsider, source: project) }
+    defer { if retainedDirectory { try? store.release(owner: outsider) } }
+    let outcome = await delegate.clearCheckoutsAppLevel()
     if retainedDirectory {
-        if case .failed = outcome {} else { Issue.record("clear must fail with a retained directory") }
+        if case .failed = outcome {} else { Issue.record("clear must fail with a live checkout directory") }
     } else {
         #expect(outcome == .cleared)
     }
-    #expect(!materializer.isUnderMaintenance)
+    #expect(!store.isUnderMaintenance)
     // This terminal state proves prepare ran again; simply clearing the
     // maintenance flag would leave readiness at off(cache maintenance).
     #expect(await appServicesEventually { coordinator.readiness == expected })
@@ -121,16 +123,16 @@ func appTrustGrantRefreshesExistingSettingsAndOtherWindows() async throws {
     let project = root.appendingPathComponent("project")
     try appServicesMakeGitProject(at: project)
     let registry = TrustRegistry(fileURL: root.appendingPathComponent("trust.json"))
-    let materializer = Materializer(rootURL: root.appendingPathComponent("cache"))
+    let store = CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     let delegate = AppDelegate(
-        startedAt: .now, sharedTrustRegistry: registry, sharedMaterializer: materializer
+        startedAt: .now, sharedTrustRegistry: registry, sharedCheckoutStore: store
     )
     let coordinators = (0..<2).map { _ in
         ExactCoordinator(
             providerFactory: { _ in throw CocoaError(.featureUnsupported) },
             sandboxAvailable: { false },
             trustRegistry: registry,
-            materializer: materializer
+            checkoutStore: store
         )
     }
     let models = coordinators.map { AppModel(exactCoordinator: $0) }
@@ -169,13 +171,13 @@ func productionFirstAndLaterWindowsShareBookmarksTrustAndCache() async throws {
         try? FileManager.default.removeItem(at: root)
     }
     let registry = TrustRegistry(fileURL: root.appendingPathComponent("trust.json"))
-    let materializer = Materializer(rootURL: root.appendingPathComponent("cache"))
+    let store = CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     let delegate = AppDelegate.production(
         startedAt: .now,
         sessionURL: root.appendingPathComponent("session.json"),
         recentProjectsStore: RecentProjectsStore(defaults: defaults),
         sharedTrustRegistry: registry,
-        sharedMaterializer: materializer
+        sharedCheckoutStore: store
     )
     delegate.selfTestLaunchOffscreen()
     #expect(NSApplication.shared.sendAction(NSSelectorFromString("newWindow:"), to: delegate, from: nil))
@@ -198,8 +200,8 @@ func productionFirstAndLaterWindowsShareBookmarksTrustAndCache() async throws {
     for controller in [first, second] {
         #expect(controller.model.exactCoordinator.trustRegistry === registry)
     }
-    materializer.beginMaintenance()
-    defer { materializer.endMaintenance() }
+    store.beginMaintenance()
+    defer { store.endMaintenance() }
     for controller in [first, second] {
         let coordinator = controller.model.exactCoordinator
         coordinator.prepare(projectURL: root, revision: nil, generation: 1)
@@ -226,7 +228,7 @@ func closedWindowIgnoresLateTrustSheetConfirmation() async throws {
         providerFactory: { _ in throw CocoaError(.featureUnsupported) },
         sandboxAvailable: { false },
         trustRegistry: registry,
-        materializer: Materializer(rootURL: root.appendingPathComponent("cache"))
+        checkoutStore: CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     )
     let recent = RecentProjectsStore(defaults: defaults)
     let model = AppModel(

@@ -1470,7 +1470,7 @@ extension AppDelegate {
             "realOfflineCoveragePassedOrSkipped": realOffline.passed,
             "historicalExactVisible": historical.exactVisible,
             "historicalInitialStatusSafe": historical.initialStatusSafe,
-            "providerRootIsMaterialized": historical.providerRootIsMaterialized,
+            "providerRootIsCheckout": historical.providerRootIsCheckout,
             "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
             "historicalProvenanceAttributed": historical.provenanceAttributed,
         ]
@@ -1650,7 +1650,7 @@ extension AppDelegate {
             },
             onClearCache: {
                 do {
-                    try await coordinator.clearMaterializedCache()
+                    try await coordinator.clearCheckouts()
                     return .cleared
                 } catch {
                     return .failed(error.localizedDescription)
@@ -1733,7 +1733,7 @@ extension AppDelegate {
     }
 
     private func runHistoricalExactVariant() -> (
-        providerRootIsMaterialized: Bool,
+        providerRootIsCheckout: Bool,
         uiPathIsRepoRelative: Bool,
         exactVisible: Bool,
         initialStatusSafe: Bool,
@@ -1779,8 +1779,8 @@ extension AppDelegate {
             isDirectory: true
         )
         defer { try? FileManager.default.removeItem(at: cache) }
-        let materializer = Materializer(
-            rootURL: cache.appendingPathComponent("materialized")
+        let checkoutStore = CheckoutStore(
+            parentURL: cache.appendingPathComponent("checkouts")
         )
         let providerState = ExactSelfTestProviderState()
         let coordinator = ExactCoordinator(
@@ -1796,7 +1796,7 @@ extension AppDelegate {
             trustRegistry: TrustRegistry(
                 fileURL: cache.appendingPathComponent("trust.json")
             ),
-            materializer: materializer
+            checkoutStore: checkoutStore
         )
         let historyModel = AppModel(
             indexService: ProjectIndexService(),
@@ -1848,8 +1848,8 @@ extension AppDelegate {
             controller.selfTestContextProvenance?.contains("Exact") == true
         })
         let providerRoot = providerState.root
-        let providerRootIsMaterialized = providerRoot?.path.contains(
-            "/materialized/\(snapshot.commitOID.hex)/"
+        let providerRootIsCheckout = providerRoot?.path.hasPrefix(
+            checkoutStore.parentURL.path
         ) == true
         let uiPath = historyModel.contextWindow.displayedCandidate?.path
         let uiPathIsRepoRelative = uiPath == "src/lib.rs"
@@ -1865,14 +1865,14 @@ extension AppDelegate {
             extra: [
                 "revision": snapshot.commitOID.hex,
                 "providerRoot": (providerRoot?.path as Any?) ?? NSNull(),
-                "providerRootIsMaterialized": providerRootIsMaterialized,
+                "providerRootIsCheckout": providerRootIsCheckout,
                 "uiPath": (uiPath as Any?) ?? NSNull(),
                 "uiPathIsRepoRelative": uiPathIsRepoRelative,
                 "provenanceAttributed": provenanceAttributed,
             ]
         )
         return (
-            providerRootIsMaterialized,
+            providerRootIsCheckout,
             uiPathIsRepoRelative,
             exactVisible,
             initialStatusSafe,

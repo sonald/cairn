@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// Shared single-instance services owned by the application, injected
     /// into every window's model (§8.2/§8.3).
     private let sharedTrustRegistry: TrustRegistry
-    private let sharedMaterializer: Materializer
+    private let sharedCheckoutStore: CheckoutStore
     // Launch Services open requests (§5.2): queued until launch finished;
     // processed strictly serially afterwards.
     private(set) var pendingOpenURLs: [URL] = []
@@ -93,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         windowSessionURL: URL? = nil,
         sharedTrustRegistry: TrustRegistry = TrustRegistry(),
-        sharedMaterializer: Materializer = Materializer()
+        sharedCheckoutStore: CheckoutStore = CheckoutStore()
     ) {
         self.startedAt = startedAt
         self.injectedModel = model
@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         self.recentProjectsStore = recentProjectsStore
         self.windowSessionURL = windowSessionURL
         self.sharedTrustRegistry = sharedTrustRegistry
-        self.sharedMaterializer = sharedMaterializer
+        self.sharedCheckoutStore = sharedCheckoutStore
         super.init()
         loadKeyBindingOverrides()
         NotificationCenter.default.addObserver(self,
@@ -137,14 +137,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         sessionURL: URL = AppModel.defaultSessionURL,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         sharedTrustRegistry: TrustRegistry = TrustRegistry(),
-        sharedMaterializer: Materializer = Materializer()
+        sharedCheckoutStore: CheckoutStore = CheckoutStore()
     ) -> AppDelegate {
         AppDelegate(
             startedAt: startedAt,
             recentProjectsStore: recentProjectsStore,
             windowSessionURL: sessionURL,
             sharedTrustRegistry: sharedTrustRegistry,
-            sharedMaterializer: sharedMaterializer
+            sharedCheckoutStore: sharedCheckoutStore
         )
     }
 
@@ -174,7 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             sharedBookmarkStore: sharedBookmarkStore,
             exactCoordinator: ExactCoordinator(
                 trustRegistry: sharedTrustRegistry,
-                materializer: sharedMaterializer
+                checkoutStore: sharedCheckoutStore
             )
         )
     }
@@ -186,6 +186,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        // No window owns a checkout yet, so every directory left by an
+        // earlier process is stale.
+        sharedCheckoutStore.removeUnowned()
         if wrapKeyMonitor == nil {
             wrapKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 let handled = MainActor.assumeIsolated {
@@ -949,7 +952,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     await self?.revokeRepositoryTrustAppLevel(repositoryURL)
                 },
                 onClearCache: { [weak self] in
-                    await self?.clearMaterializedCacheAppLevel() ?? .failed(localized("app.unavailable"))
+                    await self?.clearCheckoutsAppLevel() ?? .failed(localized("app.unavailable"))
+                },
+                checkoutSize: { [weak self] in
+                    self?.sharedCheckoutStore.totalSize() ?? 0
                 }
             ) { [weak self] settings in
                 guard let self else { return }
@@ -992,17 +998,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
     }
 
-    /// Application-level cache clear (§8.4): stops all projects' Exact
-    /// work, waits for their directories to be released, then deletes the
-    /// shared cache. Reader/index/tabs/sessions stay untouched.
-    func clearMaterializedCacheAppLevel() async -> MaterializedCacheClearOutcome {
+    /// Application-level checkout clear (§8.4): stops all projects' Exact
+    /// work, which deletes each window's checkout directory, then removes
+    /// the parent. Reader/index/tabs/sessions stay untouched.
+    func clearCheckoutsAppLevel() async -> CheckoutClearOutcome {
         // Maintenance mode spans the whole operation: every coordinator
-        // sharing this materializer refuses new prepares until the clear
-        // finished (successfully or not), so nothing can claim a directory
+        // sharing this store refuses new prepares until the clear finished
+        // (successfully or not), so nothing can create a directory
         // mid-deletion — including windows created while we wait (§8.4).
-        sharedMaterializer.beginMaintenance()
+        sharedCheckoutStore.beginMaintenance()
         defer {
-            sharedMaterializer.endMaintenance()
+            sharedCheckoutStore.endMaintenance()
             for controller in projectWindows {
                 controller.model.restartExactAnalysis()
             }
@@ -1012,7 +1018,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             for coordinator in coordinators {
                 await coordinator.stopAllWorkForCacheClear()
             }
-            try await sharedMaterializer.clear()
+            try sharedCheckoutStore.removeAll()
             return .cleared
         } catch {
             return .failed(

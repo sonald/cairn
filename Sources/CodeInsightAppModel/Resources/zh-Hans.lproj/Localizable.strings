@@ -102,7 +102,7 @@
 "model.context.unlimited" = "无已知限制";
 "model.context.unresolved" = "未解析";
 "model.context.virtual" = "虚调用";
-"model.exact.cacheCleared" = "已清除物化缓存";
+"model.exact.cacheCleared" = "已清除检出目录";
 "model.exact.closed" = "精确分析会话在准备时已关闭";
 "model.exact.maintenance" = "缓存维护中";
 "model.exact.noProject" = "没有项目";

@@ -1451,7 +1451,7 @@ func exactCoordinatorInvalidatesAnOlderSnapshotResult() async throws {
 
 @MainActor
 @Test
-func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
+func exactCoordinatorChecksOutCommitRootAndMapsResultPath() async throws {
     let root = try exactTemporaryProject([
         "src/lib.rs": "pub fn target() {}\n",
         "src/main.rs": "use exact_test::target;\nfn main() { target(); }\n",
@@ -1464,16 +1464,15 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
     try exactGit(root, "commit", "-q", "-m", "fixture")
     let snapshot = try CommitSnapshot(repositoryURL: root)
     let profile = try ExactProfileKey(snapshot: snapshot)
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache/materialized")
+    let store = CheckoutStore(
+        parentURL: root.appendingPathComponent("cache/checkouts")
     )
-    let expectedRoot = materializer.rootURL
-        .appendingPathComponent(snapshot.commitOID.hex)
-        .appendingPathComponent(profile.configFingerprint)
     let providerRoot = ExactVersionBox("")
+    // The provider answers with an absolute path inside the window's
+    // checkout directory, as a language server would.
     let state = ExactProviderState { _, _, _ in
         ExactLocation(
-            file: expectedRoot.appendingPathComponent("src/lib.rs").path,
+            file: store.liveDirectories()[0].appendingPathComponent("src/lib.rs").path,
             byteOffset: 4,
             line: 1,
             column: 5
@@ -1494,7 +1493,7 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
         trustRegistry: TrustRegistry(
             fileURL: root.appendingPathComponent("trust.json")
         ),
-        materializer: materializer
+        checkoutStore: store
     )
 
     try coordinator.prepare(
@@ -1515,10 +1514,11 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
         generation: 1
     )
 
-    #expect(providerRoot.value == expectedRoot.path)
-    #expect(providerRoot.value.contains(
-        "materialized/\(snapshot.commitOID.hex)/"
-    ))
+    let checkout = try #require(store.liveDirectories().first)
+    #expect(providerRoot.value == checkout.path)
+    #expect(checkout.path.hasPrefix(store.parentURL.path))
+    #expect(try Data(contentsOf: checkout.appendingPathComponent("src/lib.rs"))
+        == Data(snapshot.readBytes(path: "src/lib.rs")))
     #expect(exactCompletedEntry(result)?.location.file == "src/lib.rs")
     #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex
@@ -1527,7 +1527,7 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
 
 @MainActor
 @Test
-func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
+func exactCoordinatorChecksOutNoConfigPythonCommitAndMapsResultPath()
     async throws
 {
     let root = try exactTemporaryPythonProject([
@@ -1544,16 +1544,13 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
         snapshot: snapshot,
         language: .python
     )
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache/materialized")
+    let store = CheckoutStore(
+        parentURL: root.appendingPathComponent("cache/checkouts")
     )
-    let expectedRoot = materializer.rootURL
-        .appendingPathComponent(snapshot.commitOID.hex)
-        .appendingPathComponent(profile.configFingerprint)
     let providerRoot = ExactVersionBox("")
     let state = ExactProviderState { _, _, _ in
         ExactLocation(
-            file: expectedRoot.appendingPathComponent("main.py").path,
+            file: store.liveDirectories()[0].appendingPathComponent("main.py").path,
             byteOffset: 4,
             line: 1,
             column: 5
@@ -1568,7 +1565,7 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
         trustRegistry: TrustRegistry(
             fileURL: root.appendingPathComponent("trust.json")
         ),
-        materializer: materializer
+        checkoutStore: store
     )
 
     try coordinator.prepare(
@@ -1591,7 +1588,7 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
         generation: 1
     )
 
-    #expect(providerRoot.value == expectedRoot.path)
+    #expect(providerRoot.value == store.liveDirectories().first?.path)
     #expect(exactCompletedEntry(result)?.location.file == "main.py")
     #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex
@@ -1600,7 +1597,7 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
 
 @MainActor
 @Test
-func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throws {
+func exactCoordinatorChecksOutTypeScriptCommitAndMapsResultPath() async throws {
     let root = try exactTemporaryTypeScriptProject([
         "tools/ts/tsconfig.json": "{ \"compilerOptions\": {} }\n",
         "tools/ts/package.json": "{}\n",
@@ -1620,20 +1617,19 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
         language: .typescript,
         pathPrefix: profilePrefix
     )
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache/materialized")
+    let store = CheckoutStore(
+        parentURL: root.appendingPathComponent("cache/checkouts")
     )
-    let expectedRoot = materializer.rootURL
-        .appendingPathComponent(snapshot.commitOID.hex)
-        .appendingPathComponent(profile.configFingerprint)
-    let expectedProviderRoot = expectedRoot.appendingPathComponent(
-        profilePrefix,
-        isDirectory: true
-    )
+    @Sendable func expectedProviderRoot() -> URL? {
+        store.liveDirectories().first?.appendingPathComponent(
+            profilePrefix,
+            isDirectory: true
+        )
+    }
     let providerRoot = ExactVersionBox("")
     let state = ExactProviderState { _, _, _ in
         ExactLocation(
-            file: expectedProviderRoot.appendingPathComponent("src/lib.ts").path,
+            file: expectedProviderRoot()!.appendingPathComponent("src/lib.ts").path,
             byteOffset: 4,
             line: 1,
             column: 5
@@ -1654,7 +1650,7 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
         trustRegistry: TrustRegistry(
             fileURL: root.appendingPathComponent("trust.json")
         ),
-        materializer: materializer
+        checkoutStore: store
     )
 
     try coordinator.prepare(
@@ -1678,7 +1674,7 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
         generation: 1
     )
 
-    #expect(providerRoot.value == expectedProviderRoot.path)
+    #expect(providerRoot.value == expectedProviderRoot()?.path)
     #expect(exactCompletedEntry(result)?.location.file == "tools/ts/src/lib.ts")
     #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex

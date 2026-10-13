@@ -3,6 +3,7 @@ import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -77,8 +78,8 @@ private func lifecycleAppDelegate(
         sharedTrustRegistry: TrustRegistry(
             fileURL: storageRoot.appendingPathComponent("trust.json")
         ),
-        sharedMaterializer: Materializer(
-            rootURL: storageRoot.appendingPathComponent("materialized")
+        sharedCheckoutStore: CheckoutStore(
+            parentURL: storageRoot.appendingPathComponent("checkouts")
         )
     )
 }

@@ -102,7 +102,7 @@
 "model.context.unlimited" = "no known limitations";
 "model.context.unresolved" = "Unresolved";
 "model.context.virtual" = "virtual";
-"model.exact.cacheCleared" = "materialized cache cleared";
+"model.exact.cacheCleared" = "checkout directories cleared";
 "model.exact.closed" = "exact session closed during prepare";
 "model.exact.maintenance" = "cache maintenance";
 "model.exact.noProject" = "no project";

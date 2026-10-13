@@ -35,8 +35,8 @@ final class TrustListModel {
     .deletingLastPathComponent()
     .appendingPathComponent("Themes", isDirectory: true)
 
-/// Result of the app-level materialized-cache clear (§8.4).
-enum MaterializedCacheClearOutcome: Equatable {
+/// Result of the app-level checkout directory clear (§8.4).
+enum CheckoutClearOutcome: Equatable {
     case cleared
     case failed(String)
 
@@ -55,7 +55,8 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
     private let trustModel: TrustListModel
     let keyBindingsModel: KeyBindingSettingsModel
     private let onRevoke: @MainActor (URL) async -> Void
-    private let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
+    private let onClearCache: @MainActor () async -> CheckoutClearOutcome
+    private let checkoutSize: @MainActor () -> UInt64
     private let onChange: @MainActor (ReaderSettings) -> Void
     private(set) var currentSettings: ReaderSettings
     fileprivate var previewActive = true
@@ -67,7 +68,8 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         trustModel: TrustListModel,
         keyBindingsModel: KeyBindingSettingsModel? = nil,
         onRevoke: @escaping @MainActor (URL) async -> Void,
-        onClearCache: @escaping @MainActor () async -> MaterializedCacheClearOutcome,
+        onClearCache: @escaping @MainActor () async -> CheckoutClearOutcome,
+        checkoutSize: @escaping @MainActor () -> UInt64 = { 0 },
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
         currentSettings = settings
@@ -78,6 +80,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         self.keyBindingsModel = bindingsModel
         self.onRevoke = onRevoke
         self.onClearCache = onClearCache
+        self.checkoutSize = checkoutSize
         self.onChange = onChange
         hostingController = NSHostingController(
             rootView: SettingsView(
@@ -87,6 +90,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
                 keyBindingsModel: bindingsModel,
                 onRevoke: onRevoke,
                 onClearCache: onClearCache,
+                checkoutSize: checkoutSize,
                 onChange: onChange
             )
         )
@@ -119,12 +123,13 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
             },
             onClearCache: {
                 do {
-                    try await exactCoordinator.clearMaterializedCache()
+                    try await exactCoordinator.clearCheckouts()
                     return .cleared
                 } catch {
                     return .failed(error.localizedDescription)
                 }
             },
+            checkoutSize: { exactCoordinator.checkoutDirectorySize },
             onChange: onChange
         )
     }
@@ -180,6 +185,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
             keyBindingsModel: keyBindingsModel,
             onRevoke: onRevoke,
             onClearCache: onClearCache,
+            checkoutSize: checkoutSize,
             onChange: onChange
         )
     }
@@ -286,10 +292,20 @@ private struct SettingsView: View {
     let trustModel: TrustListModel
     @Bindable var keyBindingsModel: KeyBindingSettingsModel
     let onRevoke: @MainActor (URL) async -> Void
-    let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
+    let onClearCache: @MainActor () async -> CheckoutClearOutcome
+    let checkoutSize: @MainActor () -> UInt64
     let onChange: @MainActor (ReaderSettings) -> Void
     @State private var cacheMessage: String? = nil
     @State private var confirmsCacheClear = false
+
+    /// The checkout directories' size, measured when the tab appears and
+    /// after a clear; a clear message replaces it until then.
+    private var cacheDescription: String {
+        cacheMessage ?? localizedFormat(
+            "settings.cache.description",
+            ByteCountFormatter.string(fromByteCount: Int64(checkoutSize()), countStyle: .file)
+        )
+    }
 
     var body: some View {
         TabView(selection: $keyBindingsModel.selectedTab) {
@@ -303,7 +319,7 @@ private struct SettingsView: View {
                 )
                 Divider()
                 HStack {
-                    Text(cacheMessage ?? localized("settings.cache.description"))
+                    Text(cacheDescription)
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button(localized("settings.cache.clear")) {

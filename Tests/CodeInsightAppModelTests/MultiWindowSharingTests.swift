@@ -175,101 +175,6 @@ func sharedBookmarkStoreRetainsDirtyTableForRetryAcrossWindows() throws {
     )
 }
 
-/// W13: two references to one materialized directory; one release keeps
-/// the other's protection, and clear() refuses while referenced.
-@Test
-func materializerReferenceCountProtectsSharedDirectory() throws {
-    let root = try multiWindowGitFixture(files: [
-        "src/lib.rs": "pub fn target() {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let cacheRoot = root.appendingPathComponent("cache")
-    let materializer = Materializer(rootURL: cacheRoot)
-    let snapshot = try CommitSnapshot(repositoryURL: root)
-    let profile = try ExactProfileKey(snapshot: snapshot)
-
-    // Two windows prepare the same revision: two references.
-    let first = try materializer.materializeAndRetain(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    )
-    let second = try materializer.materializeAndRetain(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    )
-    #expect(first.url == second.url)
-    #expect(materializer.referenceCount(for: first.url) == 2)
-
-    // Clearing while referenced is refused and the directory survives.
-    #expect(throws: (any Error).self) {
-        try materializer.clear()
-    }
-    #expect(FileManager.default.fileExists(atPath: first.url.path))
-
-    // One window closes: the other's reference still protects the data.
-    materializer.release(first.url)
-    #expect(materializer.referenceCount(for: first.url) == 1)
-    #expect(throws: (any Error).self) {
-        try materializer.clear()
-    }
-    #expect(FileManager.default.fileExists(atPath: first.url.path))
-
-    // The last release makes clearing possible.
-    materializer.release(second.url)
-    #expect(materializer.retainedDirectoryCount == 0)
-    try materializer.clear()
-    #expect(!FileManager.default.fileExists(atPath: cacheRoot.path))
-
-    // Releases are idempotent.
-    materializer.release(first.url)
-    #expect(materializer.retainedDirectoryCount == 0)
-}
-
-/// W14: quota eviction only reclaims directories with zero references; a
-/// released directory becomes collectable again.
-@Test
-func materializerQuotaEvictsOnlyUnreferencedDirectories() throws {
-    let root = try multiWindowGitFixture(files: [
-        "src/lib.rs": "pub fn one() {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache"),
-        quotaBytes: 1
-    )
-    let firstSnapshot = try CommitSnapshot(repositoryURL: root)
-    let firstProfile = try ExactProfileKey(snapshot: firstSnapshot)
-    let first = try materializer.materializeAndRetain(
-        firstSnapshot,
-        configFingerprint: firstProfile.configFingerprint
-    )
-
-    // A second revision materializes under a tiny quota. The referenced
-    // first directory survives even though the total stays over quota.
-    try multiWindowGit(root, "commit", "-q", "--allow-empty", "-m", "second")
-    let secondSnapshot = try CommitSnapshot(repositoryURL: root)
-    let secondProfile = try ExactProfileKey(snapshot: secondSnapshot)
-    let second = try materializer.materializeAndRetain(
-        secondSnapshot,
-        configFingerprint: secondProfile.configFingerprint
-    )
-    #expect(second.url != first.url)
-    #expect(FileManager.default.fileExists(atPath: first.url.path))
-    #expect(FileManager.default.fileExists(atPath: second.url.path))
-
-    // Releasing the old reference lets the next materialization reclaim it.
-    materializer.release(first.url)
-    try multiWindowGit(root, "commit", "-q", "--allow-empty", "-m", "third")
-    let thirdSnapshot = try CommitSnapshot(repositoryURL: root)
-    let thirdProfile = try ExactProfileKey(snapshot: thirdSnapshot)
-    _ = try materializer.materialize(
-        thirdSnapshot,
-        configFingerprint: thirdProfile.configFingerprint
-    )
-    #expect(!FileManager.default.fileExists(atPath: first.url.path))
-    #expect(FileManager.default.fileExists(atPath: second.url.path))
-}
-
 /// W12: one TrustRegistry shared by two coordinators — grants and revokes
 /// are visible to both windows' coordinators.
 @MainActor
@@ -347,18 +252,18 @@ func appModelCloseProjectResetsStateAndStopsExact() async throws {
     await model.closeProject()
 }
 
-/// §7.1/§8.3: shutdownAndWait waits for the closed session and releases
-/// the materialized directory reference.
+/// §7.1/§8.3: shutdownAndWait waits for the closed session and then
+/// deletes the window's checkout directory.
 @MainActor
 @Test
-func coordinatorShutdownAndWaitReleasesMaterializedDirectory() async throws {
+func coordinatorShutdownAndWaitDeletesItsCheckoutDirectory() async throws {
     let root = try multiWindowGitFixture(files: [
         "src/lib.rs": "pub fn target() {}\n",
         "src/main.rs": "fn main() {}\n",
     ])
     defer { try? FileManager.default.removeItem(at: root) }
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache")
+    let store = CheckoutStore(
+        parentURL: root.appendingPathComponent("cache")
     )
     let providerState = ExactProviderState()
     let coordinator = ExactCoordinator(
@@ -373,7 +278,7 @@ func coordinatorShutdownAndWaitReleasesMaterializedDirectory() async throws {
         trustRegistry: TrustRegistry(
             fileURL: root.appendingPathComponent("trust.json")
         ),
-        materializer: materializer
+        checkoutStore: store
     )
 
     try coordinator.prepare(
@@ -383,28 +288,16 @@ func coordinatorShutdownAndWaitReleasesMaterializedDirectory() async throws {
         generation: 1
     )
     #expect(await testWaitUntil("ready") { coordinator.readiness == .ready })
-    #expect(materializer.retainedDirectoryCount == 1)
+    #expect(store.liveDirectoryCount == 1)
+    let directory = try #require(store.liveDirectories().first)
+    #expect(FileManager.default.fileExists(
+        atPath: directory.appendingPathComponent("src/lib.rs").path
+    ))
 
     await coordinator.shutdownAndWait()
 
-    #expect(materializer.retainedDirectoryCount == 0)
-    #expect(
-        materializer.referenceCount(
-            for: materializer.rootURL
-        ) == 0
-    )
-    // The materialized data itself is untouched — only the reference went.
-    let foundMaterialized = await Task.detached {
-        () -> Bool in
-        guard let enumerator = FileManager.default.enumerator(
-            at: materializer.rootURL,
-            includingPropertiesForKeys: nil
-        ) else { return false }
-        return (enumerator.allObjects as? [URL])?.contains {
-            $0.lastPathComponent == ".complete"
-        } ?? false
-    }.value
-    #expect(foundMaterialized)
+    #expect(store.liveDirectoryCount == 0)
+    #expect(!FileManager.default.fileExists(atPath: directory.path))
 }
 
 /// Review F4: prepares for a project under trust revocation are refused
@@ -455,73 +348,15 @@ func suspendedPrepareIsRefusedUntilTheSuspensionLifts() async throws {
     #expect(!coordinator.prepareIsSuspended(for: fixture.root))
 }
 
-/// Review F7: a quota-enforcement failure after the reference was taken
-/// rolls the reference back, so the cache stays clearable.
-@Test
-func materializerQuotaFailureRollsBackTheNewReference() throws {
-    let root = try multiWindowGitFixture(files: [
-        "src/lib.rs": "pub fn one() {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let materializer = Materializer(
-        rootURL: root.appendingPathComponent("cache"),
-        quotaBytes: 1
-    )
-    // An old, unreadable entry makes quota scanning throw EACCES.
-    let oldCommit = try CommitSnapshot(repositoryURL: root)
-    let oldProfile = try ExactProfileKey(snapshot: oldCommit)
-    _ = try materializer.materialize(
-        oldCommit,
-        configFingerprint: oldProfile.configFingerprint
-    )
-    let unreadable = materializer.rootURL
-        .appendingPathComponent(oldCommit.commitOID.hex)
-    try FileManager.default.setAttributes(
-        [.posixPermissions: 0o000],
-        ofItemAtPath: unreadable.path
-    )
-    defer {
-        try? FileManager.default.setAttributes(
-            [.posixPermissions: 0o755],
-            ofItemAtPath: unreadable.path
-        )
-    }
-
-    // A second revision triggers quota enforcement, which now throws.
-    try multiWindowGit(root, "commit", "-q", "--allow-empty", "-m", "second")
-    let secondSnapshot = try CommitSnapshot(repositoryURL: root)
-    let secondProfile = try ExactProfileKey(snapshot: secondSnapshot)
-    #expect(throws: (any Error).self) {
-        _ = try materializer.materializeAndRetain(
-            secondSnapshot,
-            configFingerprint: secondProfile.configFingerprint
-        )
-    }
-    #expect(
-        materializer.retainedDirectoryCount == 0,
-        "the failed materialization must roll its reference back"
-    )
-
-    // After permissions recover, the cache is clearable again.
-    try FileManager.default.setAttributes(
-        [.posixPermissions: 0o755],
-        ofItemAtPath: unreadable.path
-    )
-    try materializer.clear()
-    #expect(!FileManager.default.fileExists(
-        atPath: materializer.rootURL.path
-    ))
-}
-
 /// Review F8: maintenance mode halts prepares on every coordinator
-/// sharing the materializer and lifts afterwards.
+/// sharing the checkout store and lifts afterwards.
 @MainActor
 @Test
 func cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() async throws {
     let fixture = try MultiWindowAppFixture()
     defer { fixture.remove() }
     let sharedCacheRoot = fixture.root.appendingPathComponent("shared-cache")
-    let materializer = Materializer(rootURL: sharedCacheRoot)
+    let store = CheckoutStore(parentURL: sharedCacheRoot)
     let state = ExactProviderState()
     func makeCoordinator() -> ExactCoordinator {
         ExactCoordinator(
@@ -533,7 +368,7 @@ func cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() async throws {
             trustRegistry: TrustRegistry(
                 fileURL: fixture.root.appendingPathComponent("trust3.json")
             ),
-            materializer: materializer
+            checkoutStore: store
         )
     }
     let windowA = makeCoordinator()
@@ -543,8 +378,8 @@ func cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() async throws {
         windowB.shutdown()
     }
 
-    materializer.beginMaintenance()
-    #expect(materializer.isUnderMaintenance)
+    store.beginMaintenance()
+    #expect(store.isUnderMaintenance)
     for (index, coordinator) in [windowA, windowB].enumerated() {
         try coordinator.prepare(
             projectURL: fixture.root,
@@ -556,8 +391,8 @@ func cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() async throws {
     #expect(windowB.readiness == .off("cache maintenance"))
     #expect(state.prepareCount == 0, "no provider may start during maintenance")
 
-    materializer.endMaintenance()
-    #expect(!materializer.isUnderMaintenance)
+    store.endMaintenance()
+    #expect(!store.isUnderMaintenance)
     try windowA.prepare(projectURL: fixture.root, revision: nil, generation: 3)
     #expect(await testWaitUntil("ready") { windowA.readiness == .ready })
     #expect(state.prepareCount == 1)
@@ -639,18 +474,18 @@ func shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() async throws {
     let prepareGate = MultiWindowProviderGate()
     let closeGate = MultiWindowProviderGate()
     defer { prepareGate.release(); closeGate.release() }
-    let materializer = Materializer(rootURL: root.appendingPathComponent("cache"))
+    let store = CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     let coordinator = ExactCoordinator(
         providerFactory: { _ in
             MultiWindowGatedProvider(state: state, prepareGate: prepareGate, closeGate: closeGate)
         },
         sandboxAvailable: { true },
         trustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
-        materializer: materializer
+        checkoutStore: store
     )
     coordinator.prepare(projectURL: root, revision: "HEAD", generation: 1)
     try #require(await testWaitUntil("provider prepare entered") { prepareGate.entered })
-    #expect(materializer.retainedDirectoryCount == 1)
+    #expect(store.liveDirectoryCount == 1)
     var shutdownFinished = false
     let shutdown = Task {
         await coordinator.shutdownAndWait()
@@ -663,18 +498,18 @@ func shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() async throws {
     prepareGate.release()
     try #require(await testWaitUntil("late session close entered") { closeGate.entered })
     #expect(!shutdownFinished, "shutdown must await the late session close")
-    #expect(materializer.retainedDirectoryCount == 1)
+    #expect(store.liveDirectoryCount == 1)
     #expect(state.closedSessions.isEmpty)
     closeGate.release()
     try #require(await testWaitUntil("shutdown finished") { shutdownFinished })
     await shutdown.value
     #expect(state.closedSessions == [1])
-    #expect(materializer.retainedDirectoryCount == 0)
+    #expect(store.liveDirectoryCount == 0)
     #expect(coordinator.readiness == .off("application terminating"))
-    try materializer.clear()
+    try store.removeAll()
 }
 
-/// W15 coordinator/cache contract: both windows have retained the same
+/// W15 coordinator/cache contract: both windows hold a checkout of the same
 /// commit; maintenance blocks prepares while close is held, then clear and
 /// subsequent prepares succeed. The AppDelegate entry is exercised by UI.
 @MainActor
@@ -682,7 +517,7 @@ func shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() async throws {
 func sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() async throws {
     let root = try multiWindowGitFixture(files: ["src/lib.rs": "pub fn target() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
-    let materializer = Materializer(rootURL: root.appendingPathComponent("cache"))
+    let store = CheckoutStore(parentURL: root.appendingPathComponent("cache"))
     let states = [ExactProviderState(), ExactProviderState()]
     let gates = [MultiWindowProviderGate(), MultiWindowProviderGate()]
     defer { gates.forEach { $0.release() } }
@@ -691,7 +526,7 @@ func sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() asy
             providerFactory: { _ in MultiWindowGatedProvider(state: state, closeGate: gate) },
             sandboxAvailable: { true },
             trustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json")),
-            materializer: materializer
+            checkoutStore: store
         )
     }
     for coordinator in coordinators {
@@ -700,12 +535,9 @@ func sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() asy
     try #require(await testWaitUntil("both providers ready") {
         coordinators.allSatisfy { $0.readiness == .ready }
     })
-    let snapshot = try CommitSnapshot(repositoryURL: root)
-    let profile = try ExactProfileKey(snapshot: snapshot)
-    let directory = try materializer.materialize(snapshot, configFingerprint: profile.configFingerprint).url
-    #expect(materializer.referenceCount(for: directory) == 2)
-    materializer.beginMaintenance()
-    defer { materializer.endMaintenance() }
+    #expect(store.liveDirectoryCount == 2)
+    store.beginMaintenance()
+    defer { store.endMaintenance() }
     var stopped = [false, false]
     let stopTasks = coordinators.enumerated().map { index, coordinator in
         Task {
@@ -722,19 +554,19 @@ func sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() asy
     }
     #expect(states.allSatisfy { $0.prepareCount == 1 })
     #expect(stopped == [false, false])
-    #expect(throws: (any Error).self) { try materializer.clear() }
+    #expect(throws: (any Error).self) { try store.removeAll() }
     gates[0].release()
     try #require(await testWaitUntil("first provider stopped") { stopped[0] })
     #expect(!stopped[1])
-    #expect(materializer.referenceCount(for: directory) == 1)
-    #expect(throws: (any Error).self) { try materializer.clear() }
+    #expect(store.liveDirectoryCount == 1)
+    #expect(throws: (any Error).self) { try store.removeAll() }
     gates[1].release()
     try #require(await testWaitUntil("both providers stopped") { stopped.allSatisfy { $0 } })
     for task in stopTasks { await task.value }
-    #expect(materializer.retainedDirectoryCount == 0)
-    try await coordinators[0].clearMaterializedCache()
-    #expect(!FileManager.default.fileExists(atPath: materializer.rootURL.path))
-    materializer.endMaintenance()
+    #expect(store.liveDirectoryCount == 0)
+    try await coordinators[0].clearCheckouts()
+    #expect(!FileManager.default.fileExists(atPath: store.parentURL.path))
+    store.endMaintenance()
     for coordinator in coordinators {
         coordinator.prepare(projectURL: root, revision: "HEAD", generation: 3)
     }
@@ -742,9 +574,9 @@ func sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() asy
         coordinators.allSatisfy { $0.readiness == .ready }
     })
     #expect(states.allSatisfy { $0.prepareCount == 2 })
-    #expect(materializer.referenceCount(for: directory) == 2)
+    #expect(store.liveDirectoryCount == 2)
     for coordinator in coordinators { await coordinator.shutdownAndWait() }
-    #expect(materializer.retainedDirectoryCount == 0)
+    #expect(store.liveDirectoryCount == 0)
 }
 
 // Synchronous provider calls need a condition rather than an actor gate.
