@@ -298,8 +298,8 @@ private struct SettingsView: View {
     @State private var cacheMessage: String? = nil
     @State private var confirmsCacheClear = false
 
-    /// The checkout directories' size, measured when the tab appears and
-    /// after a clear; a clear message replaces it until then.
+    /// The checkout directories' current size; a clear's outcome message
+    /// replaces it until the window is rebuilt.
     private var cacheDescription: String {
         cacheMessage ?? localizedFormat(
             "settings.cache.description",

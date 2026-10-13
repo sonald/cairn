@@ -2046,179 +2046,9 @@ func explicitOfflineDependencyFailureAddsLimitation() {
 }
 
 @Test
-func materializerUsesCommitAndProfileLayoutAndSkipsSpecialFiles() throws {
-    let fixture = try MaterializerGitFixture()
-    defer { fixture.remove() }
-    try fixture.write("[package]\nname='materialized'\nversion='0.1.0'\n", to: "Cargo.toml")
-    try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
-    try fixture.write(
-        "version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n",
-        to: "large.rs"
-    )
-    try FileManager.default.createSymbolicLink(
-        atPath: fixture.root.appendingPathComponent("link.rs").path,
-        withDestinationPath: "src/lib.rs"
-    )
-    try fixture.commit("regular and special files")
-    let commit = try #require(
-        fixture.git("rev-parse", "HEAD").split(separator: "\n").last.map(String.init)
-    )
-    try fixture.git(
-        "update-index", "--add", "--cacheinfo",
-        "160000", commit, "dependency"
-    )
-    try fixture.git("commit", "-q", "-m", "gitlink")
-
-    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
-    let profile = try ExactProfileKey(snapshot: snapshot)
-    let cache = fixture.root.appendingPathComponent("cache/materialized")
-    let result = try Materializer(rootURL: cache).materialize(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    )
-
-    #expect(result.url == cache
-        .appendingPathComponent(snapshot.commitOID.hex)
-        .appendingPathComponent(profile.configFingerprint))
-    #expect(FileManager.default.fileExists(
-        atPath: result.url.appendingPathComponent("Cargo.toml").path))
-    #expect(FileManager.default.fileExists(
-        atPath: result.url.appendingPathComponent("src/lib.rs").path))
-    #expect(!FileManager.default.fileExists(
-        atPath: result.url.appendingPathComponent("link.rs").path))
-    #expect(!FileManager.default.fileExists(
-        atPath: result.url.appendingPathComponent("large.rs").path))
-    #expect(!FileManager.default.fileExists(
-        atPath: result.url.appendingPathComponent("dependency").path))
-    #expect(result.filesWritten == snapshot.listFiles().count {
-        $0.fileMode == .regular
-    })
-}
-
-@Test
-func materializerListsOnlyCommitsWithACompleteDirectory() throws {
-    let fixture = try simpleMaterializerFixture()
-    defer { fixture.remove() }
-    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
-    let profile = try ExactProfileKey(snapshot: snapshot)
-    let cache = fixture.root.appendingPathComponent("cache/materialized")
-    let materializer = Materializer(rootURL: cache)
-    #expect(materializer.materializedCommitOIDs().isEmpty)
-
-    try materializer.materialize(snapshot, configFingerprint: profile.configFingerprint)
-    let partial = String(repeating: "b", count: 40)
-    try FileManager.default.createDirectory(
-        at: cache.appendingPathComponent(partial).appendingPathComponent("config"),
-        withIntermediateDirectories: true
-    )
-
-    #expect(materializer.materializedCommitOIDs() == [snapshot.commitOID.hex.lowercased()])
-}
-
-@Test
-func materializerReusesACompleteDirectoryWithoutCopying() throws {
-    let fixture = try simpleMaterializerFixture()
-    defer { fixture.remove() }
-    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
-    let profile = try ExactProfileKey(snapshot: snapshot)
-    let materializer = Materializer(
-        rootURL: fixture.root.appendingPathComponent("cache/materialized")
-    )
-    let first = try materializer.materialize(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    )
-    let file = first.url.appendingPathComponent("src/lib.rs")
-    let modified = try FileManager.default.attributesOfItem(atPath: file.path)[
-        .modificationDate
-    ] as? Date
-
-    let hit = try materializer.materialize(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    )
-
-    #expect(hit.url == first.url)
-    #expect(hit.filesWritten == 0)
-    #expect(try FileManager.default.attributesOfItem(atPath: file.path)[
-        .modificationDate
-    ] as? Date == modified)
-}
-
-@Test
-func materializerEvictsTheLeastRecentlyAccessedDirectory() throws {
-    let fixture = try MaterializerGitFixture()
-    defer { fixture.remove() }
-    try fixture.write("[package]\nname='lru'\nversion='0.1.0'\n", to: "Cargo.toml")
-    for version in 1...3 {
-        try fixture.write(
-            "pub fn answer() -> u8 { \(version) }\n",
-            to: "src/lib.rs"
-        )
-        try fixture.commit("version \(version)")
-    }
-    let oldest = try CommitSnapshot(
-        repositoryURL: fixture.root,
-        revision: "HEAD~2"
-    )
-    let middle = try CommitSnapshot(
-        repositoryURL: fixture.root,
-        revision: "HEAD~1"
-    )
-    let newest = try CommitSnapshot(repositoryURL: fixture.root)
-    let profile = try ExactProfileKey(snapshot: oldest)
-    let oneDirectorySize = try oldest.listFiles().reduce(UInt64(0)) {
-        $0 + UInt64(try oldest.readBytes(path: $1.path).count)
-    }
-    let materializer = Materializer(
-        rootURL: fixture.root.appendingPathComponent("cache/materialized"),
-        quotaBytes: oneDirectorySize * 2
-    )
-    let old = try materializer.materialize(
-        oldest,
-        configFingerprint: profile.configFingerprint
-    ).url
-    let mid = try materializer.materialize(
-        middle,
-        configFingerprint: profile.configFingerprint
-    ).url
-    try FileManager.default.setAttributes(
-        [.modificationDate: Date(timeIntervalSince1970: 1)],
-        ofItemAtPath: mid.path
-    )
-    _ = try materializer.materialize(
-        oldest,
-        configFingerprint: profile.configFingerprint
-    )
-    let latest = try materializer.materialize(
-        newest,
-        configFingerprint: profile.configFingerprint
-    ).url
-
-    #expect(FileManager.default.fileExists(atPath: old.path))
-    #expect(!FileManager.default.fileExists(atPath: mid.path))
-    #expect(FileManager.default.fileExists(atPath: latest.path))
-}
-
-@Test
-func materializedPathRoundTripsToSnapshotPath() throws {
-    let root = URL(fileURLWithPath: "/tmp/materialized/commit/config")
-    let materialized = try Materializer.materializedURL(
-        for: "src/lib.rs",
-        under: root
-    )
-
-    #expect(materialized.path == "/tmp/materialized/commit/config/src/lib.rs")
-    #expect(try Materializer.snapshotPath(
-        for: materialized,
-        under: root
-    ) == "src/lib.rs")
-}
-
-@Test
-func rustAnalyzerUsesEachMaterializedCommitWhenInstalled() throws {
+func rustAnalyzerUsesEachCheckedOutCommitWhenInstalled() throws {
     guard let executable = RustAnalyzerProvider.findExecutable() else { return }
-    let fixture = try MaterializerGitFixture()
+    let fixture = try ExactGitFixture()
     defer { fixture.remove() }
     try fixture.write("[package]\nname='history'\nversion='0.1.0'\nedition='2021'\n", to: "Cargo.toml")
     try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
@@ -2232,19 +2062,24 @@ func rustAnalyzerUsesEachMaterializedCommitWhenInstalled() throws {
         repositoryURL: fixture.root,
         revision: "HEAD~1"
     )
-    let materializer = Materializer(
-        rootURL: fixture.root.appendingPathComponent("materialized")
+    // One window's checkout directory follows the commit, as the
+    // coordinator drives it: HEAD first, then HEAD~1 in the same directory.
+    let checkout = try CheckoutRoot(
+        directory: fixture.root.deletingLastPathComponent()
+            .appendingPathComponent("checkout-\(fixture.root.lastPathComponent)"),
+        source: fixture.root
     )
+    defer { try? checkout.remove() }
     do {
-        let headLocation = try materializedDefinition(
+        let headLocation = try checkoutDefinition(
             snapshot: head,
-            materializer: materializer,
+            checkout: checkout,
             executable: executable,
             cache: fixture.root.appendingPathComponent("ra-head")
         )
-        let previousLocation = try materializedDefinition(
+        let previousLocation = try checkoutDefinition(
             snapshot: previous,
-            materializer: materializer,
+            checkout: checkout,
             executable: executable,
             cache: fixture.root.appendingPathComponent("ra-previous")
         )
@@ -4377,19 +4212,16 @@ private func runDefinition(
     return location
 }
 
-private func materializedDefinition(
+private func checkoutDefinition(
     snapshot: CommitSnapshot,
-    materializer: Materializer,
+    checkout: CheckoutRoot,
     executable: URL,
     cache: URL
 ) throws -> ExactLocation {
     let profile = try ExactProfileKey(snapshot: snapshot)
-    let root = try materializer.materialize(
-        snapshot,
-        configFingerprint: profile.configFingerprint
-    ).url
+    try checkout.checkout(commit: snapshot.commitOID)
     let provider = try RustAnalyzerProvider(
-        projectURL: root,
+        projectURL: checkout.url,
         executableURL: executable,
         cacheURL: cache,
         requestTimeout: 30,
@@ -4425,28 +4257,12 @@ private enum DefinitionTestError: Error {
     case notCompleted
 }
 
-private func simpleMaterializerFixture() throws -> MaterializerGitFixture {
-    let fixture = try MaterializerGitFixture()
-    do {
-        try fixture.write(
-            "[package]\nname='simple'\nversion='0.1.0'\n",
-            to: "Cargo.toml"
-        )
-        try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
-        try fixture.commit("simple")
-        return fixture
-    } catch {
-        fixture.remove()
-        throw error
-    }
-}
-
-private final class MaterializerGitFixture {
+private final class ExactGitFixture {
     let root: URL
 
     init() throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "CodeInsightMaterializerTests-\(UUID().uuidString)",
+            "CodeInsightExactGitTests-\(UUID().uuidString)",
             isDirectory: true
         )
         try FileManager.default.createDirectory(
@@ -4485,7 +4301,7 @@ private final class MaterializerGitFixture {
             workingDirectory: root
         )
         guard result.status == 0 else {
-            throw MaterializerTestError.git(result.output)
+            throw ExactGitFixtureError.git(result.output)
         }
         return result.output
     }
@@ -4493,7 +4309,7 @@ private final class MaterializerGitFixture {
     func remove() { try? FileManager.default.removeItem(at: root) }
 }
 
-private enum MaterializerTestError: Error {
+private enum ExactGitFixtureError: Error {
     case git(String)
 }
 
