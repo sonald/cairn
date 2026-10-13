@@ -16,9 +16,13 @@
 2. **检出策略与快照边界一致。** 只落盘普通文件（100644/100755）：checkout 后按 tree 遍历删除符号链接与 gitlink 对应路径（gitlink 的空目录一并删）。禁用全部过滤：仓库配置 `core.autocrlf=false`、`core.symlinks=false`，`.git/info/attributes` 写 `* -text -eol -filter -ident`（优先级高于 tree 中的 `.gitattributes`）。`git_checkout_tree(FORCE)` 以 HEAD 为基线并 `set_head_detached`，tracked 文件的增删改由它处理；非跟踪残留只清理本计划自己创建的软链（见决定 6）。测试比较每个普通文件的内容哈希与 blob 字节，不只比文件列表。
 3. **只替换 Exact 的文件系统视图。** 阅读区、索引、搜索、比较继续读 Git 对象快照，不变。检出目录只给语言服务器看。
 4. **每窗口一份目录；Materializer 退役。** 应用会激活同一项目已有的窗口（`CodeInsightApp.swift:819`），所以同项目不会有两个窗口；按窗口建目录是为了不同项目窗口彼此隔离。目录在关窗时删除；窗口标识只在本次进程内有效，所以启动时的规则是"删除不属于本进程任一活动窗口的全部目录"，不需要任何过期判定。不再有 2 GB 配额：旧机制回收的是无人使用的历史导出，新机制只有活动窗口目录、关窗即删，没有可回收对象；设置页显示检出目录总大小并提供清理。
-5. **热切换按固定顺序，就绪有确认。** 同一会话复用时的顺序：暂停新请求 → 等待/取消在途请求（它们可能在 checkout 后 `didOpen` 旧字节，污染服务器）→ `didClose` 全部已开文件 → checkout 目标 commit、重算软链 → 更新会话的快照引用 → `workspace/didChangeWatchedFiles`（新增/删除/修改分别 type 1/3/2）→ **等待服务器确认已吸收变化** → 恢复请求。确认信号按服务器：RA 用 `experimental/serverStatus` 从非空闲回到空闲；Pyright 用分析进度（`$/progress`）结束；tsserver 用项目加载进度结束。S0 验证这三种信号是否可靠；拿不到可靠信号的服务器，切换期间保持"准备中"直到 S0 确定的替代判定成立，不能把通知发完当成就绪。取消、失败、关窗、清理遵守同一顺序：等在途 checkout/prepare 结束，再关会话、删目录；checkout 部分失败后旧会话不得回到 ready，走重启或报不可用。
-6. **复用条件覆盖配置与环境。** 候选与活动会话的 `ReuseKey` 除 `versionIdentity`、`configFingerprint` 外全部相同才热切换：语言、分析单元、`featureSelection`、`environmentFingerprint`（实际解释器等）、`trustMode`、`toolVersion` 任一变化都重启（它们是初始化参数或无法可靠热更新的环境）。`configFingerprint`（Cargo/pyproject/tsconfig 内容）变化走热更新，由服务器自己重载，S0 验证三种服务器都能重载。切换成功后同步替换会话的 profile、完整缓存键、结果归因与崩溃重启参数，不能只换 commit ID。结果缓存 `ReuseKey.versionIdentity` 仍按 commit。
-7. **工作区 ↔ commit 双活动会话。** 工作区读真实目录、commit 读检出目录，两个根各一个会话槽；切换只换当前指向，另一槽待命不关闭；信任撤销、语言/单元变化、关窗、清理缓存关闭两槽。待命槽上到达的旧请求按 generation 拒绝。**重新激活待命槽也是复用**：它仍持有停放时快照的 `didOpen` 缓冲，而回到工作区会重新捕获快照、回到检出槽可能换了 commit，所以重新激活同样走决定 5 的顺序（关闭缓冲 → 更新快照引用 → 通知 → 确认 → 恢复；工作区槽省去 checkout 一步），不能只换快照 ID。待命槽是否按空闲时间或内存上限释放，依 S0 的 RSS 数据决定，默认不加。
+5. **热切换按固定顺序，就绪有确认。** 同一会话复用时的顺序：暂停新请求 → 等待/取消在途请求（它们可能在 checkout 后 `didOpen` 旧字节，污染服务器）→ `didClose` 全部已开文件 → checkout 目标 commit、重算软链 → 更新会话的快照引用 → `workspace/didChangeWatchedFiles`（新增/删除/修改分别 type 1/3/2）→ **等待服务器确认已吸收变化** → 恢复请求。确认信号按服务器（S0 实测，见 evidence "S0 门槛"第 3 项）：
+   - RA：不能用 `quiescent` 的 false→true 翻转（清单切换不发 false，.rs 切换的 false 可迟到 2 s）；也不能在通知发完就放行（+0.46 s 会拿到旧 crate graph 的答案）。判定 = 通知后等 `$/progress` `rustAnalyzer/Fetching` 的 begin，再等其后的第一个 `serverStatus quiescent=true`；等 Fetching begin 设约 1 s 上限，超时放行——在 Cairn 沙箱里（FSEvents 被拒，RA 没有自己的监视器）只改 `.rs` 的切换不触发任何通知，首个答案直接正确；通知含 Cargo.toml/Cargo.lock 时一定有重载信号。Cairn 对 `serverIsQuiescent` 的粘性状态要在发通知时重置。`-32801 content modified` 重试保留。
+   - Pyright：没有 `$/progress`。已 `didClose` 的前提下源码变化直接放行（首个答案即正确）；通知含 pyrightconfig/pyproject 时等 `window/logMessage` "Reloading configuration file"（配置变化后 +0.002 s 的答案是旧配置的）。
+   - tsserver：等 `$/progress` "Initializing JS/TS language features" 的 end（每次切换都发）。
+   拿不到信号的情形保持"准备中"，不能把通知发完当成就绪。取消、失败、关窗、清理遵守同一顺序：等在途 checkout/prepare 结束，再关会话、删目录；checkout 部分失败后旧会话不得回到 ready，走重启或报不可用。
+6. **复用条件覆盖配置与环境。** 候选与活动会话的 `ReuseKey` 除 `versionIdentity`、`configFingerprint` 外全部相同才热切换：语言、分析单元、`featureSelection`、`environmentFingerprint`（实际解释器等）、`trustMode`、`toolVersion` 任一变化都重启（它们是初始化参数或无法可靠热更新的环境）。`configFingerprint`（Cargo/pyproject/tsconfig 内容）变化走热更新，由服务器自己重载（S0 已验证三种都能重载，且重载完成前会用旧配置作答，故必须过决定 5 的门）。依赖可得性不是复用条件而是结果可信度条件：Safe 模式下离线缺依赖会让 RA 加载极慢（toydb 84 s，n=1）或 crate graph 残缺（codex 旧 lock 下 definition 全空），切换前后 `dependenciesUnavailableOffline` 的变化要照常进入 `limitations` 标注。切换成功后同步替换会话的 profile、完整缓存键、结果归因与崩溃重启参数，不能只换 commit ID。结果缓存 `ReuseKey.versionIdentity` 仍按 commit。
+7. **工作区 ↔ commit 双活动会话。** 工作区读真实目录、commit 读检出目录，两个根各一个会话槽；切换只换当前指向，另一槽待命不关闭；信任撤销、语言/单元变化、关窗、清理缓存关闭两槽。待命槽上到达的旧请求按 generation 拒绝。**重新激活待命槽也是复用**：它仍持有停放时快照的 `didOpen` 缓冲，而回到工作区会重新捕获快照、回到检出槽可能换了 commit，所以重新激活同样走决定 5 的顺序（关闭缓冲 → 更新快照引用 → 通知 → 确认 → 恢复；工作区槽省去 checkout 一步），不能只换快照 ID。S0 实测 RA 在 codex 上单槽 RSS 4–5 GB（toydb 0.85–1 GB，空闲后回落），双槽按两份 codex 约 8–9 GB，所以待命槽必须有释放策略：待命超过固定空闲时间（建议 10 分钟）或待命槽进程 RSS 超过阈值（建议 2 GB，按 S4 实测调整）时关闭待命槽，下次激活冷启动；当前槽不受限。阈值与时间放常量，不做设置项。
 8. **依赖借用按语言各取最佳方式，并在界面标注。**
    - TypeScript：工作区中存在、且目标 commit tree 中对应目录存在的每个 `node_modules`，软链到检出目录同一相对路径。已验证可解析。
    - Python：`workspace/configuration` 对 `python` 节回答 `pythonPath`，取工作区对应单元根的 `.venv/bin/python` 或 `venv/bin/python`；没有则维持当前行为（PATH）。commit 自己的 `[tool.pyright]`/`pyrightconfig.json` 配置了相对 `venvPath` 时同时软链该目录。已验证仅软链无效、`pythonPath` 有效。工作区模式同样回答 `pythonPath`（同一规则，顺带修正工作区看不到 `.venv` 的问题）。`PyrightProvider.interpreterIdentity` 必须用实际回答的解释器计算，否则 `environmentFingerprint` 与真实环境不一致。
@@ -26,7 +30,7 @@
    - 软链集合每次切换重算：以目标 tree 与当前工作区为输入得到应有集合，删除不在集合中的旧链（不只是父目录消失的情况，Python 环境路径变化也在内），再补建；与目标 commit 的 tracked 路径冲突时 tracked 内容优先、不建链。
    - 结果路径分类在会话层做：服务器可能返回软链路径（检出目录下）或真实路径（工作区 `node_modules`、`.venv`）。两种拼写都要归为依赖文件（与今天 `~/.cargo` 同类），从真实路径读取，不得当作快照相对路径去 `snapshot.readBytes`；关系查询中直接读快照的路径同样处理。
    - 标注：`ExactAnalysisEnvironment.limitations` 增加"依赖来自当前工作区，可能与该 commit 不一致"。
-9. **沙箱为长驻进程重定。** 现有 `ulimit -t 60` 是累计 CPU 时间，长驻会话持续索引与切换会触发 `SIGXCPU`，不能沿用；S0 测量实际 CPU 用量后改为按单次请求/切换的监控或显著提高上限。同处的 `ulimit -v` 为 512 GiB 地址空间，预计不构成限制，但 S0 同时记录 VSZ 并观察分配失败。可写集：检出目录本身不可写（与今天导出目录一致，今天放行的只有 provider 缓存和 Trusted 的 `project/target`），tsserver 的 `tsbuildinfo` 等需要落点的写入必须指向缓存目录或禁用；借用依赖的真实目录、用户源码与 `.git` 保持不可写。历史分析在真实沙箱下验证这些边界。
+9. **沙箱为长驻进程重定。** 现有 `ulimit -t 60` 是累计 CPU 时间，S0 实测沙箱内 RA 加载 codex 就用 52 s CPU、每次 .rs 热切换再加 3.7 s、toydb 清单切换 1.8 s/次，CLI 冷启动已用 50 s——上限在 codex 上只够切 1–2 次，**废除**。替代：不设累计 CPU 上限，Exact 已有的单次请求超时与崩溃重启保留；若要防失控，用协调器侧的墙钟监控（切换后超过固定秒数未就绪即重启会话），不用 rlimit。`ulimit -v`（512 GiB）保留，VSZ 实测恒定。写入边界按现配置即可：S0 已验证检出目录、借用的 `node_modules`/`.venv`、用户仓库与 `.git` 均被拒，缓存目录允许。另：沙箱拒绝 `mach-lookup com.apple.FSEvents`，RA 在沙箱内没有自己的文件监视，变化只能靠 Cairn 的 `didChangeWatchedFiles` 送达——这是决定 5 必须完整发送所有变化路径的原因，也让切换不会触发整工作区重扫。可写集：检出目录本身不可写（与今天导出目录一致，今天放行的只有 provider 缓存和 Trusted 的 `project/target`），tsserver 的 `tsbuildinfo` 等需要落点的写入必须指向缓存目录或禁用；借用依赖的真实目录、用户源码与 `.git` 保持不可写。历史分析在真实沙箱下验证这些边界。
 10. **文档承诺改写。** product.md "不执行 Git checkout" 改为"不改动用户工作区与仓库；历史 commit 的精确分析在应用自有目录中检出"。
 
 ## 不做
@@ -39,7 +43,7 @@
 
 ## 阶段
 
-**S0 门槛（先于 S1 之后的一切；与 S1 可并行）**
+**S0 门槛 — 2026-10-13 完成，结论"可进 S2"**（evidence "S0 门槛"节；第 1 项的原生四段计时与双槽 RSS 因无法接管桌面 BLOCKED，移到 S4 在用户在场时补；决定 5/6/7/9 已按结果修订）。原始要求如下：
 - 打包应用基线：toydb 上每次切换记四段墙钟——正文出现、基础索引可用（大纲/搜索）、精确分析就绪（状态栏）、返回刚读过的版本；HEAD~5 与 HEAD~100 各 3 次；记录语言服务器 RSS（单会话与双槽各一组）。codex（`codex-rs/` 单元，8,274 commits，2,612 个 `.rs`）上同样两组。
 - 跨文件更新：三种服务器各一例，从文件 A 跳到两个 commit 之间在文件 B 中新增/移动的声明，热切换后 definition 指向新位置；同时记录"状态栏就绪"与"首个正确跨文件结果"两个时间，后者是验收口径。
 - 就绪信号：确定决定 5 中每种服务器可用的确认信号及其在切换后的时序；拿不到的给出替代判定。探针必须用 Cairn 的 `initialize` 能力集（`LSP.swift:502`，已含 `window.workDoneProgress` 与 `experimental.serverStatusNotification`）而不是脚本自己的，否则结论不能迁移到 S2。
@@ -72,5 +76,5 @@
 
 - 最大风险：切换变快，却把旧索引或旧配置的答案标成新 commit 的结果。决定 5/6 与 S0 门槛针对它；验收以跨文件结果为准，不以状态栏为准。
 - 用户仓库 gc 后旧 commit 不可达：checkout 失败，Exact 报不可用，阅读不受影响（快照已另有缓存）。
-- 规模：原型仓库都很小；codex 上的 manifest 变更重载成本与 RSS 待 S0 测量。
+- 规模：S0 在 codex 上量到热切换 definition 7.4–7.7 s（冷 27.9 s），RSS 4–5 GB。另一个范围外的发现：codex 的索引切换（`switch-stats`）本身 8.4–8.7 s，即便内容复用 99%——"索引只占 5%"只在小仓库成立。这不在本计划内，完成后另立题看快照捕获/索引装载在大仓库上的常数开销。
 - 长驻进程的资源：取消 `ulimit -t` 后需要替代的失控保护（S0 给出用量，S2 定监控方式）。
