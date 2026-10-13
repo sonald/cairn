@@ -757,7 +757,7 @@ func treeWalkKeepsExactlyFilesWhoseAncestorsAndSelfAreIncluded() throws {
     }
 }
 
-private final class GitFixture {
+final class GitFixture {
     let root: URL
 
     init() throws {
@@ -807,7 +807,7 @@ private final class GitFixture {
     }
 }
 
-private enum FixtureError: Error {
+enum FixtureError: Error {
     case git(String)
 }
 

@@ -507,18 +507,18 @@ private func capturedFileMode(
         ? .lfsPointer : fallback
 }
 
-private struct TreeEntry {
+struct TreeEntry {
     let path: String
     let oid: GitOID
     let rawOID: git_oid
     let fileMode: FileMode
 }
 
-private final class TreeWalkCollector {
+final class TreeWalkCollector {
     var entries: [TreeEntry] = []
 }
 
-private let collectTreeEntry: git_treewalk_cb = { root, entry, payload in
+let collectTreeEntry: git_treewalk_cb = { root, entry, payload in
     guard let root, let entry, let payload,
           let name = git_tree_entry_name(entry),
           let oid = git_tree_entry_id(entry),
