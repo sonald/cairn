@@ -198,6 +198,21 @@ func twoCheckoutRootsOnOneRepositoryDoNotInterfere() throws {
     #expect(try filesOnDisk(a.url) == expectedFiles(firstSnapshot))
     #expect(try filesOnDisk(b.url) == expectedFiles(secondSnapshot))
 
+    // A window that opens another repository keeps its owner id: the old
+    // root (and its lock) must go before the replacement is built in the
+    // same directory.
+    let other = try GitFixture()
+    defer { other.remove() }
+    try other.writeFile("main.rs", "fn main() {}\n")
+    try other.git("add", "main.rs")
+    try other.commit("init")
+    let replacement = try store.root(owner: owners.0, source: other.root)
+    #expect(replacement !== a)
+    #expect(replacement.url == a.url)
+    try replacement.checkout(commit: CommitSnapshot(repositoryURL: other.root, revision: "HEAD").commitOID)
+    #expect(try filesOnDisk(replacement.url).keys.sorted() == ["main.rs"])
+    #expect(try filesOnDisk(b.url) == expectedFiles(secondSnapshot))
+
     // Releasing one window leaves the other's directory in place; a clear
     // is refused until the last owner is gone.
     try store.release(owner: owners.0)
