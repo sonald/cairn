@@ -8,7 +8,14 @@ checks out in place):
   switch-manifest start at FROM (Cargo.toml/lock differ), checkout TO, time until new-file hover works
   stale           didOpen old bytes, checkout TO, show whether hover answers from the stale buffer
 
-Usage: lsp_probe.py ROOT SCENARIO [--notify] [--from SHA] [--to SHA]
+Usage: rust_analyzer_probe.py ROOT SCENARIO [--notify] [--from SHA] [--to SHA]
+       [--serve-root REL] [--target FILE:LINE:COL --expect SUBSTR [--from-expect SUBSTR]]
+
+2026-10-13 (S0): the handshake now mirrors Cairn's LSPClient.initialize (LSP.swift:502) —
+processId null, clientInfo CodeInsight/4, the full capability set, workspace/configuration
+answered with nulls — and the environment mirrors Sandbox.swift (CARGO_NET_OFFLINE=true,
+TMPDIR/XDG_CACHE_HOME under a scratch cache). --serve-root/--target/--expect generalize the
+toydb-only hover targets so the same script runs on codex (codex-rs/).
 """
 import json, os, subprocess, sys, threading, time, queue, argparse
 
@@ -22,9 +29,13 @@ INIT_OPTIONS = {  # mirrors Cairn Safe mode (RustAnalyzerProvider.initialization
 class RA:
     def __init__(self, root):
         self.root = os.path.realpath(root)
+        cache = os.environ.get("RA_PROBE_CACHE") or os.path.join(os.environ.get("TMPDIR", "/tmp"), "ra-probe-cache")
+        os.makedirs(os.path.join(cache, "tmp"), exist_ok=True)
+        env = dict(os.environ, TMPDIR=os.path.join(cache, "tmp"), XDG_CACHE_HOME=cache,
+                   CARGO_NET_OFFLINE="true")  # Sandbox.swift environment
         self.proc = subprocess.Popen(
             ["rust-analyzer"], cwd=self.root, stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env)
         self.next_id = 1
         self.pending = {}
         self.lock = threading.Lock()
@@ -58,8 +69,10 @@ class RA:
     def _dispatch(self, msg):
         if "id" in msg and "method" in msg:  # server → client request
             m = msg["method"]
-            if m == "workspace/configuration":
-                result = [INIT_OPTIONS for _ in msg["params"]["items"]]
+            if m == "workspace/configuration":  # LSP.swift answers null per item
+                result = [None for _ in msg["params"]["items"]]
+            elif m == "workspace/workspaceFolders":
+                result = []
             else:  # window/workDoneProgress/create, client/registerCapability, ...
                 result = None
             self._send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
@@ -95,16 +108,25 @@ class RA:
         return "file://" + os.path.join(self.root, rel)
 
     def initialize(self):
-        self.request("initialize", {
-            "processId": os.getpid(),
+        self.request("initialize", {  # mirrors LSPClient.initialize (LSP.swift:502)
+            "processId": None,
+            "clientInfo": {"name": "CodeInsight", "version": "4"},
             "rootUri": "file://" + self.root,
-            "workspaceFolders": [{"uri": "file://" + self.root, "name": "root"}],
+            "workspaceFolders": [{"uri": "file://" + self.root, "name": os.path.basename(self.root)}],
             "capabilities": {
-                "textDocument": {"hover": {"contentFormat": ["markdown", "plaintext"]}},
+                "textDocument": {
+                    "callHierarchy": {},
+                    "definition": {"linkSupport": True},
+                    "hover": {"contentFormat": ["markdown", "plaintext"]},
+                    "implementation": {"linkSupport": True},
+                    "references": {},
+                },
+                "window": {"workDoneProgress": True},
                 "workspace": {"configuration": True},
                 "experimental": {"serverStatusNotification": True},
             },
             "initializationOptions": INIT_OPTIONS,
+            "trace": "off",
         })
         self.notify("initialized", {})
 
@@ -201,13 +223,24 @@ def main():
     ap.add_argument("--notify", action="store_true")
     ap.add_argument("--from", dest="frm")
     ap.add_argument("--to", dest="to")
+    ap.add_argument("--serve-root", default=".", help="server root relative to ROOT (e.g. codex-rs)")
+    ap.add_argument("--target", help="FILE:LINE:COL (relative to serve root) replacing the toydb default")
+    ap.add_argument("--expect", help="hover substring expected at TO")
+    ap.add_argument("--from-expect", help="hover substring expected at FROM (switch-rs)")
     a = ap.parse_args()
+    global TYPES, AT_HEAD, AT_FROM, MUTATION
+    if a.target:
+        f, l, c = a.target.rsplit(":", 2)
+        TYPES = MUTATION = (f, int(l), int(c))
+        AT_HEAD = lambda s: bool(s) and a.expect in s
+        AT_FROM = lambda s: bool(s) and (a.from_expect or "") in (s or "")
     root = a.root
+    serve = os.path.join(root, a.serve_root)
     log = lambda *x: print(*x, flush=True)
 
     if a.scenario == "cold":
         checkout(root, a.to)
-        ra = RA(root)
+        ra = RA(serve)
         ra.initialize()
         rel, ln, col = TYPES
         ra.did_open(rel)
@@ -221,7 +254,7 @@ def main():
 
     if a.scenario in ("switch-rs", "switch-manifest"):
         checkout(root, a.frm)
-        ra = RA(root)
+        ra = RA(serve)
         ra.initialize()
         q = ra.wait_quiescent()
         log(f"warm at FROM: quiescent after {q:.2f}s")
@@ -233,13 +266,14 @@ def main():
             pred = AT_HEAD
         else:
             rel, ln, col = MUTATION
-            pred = lambda s: s and "make_row" in s
+            pred = AT_HEAD if a.target else (lambda s: s and "make_row" in s)
         files = changed_files(root, a.frm, a.to)
         ct = checkout(root, a.to)
         log(f"checkout {a.frm[:7]} -> {a.to[:7]}: {ct*1000:.0f}ms, {len(files)} files changed")
         t_switch = time.perf_counter()
+        ra.quiescent.clear()  # so the post-switch wait sees a fresh flip, not the pre-switch state
         if a.notify:
-            ra.did_change_watched(files)
+            ra.did_change_watched([os.path.relpath(os.path.join(root, f), ra.root) for f in files])
         if a.scenario == "switch-manifest":
             ra.did_open(rel)  # new file: open with new bytes
         t, txt = poll_hover(ra, rel, ln, col, pred, 120)
@@ -247,8 +281,7 @@ def main():
             log(f"after switch: hover never flipped within 120s; last -> {first_line(txt)}")
         else:
             log(f"after switch: correct hover after {t:.2f}s -> {first_line(txt)}")
-        ra.quiescent.clear() if False else None
-        # time to quiescent after switch (status may have flipped to non-quiescent)
+        # time to quiescent after switch (cleared right after checkout above)
         q2 = ra.quiescent.wait(120)
         log(f"after switch: quiescent={'yes' if q2 else 'no'} at +{time.perf_counter()-t_switch:.2f}s")
         ra.shutdown()
@@ -256,7 +289,7 @@ def main():
 
     if a.scenario == "stale":
         checkout(root, a.frm)
-        ra = RA(root)
+        ra = RA(serve)
         ra.initialize()
         ra.wait_quiescent()
         rel, ln, col = TYPES

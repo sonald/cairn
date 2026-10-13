@@ -56,6 +56,124 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 - 所有判定点都在被 hover 的文件内（impl 头、`parseDisplayJSON`、`_initialize_metadata_once`、`Insert`），没有直接验证跨文件索引是否随 checkout 更新；RA 的"空闲"只是间接证据，Pyright/tsserver 没有。
 - 未经 Cairn 沙箱；Pyright/tsserver 的 stale buffer 行为按 LSP 语义推定，未单独跑。
 - mini-sglang 工作区 `.venv` 没有安装 torch，所以其 Python 依赖测试无效，已改用 llm-tools。
-- toydb 在 Safe 模式报 `dependenciesUnavailableOffline`，与本探针无关，待单独排查。
+- toydb 在 Safe 模式报 `dependenciesUnavailableOffline`：S0 查明是本机 registry 缺 `arrayref 0.3.6` / `cc 1.0.68`（`cargo metadata` 离线失败），`cargo fetch` 一次后消失；codex 上同一标注来自 sysroot 的 `cc` 构建依赖，见下文。
 
 复现：按脚本头部用法，先 `git clone --local` 到临时目录，`python3 -I <脚本> ...`。
+
+## S0 门槛（2026-10-13）
+
+对应[计划](../../plans/commit-reading-warm-exact.md) S0 段的六项。全部实测；每项标 PASS / FAIL / BLOCKED。
+
+### 环境与方法
+
+- 构建：worktree HEAD `1297f2e`，Xcode 27.0（27A266a）/ Swift 6.4，`CAIRN_LIBGIT2=brew bash scripts/make-app.sh`（另以 `CAIRN_BUNDLE_IDENTIFIER=dev.cairn.s0` 打了一份隔离数据的副本），CLI 用 `swift build -c release --product codeinsight`。
+- 工具：rust-analyzer 65ac641199（2026-10-04），pyright 1.1.414，typescript-language-server 3.3.0 + typescript 5.0.2，node v26.11.1，cargo 1.98.1（codex 的 `rust-toolchain.toml` 让 rustup 自动安装了 1.95.0，含 rust-src），git 2.54.0，macOS 27.0.1，Apple M3 Pro / 36 GB。
+- 语料：全部 `git clone --local` 到 scratch 目录再原地 checkout，不碰原仓库。toydb（404 commits，60 `.rs`），codex（8,274 commits，`codex-rs/` 2,596 `.rs`），llm-tools（TypeScript 单元 `tools/model-files-web`，软链工作区 `node_modules`），mcp-python-sdk（Python；llm-tools 只有 8 个 `.py`，扫完 290 个 commit 没有一处跨文件新增声明，所以 Python 跨文件用例改用 `~/.cache/cairn-corpora/mcp-python-sdk` 的克隆）。
+- 探针：[`s0_probe.py`](s0_probe.py)。`initialize` 逐字段照搬 `LSP.swift:502`（`processId: null`、`clientInfo CodeInsight/4`、`definition.linkSupport`、`window.workDoneProgress`、`workspace.configuration`、`experimental.serverStatusNotification`、`trace: off`），`workspace/configuration` 同 Cairn 回 null；环境照 `Sandbox.swift`（`CARGO_NET_OFFLINE=true`、`TMPDIR`/`XDG_CACHE_HOME` 指向 scratch 缓存）；`--sandbox` 时用逐字复制的 sandbox 配置和 `ulimit -t 60`/`-v` shim 经 `/usr/bin/sandbox-exec` 启动。切换顺序按决定 5：`didClose` 全部已开文件 → checkout → `workspace/didChangeWatchedFiles`（按 `git diff --name-status` 给 1/2/3）→ `didOpen` 目标文件（TO 字节）→ 每 100 ms 发一次 `textDocument/definition` 直到指向期望文件:行。所有 `experimental/serverStatus`、`$/progress`、`window/logMessage` 带时间戳记录，并对照每个信号到达时刻之前/之后的答案。
+- 依赖可得性：探针第一次跑 toydb 时本机 registry 缺 `arrayref 0.3.6`/`cc 1.0.68`，离线 `cargo metadata` 失败，RA 启动到空闲用了 **84 s**（n=1，之后没再复现）。此后对四个 toydb commit 和两个 codex commit 各做了一次 `cargo fetch`（联网，只写 `~/.cargo`），之后离线 metadata 成功。codex 的 sysroot 仍报 `Failed to read Cargo metadata with dependencies for sysroot`（std 的 `cc` 构建依赖离线缺失），RA 以 health=warning 继续工作；用户仓库上的 CLI 也因此报 `dependenciesUnavailableOffline`，hover 里 `String` 显示为 `{unknown}`。本机副作用：`cargo fetch` 写入了 `~/.cargo`（registry 与 `libwebrtc` 的 git 检出），rustup 自动安装了 1.95.0 工具链，克隆与缓存都在会话 scratch 目录；用户仓库只被只读访问。
+
+### 1. 打包应用基线 — BLOCKED（原生四段计时）/ PASS（CLI 代理）
+
+- 原生驱动：隔离副本 `dev.cairn.s0` 的 computer-use 访问请求被拒绝（`user_denied`）；已授权的 `dev.cairn.Cairn` 被另一会话正在跑的 Cairn 实例占用（窗口 "codex — Cairn"），不能用它做切换；版本选择器本来也需要全屏控制（见 memory）。因此"正文出现 / 基础索引可用 / 精确就绪 / 返回刚读过的版本"四段墙钟和双槽 RSS 都 **BLOCKED**，留给 S4 在用户在场时补。
+- 隔离副本确实在 toydb 上跑起来了：它拉起的 rust-analyzer（pid 71502）RSS 726 MB、CPU 4.57 s（加载完成后），进程环境 `TMPDIR=~/Library/Caches/CodeInsight/Exact/tmp`、`XDG_CACHE_HOME=~/Library/Caches/CodeInsight/Exact`、`CARGO_NET_OFFLINE=true`，与 `Sandbox.swift` 一致；`ps` 看不到 sandbox-exec 参数（它 exec 成服务器进程），所以沙箱保真度只能靠下面第 5 项的写入拒绝来证明。
+- CLI 代理（release 二进制，在用户仓库上、Safe 模式、经沙箱；每条 = Materializer 不参与的工作区快照 + 冷启动 RA + 第一个 hover，相当于今天每次切 commit 要重来的部分）：
+
+| 命令 | 3 次 wall | user CPU |
+| --- | --- | --- |
+| `exact-hover` toydb `src/sql/execution/mod.rs:40:79`（HashJoin） | 4.09 / 4.06 / 3.60 s | 6.4–6.9 s |
+| `exact-hover` codex-rs `core/src/session/session.rs:586:59`（ThreadOriginator） | 15.28 / 13.11 / 13.28 s | 50.5 / 49.5 / 49.9 s |
+| `switch-stats` toydb HEAD~5→HEAD | 49 ms（复用 80%） | |
+| `switch-stats` toydb HEAD~100→HEAD | 93 ms（复用 5%） | |
+| `switch-stats` codex HEAD~5→HEAD（unit codex-rs/core） | 8.69 s（复用 99%） | |
+| `switch-stats` codex HEAD~100→HEAD | 8.38 s（复用 79%） | |
+
+  codex 三次冷启动各用掉 ~50 s CPU，距 `ulimit -t 60` 只剩 10 s；codex 的索引切换 8.4–8.7 s 与 RA 热切换同量级（见第 6 项），计划里"索引切换只占 5%"在 codex 上不成立，但不在本计划范围内。
+
+### 2. 跨文件更新 — PASS
+
+从文件 A 发 definition 到两个 commit 之间在文件 B 中新增的声明；热切换后答案与冷启动一致。时间从 checkout 结束算。
+
+| 服务器 / 语料 | FROM→TO（变更文件） | A → B | 热切换首个正确答案 | 冷启动对照 |
+| --- | --- | --- | --- | --- |
+| rust-analyzer / toydb | 46308de→babe5de（24） | `execution/mod.rs:40:79` → `join.rs:142 pub struct HashJoin` | 0.657 / 0.637 s（2 次） | 3.84 s |
+| rust-analyzer / codex-rs | 71448a29e7→78ba047bda（16） | `core/src/session/session.rs:586:59` → `ext/extension-api/.../thread_lifecycle.rs:11 ThreadOriginator` | 7.73 / 7.40 s（2 次） | 27.9 s |
+| tsserver / llm-tools | f141608→d0b9397（13） | `sourceHighlight.worker.ts:44:46` → `core/jsonSource.ts:43 highlightJsonWindow` | 0.794 s | 0.989 s |
+| Pyright / mcp-python-sdk | 17f9c00c→679b2297（11） | `client/auth.py:143:20` → `shared/auth_utils.py:8 resource_url_from_server_url` | 0.112 s（重开 A）/ 0.051 s（不重开，A 已 didClose） | 0.396 s |
+
+- 第一轮 toydb 用例把列给错（col 19 落在 `Node::HashJoin` 变体上），答案 `plan/mod.rs:71` 其实也是该 commit 新增的跨文件声明，且在 quiescent 后首个请求即正确；表中用 col 79（`HashJoin::new`）重跑的结果。
+- codex 上 quiescent 之后首个请求用了 ~1.4 s 才返回（7.40 − 5.95），返回即正确，中间只有一次在途的 `-32801 content modified`；不是旧答案。
+
+### 3. 就绪信号 — PASS（RA 要用组合信号；Pyright 没有协议信号，给出替代判定）
+
+**rust-analyzer**：`experimental/serverStatus` 的 quiescent "false→true" 翻转**不可靠**：
+
+- toydb 清单切换（69c46e5↔5b72c04，Cargo.toml/lock + 385 文件）两方向都**没有**发 `quiescent=false`；只在 +1.63 s 收到一次 `quiescent=true`。只看 `isQuiescent` 的客户端会在通知发完立刻放行，而 +0.46 s 的答案是**旧 crate graph 的**（definition 落在 `tokio-0.2.19/.../listener.rs:69`，正确应为 `tokio-1.6.2/.../listener.rs:52`；反向同样 +0.458 s 给出旧版本）。
+- codex 的 .rs 切换第一次 `quiescent=false` 迟到 +2.2 s（第二次 +0.04 s），toydb .rs 切换 +0.002/+0.008 s 到——时机不稳定。
+
+可靠的组合判定（5/5 切换成立，含第 6 项 codex 的 Cargo.lock 组）：通知后先等到 `$/progress` `rustAnalyzer/Fetching` 的 begin（+0.13～0.22 s 到达），再等它之后的第一个 `serverStatus quiescent=true`（紧跟 `rustAnalyzer/cachePriming` end）。该时刻答案：toydb .rs 两次下一请求正确（在途请求收 `-32801`，Cairn 现有重试覆盖）；toydb 清单两方向正确答案在 quiescent 之前 0.05 s 已出现；codex 下一请求正确（计算 1.4 s）。`-32801` 重试仍需保留。两点补充：实测的切换都含 `.rs` 变化，一个不涉及 Rust 文件的 commit 对可能根本不触发 Fetching，所以等 Fetching begin 要设上限（实测 0.11–0.33 s 到达，1 s 足够），超时则按现有空结果/`-32801` 重试路径放行；Cairn 的 `LSPClient.serverIsQuiescent` 是粘滞值，发出通知时必须本地清零，否则清单切换（服务器不发 false）会被当成已就绪。
+
+**Pyright**：六次运行（含 167 文件的 mcp-python-sdk 冷启动）**一次都没有**发 `window/workDoneProgress/create` 或 `$/progress`。
+
+- 源码变化：不需要信号。按决定 5 顺序（已 `didClose`）后首个 definition 就正确（0.05–0.11 s）；旧探针里"10 s 仍旧"是因为文件没关。
+- 配置变化（pyrightconfig.json）：首个答案**是旧的**（+0.002 s 仍指 libA），随后 `window/logMessage` "Reloading configuration file at …"（+0.188 s）、"Found 3 source files"（+0.450 s），正确答案 +0.232/+0.239 s。替代判定：通知里含配置文件时，等 logMessage "Reloading configuration file"；否则直接放行。两次实测该判定成立。
+
+**tsserver**：每次切换（源码或 tsconfig）都发 `$/progress` "Initializing JS/TS language features…" begin/end：begin +0.001～0.084 s，end +0.096～0.446 s；通知后发出的请求都在 end 之后返回且正确（0.097 / 0.794 s）。以 end 为就绪信号成立。
+
+### 4. 配置变化 — PASS（三种都热重载；RA 与 Pyright 要先过第 3 项的门）
+
+| 配置 | 用例 | 热切换 | 冷启动 |
+| --- | --- | --- | --- |
+| Cargo.toml + Cargo.lock（tokio 0.2→1.6 等 20 处依赖版本/features） | toydb 69c46e5→5b72c04，`server.rs` `TcpListener` definition 落到哪个 tokio | 1.586 s 正确（tokio-1.6.2）；+0.461 s 先给旧版本 | 3.47 s |
+| 同上反向 | 5b72c04→69c46e5 | 1.438 s 正确（tokio-0.2.19）；+0.458 s 先给新版本 | — |
+| pyrightconfig.json `extraPaths` libA→libB（合成两 commit fixture，[`make_config_fixtures.py`](make_config_fixtures.py)） | `main.py` `f` definition | 0.232 / 0.239 s 正确（libB）；+0.002 s 先给 libA | 0.348 s |
+| tsconfig.json `paths` `@lib/*` libA→libB（同上合成） | `src/main.ts` `f` definition | 0.097 s 正确；无旧答案 | 0.466 s |
+
+语料里找不到真实的 pyrightconfig/tsconfig 语义变化（llm-tools 两个 tsconfig 各只有一次新建提交，mcp-python-sdk 的 pyproject 改动只涉及 pyright 版本号和 `typeCheckingMode`），所以这两项用合成仓库，已标明。没有需要列为重启条件的配置变化；但 RA 和 Pyright 在配置变化后 0.5 s 内会用旧配置作答，必须按第 3 项的信号门控。
+
+### 5. 真实沙箱长驻 — FAIL（决定 9 的 `ulimit -t 60`）/ PASS（写入边界）
+
+- 写入拒绝（`writeprobe`，sandbox 配置逐字复制自 `Sandbox.swift`，Safe 模式，项目根 = llm-tools 克隆）：克隆根、克隆内源码目录、借用的工作区 `node_modules`、`.venv`、用户仓库根、用户 `.git` 六处 `printf > 文件` 全部 `Operation not permitted`（status 1，文件未创建），`/usr/bin/log show` 有对应 `Sandbox: bash(…) deny(1) file-write-create …` 记录；缓存目录和 `cache/tmp` 两处允许。
+- 长驻（`longrun --sandbox`，RA 经逐字复制的沙箱配置与 rlimit shim 启动，每次切换按决定 5 顺序并发一次 definition 作存活检查；检查位置 `kv.rs:1:28 Catalog → schema.rs` 在两个 commit 都存在，所以这里只量资源和存活，不量过期——过期由第 2–4 项覆盖）：
+  - toydb 46308de↔babe5de 交替 24 次（每次 24 文件）：累计 CPU 4.62 s（冷启动）→ 6.57 s，即 **≈0.08 s/次**；RSS 864→882 MB 平稳；VSZ 466.73 GiB 不变；24 次全部有正确答案（0.01–0.23 s）；退出状态 0，无 SIGXCPU。另一组 24 次（检查位置只在一个 commit 有效，奇数次等满 60 s 超时）累计 CPU 4.88→8.77 s，RSS 从 853 MB 在空闲后回落到 28–100 MB。
+  - toydb 69c46e5↔5b72c04 交替 10 次（每次 Cargo.toml/lock + 385 文件）：累计 CPU 5.08→22.82 s，即 **≈1.8 s/次**；RSS 848→968 MB；答案 0.45–0.75 s；无 SIGXCPU。按 60 s 上限推算：toydb 清单级切换约 30 次后就会被杀。
+  - 长驻确实在沙箱内：`/usr/bin/log show` 在两次长驻的 RA 进程（pid 87790、88948）启动时各有十余条 `Sandbox: rust-analyzer(…) deny(1) system-info vfs.disk-space`（profile 不放行 sysctl，RA 照常工作），没有任何 `file-write` 拒绝——它只写缓存目录。
+- CPU 上限：toydb 每次切换只花 0.1–0.3 s CPU，但 codex 不同——探针里（沙箱外测得，CPU 计量相同）RA 加载 codex-rs 到空闲用 53–61 s CPU，一次 16 文件的热切换再花 **18.5–18.7 s CPU**（1:00.83→1:19.33，0:53.29→1:11.94）；CLI 冷启动在沙箱内已用 50 s。沙箱内实测（`switch --sandbox`，codex 71448a29e7→78ba047bda）：加载到空闲 52.35 s CPU，**一次热切换只加 3.7 s CPU**（→56.08），答案 +2.66 s 正确，退出状态 0，没有 SIGXCPU——但只是因为还差 4 s 到上限；再切一次就会越过 60 s。和沙箱外 18.5 s/次的差别见下一条。
+- 沙箱内外 RA 的切换行为不同：沙箱外每次 .rs 切换 RA 都重走 Fetching → CrateGraph → Roots Scanned → cachePriming（整个 workspace 重扫，codex 18.5 s CPU、toydb 0.3 s）；沙箱内同样的 16 文件切换**没有任何** `$/progress`/`serverStatus` 通知（3 s 内），RA 只按 `didChangeWatchedFiles` 更新那些文件，首个 definition 2.66 s 返回且正确。toydb 的两次沙箱长驻也一样：.rs 组 24 次切换 idle 都在 0.01–0.11 s（没有 quiescent 翻转），而含 Cargo.toml 的组每次都有 0.75 s 的重载。原因有记录：这次沙箱运行里 `/usr/bin/log show` 有 6 条 `Sandbox: rust-analyzer(…) deny(1) mach-lookup com.apple.FSEvents`（另有 642 条 `system-info vfs.disk-space`、2 条 DiskArbitration、1 条 coreservicesd），即沙箱外 RA 自己的 FSEvents 监视看到 checkout 后触发了整体重载，沙箱内这个监视拿不到，只剩客户端的 `didChangeWatchedFiles`；Cairn 的会话都在沙箱内，所以 **S2 的 RA 就绪判定不能依赖 Fetching 一定出现**（第 3 项的上限条款因此是必需的，不是兜底）。VSZ 恒为 466–467 GiB（dyld 共享缓存），远低于 512 GiB 上限，无分配失败。
+- RSS：toydb RA 850–1,000 MB，空闲一段时间后回落到 60–230 MB；codex RA 4.0–4.9 GB，切换后 3.4–4.3 GB。双槽（决定 7）若两槽都是 codex 量级约 8–9 GB，未在应用内实测。
+
+### 6. codex 上的热 RA 切换 — PASS（量到了；但规模结论见第 5 项）
+
+[`rust_analyzer_probe.py`](rust_analyzer_probe.py) 已改为 Cairn 的 initialize 能力集与沙箱环境变量，并加 `--serve-root/--target/--expect`（hover 判定，目标文件以 TO 字节 `didOpen`）；`s0_probe.py` 用 definition 判定同一组 commit。服务器根 `codex-rs/`（workspace 134 crates，Roots Scanned 1095）。
+
+| 组 | 变更 | 原型脚本（hover 正确 / quiescent） | s0_probe（跨文件 definition 正确 / quiescent） | 冷启动 |
+| --- | --- | --- | --- | --- |
+| 只有 .rs：71448a29e7→78ba047bda | 16 文件 | 2.94 s / 5.37 s | 7.73、7.40 s / 6.29、5.95 s | hover 9.11 s（quiescent 15.15 s）；definition 27.9 s（quiescent 16.1 s） |
+| 含 Cargo.lock：9ff47868eb→a47c661ea9（Cargo.lock −1、ext/skills/Cargo.toml −1 依赖、新文件 fielded_bm25.rs） | 7 文件（A=2 M=4 D=1） | 3.16 s / 5.12 s | 3.19 s / 5.49 s（`dynamic_skill_selector.rs:3:30` 的 `use` → 新文件 `fielded_bm25.rs:25`） | definition 9.21 s（quiescent 13.4 s） |
+
+- 原型脚本的 `switch-rs --target` 路径在 toydb 46308de→babe5de 上跑过一次：hover 正确 0.78 s，quiescent +0.78 s，与 s0_probe 的 definition 0.64–0.66 s 一致。
+- 表中数字都是沙箱外测得：两组热切换都在 5–6 s 回到 quiescent，比冷启动的 15–16 s 快约 3 倍，但每次切换 RA 都重走 Fetching → Building CrateGraph → Roots Scanned → cachePriming（1095 roots 重扫），CPU 18.5 s/次。沙箱内（FSEvents 被拒）同一 .rs 组不重载，definition 2.66 s 正确、CPU 3.7 s（第 5 项）。
+- hover 在 didOpen 的文件上先于 quiescent 正确（它只依赖该文件自身），不能作为"索引已更新"的证据；跨文件 definition 才是验收口径。
+- 含 Cargo.lock 组的 definition 在 `Roots Scanned` 结束后、cachePriming 期间就已正确（+3.19 s，quiescent +5.49 s）。最初选的使用点 `shadow_selection_experiment.rs:41:26`（`Box::new(FieldedBm25SkillSelector)`）热切换和冷启动都返回空（各 180 s），原因未查，换到 `use` 行后两者一致，所以不是热切换问题。
+- 这一组是在 `cargo fetch` 之后测的：之前离线 metadata 失败时（9ff47868eb 还带 `libwebrtc` git 依赖），RA 以 health=warning 加载却对 ext/skills 内的 definition 一直返回空（300 s），冷启动也一样——依赖不可得时 RA 的 crate graph 残缺，不是热切换问题，但用户机器上会以"精确分析空结果"出现。
+- RSS：codex RA 空闲 4.0–4.9 GB，切换后 2.6–4.3 GB；双槽按两份 codex 估算 8–9 GB（未实测）。
+
+### 结论：可以进入 S2，但先修订决定 5、9，并给决定 7、6 补条件
+
+| 项 | 结果 |
+| --- | --- |
+| 1 打包应用基线 | BLOCKED（原生四段计时、双槽 RSS）；CLI 代理 PASS |
+| 2 跨文件更新 | PASS（三种服务器热切换后首个正确跨文件结果 = 冷启动答案） |
+| 3 就绪信号 | PASS，但 RA 不能只看 quiescent 翻转，Pyright 没有协议信号 |
+| 4 配置变化 | PASS（Cargo/pyrightconfig/tsconfig 都热重载，无需重启条件） |
+| 5 真实沙箱长驻 | 写入边界 PASS；`ulimit -t 60` FAIL（codex 加载已用 52 s CPU，沙箱内每次 .rs 切换 3.7 s，第 2–3 次切换越限） |
+| 6 codex 热 RA | PASS（5–6 s 回到空闲 vs 冷 15–16 s；definition 7.4–7.7 s vs 冷 27.9 s） |
+
+需要修订的决定：
+
+- **决定 5（就绪确认）**：RA 的确认改为"`$/progress` `rustAnalyzer/Fetching` begin 出现之后的第一个 `serverStatus quiescent=true`"，不能用 `quiescent` 的 false→true 翻转（清单切换不发 false，.rs 切换 false 可迟到 2 s）；quiescent 后仍要保留 `-32801` 重试。而且在沙箱内（Cairn 的真实环境）只改 `.rs` 的切换根本不触发 Fetching、不发任何通知，答案直接正确——所以等 Fetching 必须有约 1 s 的上限，超时即放行；只有通知里含 Cargo.toml/Cargo.lock 时才一定会有重载信号。Pyright 没有 `$/progress`：源码变化直接放行（已 `didClose` 的前提下首个答案即正确），通知含 pyrightconfig/pyproject 时等 `window/logMessage` "Reloading configuration file"；tsserver 用 "Initializing JS/TS language features…" 的 end。"暂停新请求直到确认"必须真的挡住请求：RA 清单切换和 Pyright 配置切换都在通知后 0.5 s 内给过旧答案。
+- **决定 9（沙箱）**：废除累计 `ulimit -t 60`。实测沙箱内 codex 加载 52 s CPU、每次 .rs 热切换 3.7 s、toydb 清单切换 1.8 s/次（沙箱外因 FSEvents 触发整体重载是 18.5 s/次，不是 Cairn 会遇到的数字）；现有上限在 codex 上加载后只够切 1–2 次，CLI 冷启动已用 50 s。替代为按单次请求/切换的墙钟监控或把上限提到以小时计；`ulimit -v` 可保留（VSZ 恒 467 GiB）。写入边界按现配置即可：检出目录、借用的 `node_modules`/`.venv`、用户仓库与 `.git` 都已被拒。
+- **决定 7（双槽）**：codex 单槽 RSS 4–5 GB，双槽 8–9 GB；"默认不加释放策略"要改成按 RSS 或空闲时间释放待命槽，至少对大仓库。
+- **决定 6（复用条件）**：三种配置变化都能热重载，`configFingerprint` 走热更新的决定成立；补一条：Safe 模式下依赖离线不可得会让 RA 加载极慢（toydb 84 s，n=1）或 crate graph 残缺（codex 旧 lock 下 definition 全空），切换前后依赖可得性变化应作为"结果不可信"的标注条件，而不是复用条件。
+- S4 原生验收前要补第 1 项：在用户在场时用隔离 bundle id 的构建跑四段计时与双槽 RSS。
+
+复现：`docs/evidence/warm-lsp-switch-2026-10/s0_probe.py --help`；原始日志在本次会话 scratch 目录，未入库。
