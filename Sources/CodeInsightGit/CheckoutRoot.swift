@@ -134,13 +134,26 @@ public final class CheckoutRoot: @unchecked Sendable {
         return flock(descriptor, LOCK_EX | LOCK_NB) != 0
     }
 
+    /// Symlinks this checkout holds into the user's workspace, borrowing
+    /// ignored dependency directories (`node_modules`, a configured venv),
+    /// by checkout-relative path → workspace directory.
+    public private(set) var borrowedLinks: [String: URL] = [:]
+
     /// Makes the directory hold exactly `commit`'s regular files. The
     /// current HEAD is the baseline, so only changed paths are rewritten;
     /// untracked files that are not in the way are left alone.
-    public func checkout(commit: GitOID) throws {
+    ///
+    /// `links` is the borrowed-link set wanted for this commit. Links no
+    /// longer wanted, pointing elsewhere, or sitting on a path the commit
+    /// tracks are removed *before* the checkout, so it never writes through
+    /// a link into the workspace; the rest are created afterwards where the
+    /// parent directory exists and nothing occupies the path (tracked
+    /// content wins).
+    public func checkout(commit: GitOID, links: [String: URL] = [:]) throws {
         guard FileManager.default.fileExists(atPath: sourceObjectsPath) else {
             throw CheckoutError.sourceObjectsUnavailable(sourceObjectsPath)
         }
+        var wanted: [String: URL] = [:]
         let specialPaths: [(path: String, fileMode: FileMode)] = try LibGit2Executor.sync {
             var object: OpaquePointer?
             try commit.hex.withCString { spec in
@@ -168,6 +181,39 @@ public final class CheckoutRoot: @unchecked Sendable {
             }
             defer { git_object_free(peeled) }
 
+            var entries: [TreeEntry] = []
+            var tree: OpaquePointer?
+            try check(git_commit_tree(&tree, peeled), "git_commit_tree")
+            if let tree {
+                defer { git_tree_free(tree) }
+                let collector = TreeWalkCollector()
+                let payload = Unmanaged.passUnretained(collector).toOpaque()
+                try check(
+                    git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
+                    "git_tree_walk"
+                )
+                entries = collector.entries
+            }
+            // Every tracked path and its ancestors.
+            var tracked = Set<String>()
+            for entry in entries {
+                var path = Substring(entry.path)
+                tracked.insert(String(path))
+                while let slash = path.lastIndex(of: "/") {
+                    path = path[..<slash]
+                    tracked.insert(String(path))
+                }
+            }
+            // A link needs its parent directory in the commit; it must
+            // not stand where the commit puts its own content.
+            wanted = links.filter { path, _ in
+                let parent = path.split(separator: "/").dropLast().joined(separator: "/")
+                return !tracked.contains(path) && (parent.isEmpty || tracked.contains(parent))
+            }
+            for (path, destination) in borrowedLinks where wanted[path] != destination {
+                try unlinkBorrowed(path)
+            }
+
             var options = git_checkout_options()
             try check(
                 git_checkout_options_init(&options, UInt32(GIT_CHECKOUT_OPTIONS_VERSION)),
@@ -179,18 +225,7 @@ public final class CheckoutRoot: @unchecked Sendable {
                 git_repository_set_head_detached(repository.raw, oid),
                 "git_repository_set_head_detached"
             )
-
-            var tree: OpaquePointer?
-            try check(git_commit_tree(&tree, peeled), "git_commit_tree")
-            guard let tree else { return [] }
-            defer { git_tree_free(tree) }
-            let collector = TreeWalkCollector()
-            let payload = Unmanaged.passUnretained(collector).toOpaque()
-            try check(
-                git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
-                "git_tree_walk"
-            )
-            return collector.entries
+            return entries
                 .filter { $0.fileMode == .symlink || $0.fileMode == .gitlink }
                 .map { ($0.path, $0.fileMode) }
         }
@@ -198,20 +233,75 @@ public final class CheckoutRoot: @unchecked Sendable {
         // every checkout: with core.symlinks off a link lands as a plain
         // file holding its target, and a gitlink as an empty directory.
         for entry in specialPaths {
-            var path = entry.path.split(separator: "/").reduce(url) {
-                $0.appendingPathComponent(String($1))
-            }
+            let path = fileURL(entry.path)
             guard FileManager.default.fileExists(atPath: path.path) else { continue }
             try FileManager.default.removeItem(at: path)
-            // Like checkout's own removals, drop the directories this emptied.
-            path = path.deletingLastPathComponent()
-            while path.standardizedFileURL != url,
-                  try FileManager.default.contentsOfDirectory(atPath: path.path).isEmpty
-            {
-                try FileManager.default.removeItem(at: path)
-                path = path.deletingLastPathComponent()
-            }
+            try removeEmptyParents(of: path)
         }
+        for (path, destination) in wanted.sorted(by: { $0.key < $1.key })
+            where borrowedLinks[path] == nil
+        {
+            let link = fileURL(path)
+            guard isRealDirectory(link.deletingLastPathComponent()),
+                  !occupied(link)
+            else { continue }
+            try FileManager.default.createSymbolicLink(
+                atPath: link.path,
+                withDestinationPath: destination.path
+            )
+            borrowedLinks[path] = destination
+        }
+    }
+
+    private func fileURL(_ relative: String) -> URL {
+        relative.split(separator: "/").reduce(url) {
+            $0.appendingPathComponent(String($1))
+        }
+    }
+
+    /// Removes the link itself, never what it points at, and the
+    /// directories its removal emptied.
+    private func unlinkBorrowed(_ path: String) throws {
+        borrowedLinks[path] = nil
+        let link = fileURL(path)
+        var status = stat()
+        guard lstat(link.path, &status) == 0,
+              status.st_mode & S_IFMT == S_IFLNK
+        else { return }
+        guard unlink(link.path) == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: link.path])
+        }
+        try removeEmptyParents(of: link)
+    }
+
+    /// Like checkout's own removals, drops the directories that became empty.
+    private func removeEmptyParents(of removed: URL) throws {
+        var path = removed.deletingLastPathComponent()
+        while path.standardizedFileURL != url,
+              try FileManager.default.contentsOfDirectory(atPath: path.path).isEmpty
+        {
+            try FileManager.default.removeItem(at: path)
+            path = path.deletingLastPathComponent()
+        }
+    }
+
+    private func occupied(_ file: URL) -> Bool {
+        var status = stat()
+        return lstat(file.path, &status) == 0
+    }
+
+    /// True for a directory reached from the checkout root without passing
+    /// through a symlink, so a new link never lands inside the workspace.
+    private func isRealDirectory(_ directory: URL) -> Bool {
+        var current = directory.standardizedFileURL
+        while current != url {
+            var status = stat()
+            guard lstat(current.path, &status) == 0,
+                  status.st_mode & S_IFMT == S_IFDIR
+            else { return false }
+            current = current.deletingLastPathComponent().standardizedFileURL
+        }
+        return true
     }
 
     /// Deletes the directory. The libgit2 handle is released on deinit.

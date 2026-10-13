@@ -255,6 +255,89 @@ func checkoutStoreLaunchCleanupRemovesOnlyUnownedDirectories() throws {
     try otherProcess.removeAll()
 }
 
+@Test
+func checkoutRootRecomputesBorrowedLinksAndNeverWritesThroughThem() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    try fixture.writeFile("app/package.json", "{}\n")
+    try fixture.writeFile("web/package.json", "{}\n")
+    try fixture.git("add", "-A")
+    try fixture.commit("two packages")
+    let first = try CommitSnapshot(repositoryURL: fixture.root)
+    // The next commit drops `web` and starts tracking a file inside
+    // `app/node_modules`, so that link must go before the checkout.
+    try fixture.git("rm", "-q", "-r", "web")
+    try fixture.writeFile("app/node_modules/vendored.js", "// tracked\n")
+    try fixture.git("add", "-f", "app/node_modules/vendored.js")
+    try fixture.commit("vendored")
+    let second = try CommitSnapshot(repositoryURL: fixture.root)
+
+    // Workspace dependency directories live outside the checkout.
+    let workspace = fixture.root.deletingLastPathComponent()
+        .appendingPathComponent("deps-\(fixture.root.lastPathComponent)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    let appModules = workspace.appendingPathComponent("app/node_modules", isDirectory: true)
+    let webModules = workspace.appendingPathComponent("web/node_modules", isDirectory: true)
+    let rootModules = workspace.appendingPathComponent("node_modules", isDirectory: true)
+    for directory in [appModules, webModules, rootModules] {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("dependency\n".utf8).write(to: directory.appendingPathComponent("index.js"))
+    }
+    let links = [
+        "node_modules": rootModules,
+        "app/node_modules": appModules,
+        "web/node_modules": webModules,
+        "missing/node_modules": rootModules,
+    ]
+
+    let store = CheckoutStore(parentURL: checkoutParent(beside: fixture))
+    defer { try? store.removeAll() }
+    let owner = UUID()
+    let root = try store.root(owner: owner, source: fixture.root)
+    func linkTarget(_ path: String) -> String? {
+        try? FileManager.default.destinationOfSymbolicLink(
+            atPath: root.url.appendingPathComponent(path).path
+        )
+    }
+
+    try root.checkout(commit: first.commitOID, links: links)
+    #expect(root.borrowedLinks == [
+        "node_modules": rootModules,
+        "app/node_modules": appModules,
+        "web/node_modules": webModules,
+    ], "a link whose parent directory the commit lacks is not created")
+    #expect(linkTarget("app/node_modules") == appModules.path)
+    #expect(!FileManager.default.fileExists(atPath: root.url.appendingPathComponent("missing").path))
+
+    try root.checkout(commit: second.commitOID, links: links)
+    #expect(root.borrowedLinks == ["node_modules": rootModules])
+    #expect(linkTarget("app/node_modules") == nil, "tracked content wins over the link")
+    #expect(try Data(contentsOf: root.url.appendingPathComponent("app/node_modules/vendored.js"))
+        == Data("// tracked\n".utf8))
+    #expect(!FileManager.default.fileExists(atPath: root.url.appendingPathComponent("web").path),
+            "the removed link's emptied parent goes too")
+    // Nothing reached the workspace through a link.
+    #expect(!FileManager.default.fileExists(atPath: appModules.appendingPathComponent("vendored.js").path))
+    #expect(try FileManager.default.contentsOfDirectory(atPath: appModules.path) == ["index.js"])
+
+    // A different target for a kept path replaces the link; an empty set
+    // removes the rest.
+    try root.checkout(commit: first.commitOID, links: ["node_modules": webModules])
+    #expect(root.borrowedLinks == ["node_modules": webModules])
+    #expect(linkTarget("node_modules") == webModules.path)
+    #expect(linkTarget("app/node_modules") == nil)
+    try root.checkout(commit: first.commitOID)
+    #expect(root.borrowedLinks.isEmpty)
+    #expect(linkTarget("node_modules") == nil)
+
+    // Deleting the checkout removes links, never the workspace directories.
+    try root.checkout(commit: first.commitOID, links: links)
+    try store.release(owner: owner)
+    for directory in [appModules, webModules, rootModules] {
+        #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("index.js").path))
+    }
+}
+
 /// A checkout parent beside (not inside) the repository, so it never shows
 /// up as an untracked path of the fixture.
 private func checkoutParent(beside fixture: GitFixture) -> URL {
