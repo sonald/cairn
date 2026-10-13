@@ -340,6 +340,7 @@ extension LSPLanguageSpec {
     static var pyright: LSPLanguageSpec {
         LSPLanguageSpec(
             serverName: "pyright",
+            switchReadiness: .pyright,
             capabilities: {
                 advertisedCapabilities($0, [
                     "definitionProvider": .definition,

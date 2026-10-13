@@ -16,6 +16,24 @@ enum LSPRequestFlow {
     case awaitQuiescence
 }
 
+/// How a warm switch learns the server took in `didChangeWatchedFiles`
+/// (S0 measurements, docs/evidence/warm-lsp-switch-2026-10).
+enum LSPSwitchReadiness {
+    /// Wait up to `LSPLanguageSession.signalWindow` for `$/progress`
+    /// `rustAnalyzer/Fetching` to begin, then for the next `serverStatus
+    /// quiescent=true`. In the sandbox a source-only change starts no
+    /// reload and answers are already right, so no Fetching means ready.
+    case rustAnalyzer
+    /// No progress at all: a source change is ready at once; a changed
+    /// configuration is ready once "Reloading configuration file" is
+    /// logged (earlier answers use the old configuration).
+    case pyright
+    /// Wait for "Initializing JS/TS language features" to end when it
+    /// begins within the signal window; tsserver answers requests only
+    /// after a project load it starts later.
+    case typeScript
+}
+
 /// What differs between the language servers behind `LSPLanguageSession`.
 /// Executable checks and launch configuration stay in each provider.
 struct LSPLanguageSpec {
@@ -25,6 +43,8 @@ struct LSPLanguageSpec {
     /// Sent with every `initialize`, including after a restart.
     var initializationOptions: [String: Any] = [:]
     var requestFlow: LSPRequestFlow = .direct
+    /// nil: a warm switch is ready as soon as the changes are sent.
+    var switchReadiness: LSPSwitchReadiness?
     /// `initialize` result → negotiated capabilities.
     var capabilities: (Any) -> ExactCapabilities
     /// Runs after capability derivation; a throw closes the client and fails
@@ -82,11 +102,24 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         )
     }
 
-    private let stateLock = NSLock()
+    /// A switch waits for its readiness signal no longer than this; a
+    /// server that is not ready by then is replaced (decision 9).
+    static let switchReadyLimit: TimeInterval = 120
+    /// rust-analyzer and tsserver start their reload within this after the
+    /// notification (S0: 0.11–0.33 s), or not at all.
+    static let signalWindow: TimeInterval = 1
+    /// Pyright logs the configuration reload within 0.2 s (S0); without
+    /// it the switch fails and a cold start (≈0.4 s) replaces the session.
+    static let configReloadWindow: TimeInterval = 5
+
+    /// A condition so requests can wait out a switch.
+    private let stateLock = NSCondition()
     private let operationLock = NSLock()
     private let restartClient: @Sendable () throws -> LSPClient
     private let projectURL: URL
-    private let snapshot: any Snapshot
+    /// Written only while both locks are held (a switch), so readers
+    /// holding either one see a stable value.
+    private var snapshot: any Snapshot
     private let language: LSPLanguageSpec
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
@@ -96,9 +129,20 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     private var cancelled = false
     private var activeBatch: ExactRequestBatch?
     private var didRestart = false
-    private let baseAttribution: ExactAttribution
+    private var baseAttribution: ExactAttribution
     private var currentEnvironment: ExactAnalysisEnvironment
     private var environmentObserver: (@Sendable (ExactAnalysisEnvironment) -> Void)?
+    /// True while a switch runs; requests wait before reading the snapshot.
+    private var switching = false
+    /// Advances with every switch; a request that read the snapshot under
+    /// an older value is cancelled instead of opening stale bytes.
+    private var switchGeneration: UInt64 = 0
+
+    var processIdentifier: Int32? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return client.processIdentifier
+    }
 
     var readiness: ExactReadiness {
         stateLock.lock()
@@ -455,6 +499,200 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         close()
     }
 
+    /// Decision 5's fixed order. The operation lock is held from closing
+    /// documents to the readiness confirmation, so no request can open a
+    /// file while the directory is rewritten or answer before the server
+    /// has taken the change in.
+    func switchSnapshot(
+        to newSnapshot: any Snapshot,
+        profile: ExactProfileKey,
+        changes: [ExactFileChange],
+        configChanged: Bool,
+        prepareFiles: () throws -> Void
+    ) throws {
+        stateLock.lock()
+        guard state == .ready || state == .preparing else {
+            let current = state
+            stateLock.unlock()
+            throw ExactError.unavailable(
+                "cannot switch a session that is \(current)"
+            )
+        }
+        switching = true
+        switchGeneration &+= 1
+        state = .preparing
+        cancelled = false
+        let inFlight = client
+        stateLock.unlock()
+        // Requests that already read the old snapshot stop here or at
+        // their next lock (generation check).
+        inFlight.cancelOutstandingRequests()
+        operationLock.lock()
+        defer {
+            operationLock.unlock()
+            stateLock.lock()
+            switching = false
+            stateLock.broadcast()
+            stateLock.unlock()
+        }
+        do {
+            stateLock.lock()
+            let activeClient = client
+            stateLock.unlock()
+            for path in openedFiles.sorted() {
+                try activeClient.notify("textDocument/didClose", params: [
+                    "textDocument": [
+                        "uri": projectURL.appendingPathComponent(path).absoluteString,
+                    ],
+                ])
+            }
+            openedFiles.removeAll()
+            try prepareFiles()
+            stateLock.lock()
+            snapshot = newSnapshot
+            baseAttribution = ExactAttribution(
+                provider: baseAttribution.provider,
+                toolVersion: baseAttribution.toolVersion,
+                configFingerprint: profile.configFingerprint,
+                environmentFingerprint: profile.environmentFingerprint,
+                featureSelection: baseAttribution.featureSelection,
+                environment: baseAttribution.environment,
+                generatedAt: Date()
+            )
+            stateLock.unlock()
+            if !changes.isEmpty {
+                let mark = activeClient.signalMark
+                try activeClient.notify(
+                    "workspace/didChangeWatchedFiles",
+                    params: ["changes": changes.map {
+                        ["uri": $0.url.absoluteString, "type": $0.kind.rawValue]
+                    }]
+                )
+                try awaitSwitchReadiness(
+                    activeClient,
+                    after: mark,
+                    configChanged: configChanged
+                )
+            }
+            stateLock.lock()
+            if state == .preparing { state = .ready }
+            stateLock.unlock()
+        } catch {
+            stateLock.lock()
+            if state != .closed {
+                // Half switched: the old answers are wrong and a restart
+                // would reopen the same directory, so stay unavailable
+                // until the coordinator replaces the session.
+                didRestart = true
+                state = .unavailable(
+                    "\(language.serverName) switch failed: \(error)"
+                )
+            }
+            stateLock.unlock()
+            throw error
+        }
+    }
+
+    private func awaitSwitchReadiness(
+        _ client: LSPClient,
+        after mark: Int,
+        configChanged: Bool
+    ) throws {
+        let shouldContinue: @Sendable () -> Bool = { [weak self] in
+            self.map { !$0.isCancelled } ?? false
+        }
+        func progress(
+            _ method: String,
+            _ params: [String: Any],
+            kind: String
+        ) -> [String: Any]? {
+            guard method == "$/progress",
+                  let value = params["value"] as? [String: Any],
+                  value["kind"] as? String == kind
+            else { return nil }
+            return value
+        }
+        func notReady(_ signal: String) -> LSPError {
+            .timeout("\(language.serverName) \(signal) after switch")
+        }
+        switch language.switchReadiness {
+        case nil:
+            return
+        case .rustAnalyzer:
+            guard let fetching = try client.waitForSignal(
+                after: mark,
+                timeout: Self.signalWindow,
+                shouldContinue: shouldContinue,
+                matching: { method, params in
+                    progress(method, params, kind: "begin") != nil
+                        && params["token"] as? String == "rustAnalyzer/Fetching"
+                }
+            ) else { return }
+            guard try client.waitForSignal(
+                after: fetching.mark,
+                timeout: Self.switchReadyLimit,
+                shouldContinue: shouldContinue,
+                matching: { method, params in
+                    method == "experimental/serverStatus"
+                        && params["quiescent"] as? Bool == true
+                }
+            ) != nil else { throw notReady("quiescence") }
+        case .pyright:
+            guard configChanged else { return }
+            guard try client.waitForSignal(
+                after: mark,
+                timeout: Self.configReloadWindow,
+                shouldContinue: shouldContinue,
+                matching: { method, params in
+                    method == "window/logMessage"
+                        && (params["message"] as? String)?
+                            .contains("Reloading configuration file") == true
+                }
+            ) != nil else { throw notReady("configuration reload") }
+        case .typeScript:
+            guard let begin = try client.waitForSignal(
+                after: mark,
+                timeout: Self.signalWindow,
+                shouldContinue: shouldContinue,
+                matching: { method, params in
+                    (progress(method, params, kind: "begin")?["title"] as? String)?
+                        .contains("Initializing JS/TS language features") == true
+                }
+            ) else { return }
+            let token = "\(begin.params["token"] ?? "")"
+            guard try client.waitForSignal(
+                after: begin.mark,
+                timeout: Self.switchReadyLimit,
+                shouldContinue: shouldContinue,
+                matching: { method, params in
+                    progress(method, params, kind: "end") != nil
+                        && "\(params["token"] ?? "")" == token
+                }
+            ) != nil else { throw notReady("project load") }
+        }
+    }
+
+    /// Waits out a switch in progress, then returns the snapshot a request
+    /// reads and the switch generation it belongs to; nil once `batch` is
+    /// no longer current.
+    private func currentView(
+        batch: ExactRequestBatch?
+    ) -> (snapshot: any Snapshot, generation: UInt64)? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        while switching {
+            guard batch?.isCurrent != false else { return nil }
+            _ = stateLock.wait(until: Date().addingTimeInterval(0.01))
+        }
+        return (snapshot, switchGeneration)
+    }
+
+    private func isSwitchGeneration(_ generation: UInt64) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return switchGeneration == generation
+    }
+
     private func requestLocations<Result>(
         file: String,
         byteOffset: Int,
@@ -467,7 +705,8 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         guard language.acceptsPath(path) else {
             throw ExactError.invalidPath(path)
         }
-        let bytes = try snapshot.readBytes(path: path)
+        guard let view = currentView(batch: batch) else { return nil }
+        let bytes = try view.snapshot.readBytes(path: path)
         guard let map = LSPPositionMap(utf8: bytes) else {
             throw ExactError.invalidUTF8(path)
         }
@@ -491,6 +730,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         return try request(
             method: method,
             params: params,
+            switchGeneration: view.generation,
             beforeRequest: { client in
                 try self.open(path: path, bytes: bytes, client: client)
             },
@@ -503,10 +743,12 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     /// the client, open documents) and request. With `.awaitQuiescence` the
     /// session waits between them, outside the lock. A crash or closed
     /// connection in either phase restarts the server once; a second one is
-    /// "restart exhausted".
+    /// "restart exhausted". A switch since `switchGeneration` cancels the
+    /// request: its bytes and positions belong to the old snapshot.
     private func request<Result>(
         method: String,
         params: Any,
+        switchGeneration expectedSwitch: UInt64,
         beforeRequest: (LSPClient) throws -> Void,
         batch: ExactRequestBatch? = nil,
         parse: (Any) throws -> Result?
@@ -528,7 +770,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                     cancelled = false
                     activeBatch = batch
                     stateLock.unlock()
-                    guard batch?.isCurrent != false else {
+                    guard batch?.isCurrent != false,
+                          isSwitchGeneration(expectedSwitch)
+                    else {
                         throw LSPError.cancelled(method)
                     }
                     if activeClient == nil {
@@ -549,6 +793,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                         shouldContinue: { [weak self] in
                             guard let self else { return false }
                             return batch?.isCurrent != false && !self.isCancelled
+                                && self.isSwitchGeneration(expectedSwitch)
                         }
                     )
                 }
@@ -593,6 +838,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                 }
                 do {
                     try throwIfCancelled(method)
+                    guard isSwitchGeneration(expectedSwitch) else {
+                        throw LSPError.cancelled(method)
+                    }
                     let requestWasReady = awaitsQuiescence
                         && currentClient.isQuiescent
                     let response = try currentClient.request(
@@ -846,9 +1094,11 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         callSiteURI: @escaping (ExactCallHierarchyItem) -> String,
         batch: ExactRequestBatch? = nil
     ) throws -> [ExactCallRelation]? {
-        try request(
+        guard let view = currentView(batch: batch) else { return nil }
+        return try request(
             method: method,
-            params: ["item": try callHierarchyItemObject(item)],
+            params: ["item": try callHierarchyItemObject(item, snapshot: view.snapshot)],
+            switchGeneration: view.generation,
             beforeRequest: { client in
                 try self.open(item: item, client: client)
             },
@@ -888,7 +1138,8 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     }
 
     private func callHierarchyItemObject(
-        _ item: ExactCallHierarchyItem
+        _ item: ExactCallHierarchyItem,
+        snapshot: any Snapshot
     ) throws -> [String: Any] {
         var object: [String: Any] = [
             "name": item.name,
@@ -958,15 +1209,18 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         return cancelled || state == .closed
     }
 
+    // A switch owns the state until it confirms readiness.
     private func markPreparing() {
         stateLock.lock()
-        if state == .preparing || state == .ready { state = .preparing }
+        if !switching, state == .preparing || state == .ready {
+            state = .preparing
+        }
         stateLock.unlock()
     }
 
     private func markReady() {
         stateLock.lock()
-        if state == .preparing || state == .ready { state = .ready }
+        if !switching, state == .preparing || state == .ready { state = .ready }
         stateLock.unlock()
     }
 

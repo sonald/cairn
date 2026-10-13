@@ -426,6 +426,59 @@ public final class ExactRequestBatch: @unchecked Sendable {
     }
 }
 
+/// One `workspace/didChangeWatchedFiles` entry; the raw values are the LSP
+/// `FileChangeType`.
+public struct ExactFileChange: Equatable, Sendable {
+    public enum Kind: Int, Sendable {
+        case created = 1
+        case changed = 2
+        case deleted = 3
+    }
+
+    public let url: URL
+    public let kind: Kind
+
+    public init(url: URL, kind: Kind) {
+        self.url = url
+        self.kind = kind
+    }
+
+    /// What changes on disk under `root` when it goes from `old` to `new`.
+    /// Symbolic links and gitlinks are never written to disk, so a path
+    /// that becomes one is deleted.
+    public static func changes(
+        from old: any Snapshot,
+        to new: any Snapshot,
+        under root: URL
+    ) -> [ExactFileChange] {
+        func onDisk(_ snapshot: any Snapshot) -> [String: ContentID] {
+            var files: [String: ContentID] = [:]
+            for file in snapshot.listFiles()
+                where file.fileMode != .symlink && file.fileMode != .gitlink
+            {
+                files[file.path] = file.contentID
+            }
+            return files
+        }
+        let before = onDisk(old)
+        let after = onDisk(new)
+        var changes: [(String, Kind)] = []
+        for (path, content) in after {
+            if let previous = before[path] {
+                if previous != content { changes.append((path, .changed)) }
+            } else {
+                changes.append((path, .created))
+            }
+        }
+        for path in before.keys where after[path] == nil {
+            changes.append((path, .deleted))
+        }
+        return changes.sorted { $0.0 < $1.0 }.map {
+            ExactFileChange(url: root.appendingPathComponent($0.0), kind: $0.1)
+        }
+    }
+}
+
 public protocol ExactSession: AnyObject, Sendable {
     var negotiatedCapabilities: ExactCapabilities { get }
     var readiness: ExactReadiness { get }
@@ -433,6 +486,21 @@ public protocol ExactSession: AnyObject, Sendable {
     var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get set
     }
+    /// The server process, for the standby memory limit; nil when unknown.
+    var processIdentifier: Int32? { get }
+
+    /// Moves a running session to `snapshot` (warm switch): requests pause,
+    /// in-flight ones are cancelled, open documents close, `prepareFiles`
+    /// rewrites the directory the server reads, `changes` are reported, and
+    /// the call returns once the server confirms it took them in. On a
+    /// throw the session is unavailable and must be replaced.
+    func switchSnapshot(
+        to snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        changes: [ExactFileChange],
+        configChanged: Bool,
+        prepareFiles: () throws -> Void
+    ) throws
 
     func definition(
         file: String,
@@ -512,6 +580,18 @@ public extension ExactSession {
     var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get { nil }
         set {}
+    }
+
+    var processIdentifier: Int32? { nil }
+
+    func switchSnapshot(
+        to snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        changes: [ExactFileChange],
+        configChanged: Bool,
+        prepareFiles: () throws -> Void
+    ) throws {
+        throw ExactError.unavailable("warm switch unsupported")
     }
 
     func definition(

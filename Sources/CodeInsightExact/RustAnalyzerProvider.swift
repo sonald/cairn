@@ -296,6 +296,7 @@ extension LSPLanguageSpec {
             serverName: "rust-analyzer",
             initializationOptions: initializationOptions,
             requestFlow: .awaitQuiescence,
+            switchReadiness: .rustAnalyzer,
             capabilities: {
                 // Definition is assumed; the advertised set is not narrowed.
                 ExactCapabilities.definition.union(advertisedCapabilities($0, [

@@ -388,6 +388,7 @@ extension LSPLanguageSpec {
         LSPLanguageSpec(
             serverName: "typescript",
             initializationOptions: initializationOptions,
+            switchReadiness: .typeScript,
             capabilities: {
                 advertisedCapabilities($0, [
                     "definitionProvider": .definition,

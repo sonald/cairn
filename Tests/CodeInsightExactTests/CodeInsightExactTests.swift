@@ -3821,7 +3821,7 @@ func trustedSandboxAllowsTargetButStillDeniesNetwork() throws {
 }
 
 @Test
-func sandboxShimSetsCPUAndAddressSpaceLimits() throws {
+func sandboxShimSetsTheAddressSpaceLimitButNoCPULimit() throws {
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let project = root.appendingPathComponent("project", isDirectory: true)
@@ -4500,6 +4500,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedHoverContentFormat: [String]?
     private var _receivedServerStatusCapability = false
     private var _referenceIncludeDeclarations: [Bool] = []
+    private var _notifications: [(method: String, params: [String: Any])] = []
     private let implementationProvider: Any?
     private let implementationResult: Any
     private let callHierarchyProvider: Any?
@@ -4539,6 +4540,10 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     }
     var referenceIncludeDeclarations: [Bool] {
         locked { _referenceIncludeDeclarations }
+    }
+    /// Client notifications in arrival order.
+    var notifications: [(method: String, params: [String: Any])] {
+        locked { _notifications }
     }
     var error: Error? { locked { _error } }
 
@@ -4747,13 +4752,20 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                         "jsonrpc": "2.0", "id": id, "result": NSNull(),
                     ])
                 }
-            } else if method == "initialized" {
-                locked { _receivedInitialized = true }
-            } else if method == "exit" {
-                locked { _receivedExit = true }
-                try output.close()
-                done()
-                return true
+            } else {
+                locked {
+                    _notifications.append(
+                        (method, message["params"] as? [String: Any] ?? [:])
+                    )
+                }
+                if method == "initialized" {
+                    locked { _receivedInitialized = true }
+                } else if method == "exit" {
+                    locked { _receivedExit = true }
+                    try output.close()
+                    done()
+                    return true
+                }
             }
         } else if (message["id"] as? NSNumber)?.intValue == 900,
                   message.keys.contains("result")
@@ -4769,6 +4781,10 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
             "method": "experimental/serverStatus",
             "params": ["health": "ok", "quiescent": quiescent],
         ])
+    }
+
+    func sendNotification(_ method: String, _ params: [String: Any]) throws {
+        try write(["jsonrpc": "2.0", "method": method, "params": params])
     }
 
     private func write(_ message: [String: Any]) throws {
@@ -5511,4 +5527,389 @@ func exactTypeDefinitionSendsTypeDefinitionMethod() throws {
         #expect(targets.first?.location.file.hasSuffix("src/lib.rs") == true)
     }
     #expect(log.recorded == ["textDocument/typeDefinition"])
+}
+
+// MARK: S2 — warm switch
+
+/// A session over directory `before` whose snapshot can be switched to
+/// `after`: `src/main.rs` changes, `src/extra.rs` appears, `src/old.rs`
+/// goes away, `src/lib.rs` stays.
+private func withSwitchableFakeSession(
+    language: LSPLanguageSpec,
+    body: (
+        LSPLanguageSession,
+        PipeFakeLSPServer,
+        _ before: DirectorySnapshot,
+        _ after: DirectorySnapshot
+    ) throws -> Void
+) throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let before = root.appendingPathComponent("before", isDirectory: true)
+    let after = root.appendingPathComponent("after", isDirectory: true)
+    for (directory, files) in [
+        (before, [
+            "src/lib.rs": "pub fn answer() -> i32 { 1 }\n",
+            "src/main.rs": "fn main() { answer(); }\n",
+            "src/old.rs": "pub fn old() {}\n",
+        ]),
+        (after, [
+            "src/lib.rs": "pub fn answer() -> i32 { 1 }\n",
+            "src/main.rs": "fn main() { let _ = answer(); }\n",
+            "src/extra.rs": "pub fn extra() {}\n",
+        ]),
+    ] {
+        for (path, text) in files {
+            let url = directory.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(text.utf8).write(to: url)
+        }
+    }
+    let beforeSnapshot = try DirectorySnapshot(
+        root: before,
+        files: ["src/lib.rs", "src/main.rs", "src/old.rs"]
+    )
+    let afterSnapshot = try DirectorySnapshot(
+        root: after,
+        files: ["src/extra.rs", "src/lib.rs", "src/main.rs"]
+    )
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let libURI = before.appendingPathComponent("src/lib.rs").absoluteString
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            method == "textDocument/definition"
+                ? .result(["uri": libURI, "range": lspRange(line: 0, character: 7)])
+                : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let session = try LSPLanguageSession.start(
+        client: LSPClient(
+            readHandle: serverToClient.fileHandleForReading,
+            writeHandle: clientToServer.fileHandleForWriting
+        ),
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: before,
+        snapshot: beforeSnapshot,
+        language: language,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-switch")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    try body(session, server, beforeSnapshot, afterSnapshot)
+}
+
+private func plainSwitchSpec(
+    _ readiness: LSPSwitchReadiness?
+) -> LSPLanguageSpec {
+    LSPLanguageSpec(
+        serverName: "fake",
+        switchReadiness: readiness,
+        capabilities: { _ in [.definition] },
+        languageID: { _ in "rust" }
+    )
+}
+
+private func switchProfile(config: String = "config") -> ExactProfileKey {
+    ExactProfileKey(
+        language: .rust,
+        configFingerprint: config,
+        environmentFingerprint: ""
+    )
+}
+
+private func switchChanges(
+    _ from: DirectorySnapshot,
+    _ to: DirectorySnapshot,
+    server root: DirectorySnapshot
+) -> [ExactFileChange] {
+    ExactFileChange.changes(from: from, to: to, under: root.root)
+}
+
+/// Polls `condition` for up to five seconds.
+private func eventually(_ condition: () -> Bool) -> Bool {
+    let deadline = Date().addingTimeInterval(5)
+    while Date() < deadline {
+        if condition() { return true }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    return condition()
+}
+
+/// Runs `work` on its own thread; the returned closure waits for it and
+/// reports whether it finished without throwing.
+private func inBackground(
+    _ work: @escaping @Sendable () throws -> Void
+) -> () -> Bool {
+    let finished = DispatchSemaphore(value: 0)
+    let outcome = NSLockedFlag()
+    Thread.detachNewThread {
+        if (try? work()) != nil { outcome.set() }
+        finished.signal()
+    }
+    return {
+        _ = finished.wait(timeout: .now() + 10)
+        return outcome.value
+    }
+}
+
+private final class NSLockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored = false
+    var value: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+    func set() {
+        lock.lock()
+        stored = true
+        lock.unlock()
+    }
+}
+
+private func notificationMethods(_ server: PipeFakeLSPServer) -> [String] {
+    server.notifications.map(\.method).filter { $0 != "initialized" }
+}
+
+@Test
+func warmSwitchClosesOpenDocumentsBeforeTheCheckoutAndReportsEveryChange() throws {
+    try withSwitchableFakeSession(language: plainSwitchSpec(nil)) {
+        session, server, before, after in
+        _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        let changes = switchChanges(before, after, server: before)
+        #expect(changes.map { $0.url.lastPathComponent } == [
+            "extra.rs", "main.rs", "old.rs",
+        ])
+        #expect(changes.map(\.kind) == [.created, .changed, .deleted])
+
+        var seenAtCheckout: [String] = []
+        try session.switchSnapshot(
+            to: after,
+            profile: switchProfile(config: "config-2"),
+            changes: changes,
+            configChanged: true,
+            prepareFiles: {
+                _ = eventually { notificationMethods(server).count >= 2 }
+                seenAtCheckout = notificationMethods(server)
+            }
+        )
+        // The checkout ran after the open document closed, with nothing
+        // reopened in between.
+        #expect(seenAtCheckout == ["textDocument/didOpen", "textDocument/didClose"])
+        #expect(session.readiness == .ready)
+        #expect(session.attribution.configFingerprint == "config-2")
+        #expect(eventually { notificationMethods(server).count == 3 })
+        let watched = try #require(server.notifications.last)
+        #expect(watched.method == "workspace/didChangeWatchedFiles")
+        let reported = (watched.params["changes"] as? [[String: Any]])?.compactMap {
+            $0["type"] as? Int
+        }
+        #expect(reported == [1, 2, 3])
+
+        // The next request opens the new bytes.
+        _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        #expect(eventually { notificationMethods(server).count == 4 })
+        let reopened = try #require(server.notifications.last)
+        let document = reopened.params["textDocument"] as? [String: Any]
+        #expect(reopened.method == "textDocument/didOpen")
+        #expect(document?["text"] as? String == "fn main() { let _ = answer(); }\n")
+    }
+}
+
+@Test
+func warmSwitchHoldsRequestsUntilRustAnalyzerFinishesTheReload() throws {
+    try withSwitchableFakeSession(
+        language: .rustAnalyzer(initializationOptions: [:], diagnosticObserver: nil)
+    ) { session, server, before, after in
+        _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        let changes = switchChanges(before, after, server: before)
+        let switched = inBackground {
+            try session.switchSnapshot(
+                to: after,
+                profile: switchProfile(config: "manifest-2"),
+                changes: changes,
+                configChanged: true,
+                prepareFiles: {}
+            )
+        }
+        #expect(eventually {
+            notificationMethods(server).last == "workspace/didChangeWatchedFiles"
+        })
+        // A manifest reload: Fetching begins, quiescent=false never comes.
+        try server.sendNotification("$/progress", [
+            "token": "rustAnalyzer/Fetching",
+            "value": ["kind": "begin", "title": "Fetching"],
+        ])
+        let answered = inBackground {
+            _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        }
+        Thread.sleep(forTimeInterval: 1.3)
+        // Past the signal window, neither the switch nor the request got
+        // past the reload.
+        #expect(session.readiness == .preparing)
+        #expect(server.requestMethods.filter { $0 == "textDocument/definition" }.count == 1)
+        #expect(notificationMethods(server).last == "workspace/didChangeWatchedFiles")
+
+        try server.sendServerStatus(quiescent: true)
+        #expect(switched())
+        #expect(answered())
+        #expect(server.requestMethods.filter { $0 == "textDocument/definition" }.count == 2)
+        #expect(session.attribution.configFingerprint == "manifest-2")
+    }
+}
+
+@Test
+func warmSwitchReleasesRustAnalyzerWhenNoReloadStarts() throws {
+    try withSwitchableFakeSession(
+        language: .rustAnalyzer(initializationOptions: [:], diagnosticObserver: nil)
+    ) { session, _, before, after in
+        let started = Date()
+        try session.switchSnapshot(
+            to: after,
+            profile: switchProfile(),
+            changes: switchChanges(before, after, server: before),
+            configChanged: false,
+            prepareFiles: {}
+        )
+        let elapsed = Date().timeIntervalSince(started)
+        // In the sandbox a source-only switch sends nothing; the session
+        // waits out the signal window and then answers.
+        #expect(elapsed >= LSPLanguageSession.signalWindow * 0.9)
+        #expect(elapsed < LSPLanguageSession.signalWindow + 2)
+        #expect(session.readiness == .ready)
+        guard case .completed(let targets) = try session.definition(
+            file: "src/main.rs",
+            byteOffset: 12
+        ) else {
+            Issue.record("definition after the switch did not complete")
+            return
+        }
+        #expect(targets.first?.location.file == "src/lib.rs")
+    }
+}
+
+@Test
+func warmSwitchWaitsForPyrightOnlyWhenTheConfigurationChanged() throws {
+    try withSwitchableFakeSession(language: plainSwitchSpec(.pyright)) {
+        session, server, before, after in
+        let started = Date()
+        try session.switchSnapshot(
+            to: after,
+            profile: switchProfile(),
+            changes: switchChanges(before, after, server: before),
+            configChanged: false,
+            prepareFiles: {}
+        )
+        #expect(Date().timeIntervalSince(started) < 0.5)
+
+        let changes = switchChanges(after, before, server: before)
+        let switched = inBackground {
+            try session.switchSnapshot(
+                to: before,
+                profile: switchProfile(config: "pyright-2"),
+                changes: changes,
+                configChanged: true,
+                prepareFiles: {}
+            )
+        }
+        #expect(eventually {
+            notificationMethods(server).filter {
+                $0 == "workspace/didChangeWatchedFiles"
+            }.count == 2
+        })
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(session.readiness == .preparing)
+        try server.sendNotification("window/logMessage", [
+            "type": 3,
+            "message": "Reloading configuration file at /fixture/pyrightconfig.json",
+        ])
+        #expect(switched())
+        #expect(session.readiness == .ready)
+    }
+}
+
+@Test
+func warmSwitchWaitsForTheTypeScriptProjectLoadToEnd() throws {
+    try withSwitchableFakeSession(language: plainSwitchSpec(.typeScript)) {
+        session, server, before, after in
+        let changes = switchChanges(before, after, server: before)
+        let switched = inBackground {
+            try session.switchSnapshot(
+                to: after,
+                profile: switchProfile(),
+                changes: changes,
+                configChanged: false,
+                prepareFiles: {}
+            )
+        }
+        #expect(eventually {
+            notificationMethods(server).last == "workspace/didChangeWatchedFiles"
+        })
+        try server.sendNotification("$/progress", [
+            "token": "load-1",
+            "value": [
+                "kind": "begin",
+                "title": "Initializing JS/TS language features…",
+            ],
+        ])
+        Thread.sleep(forTimeInterval: 1.3)
+        // Past the signal window: the load that began still holds it.
+        #expect(session.readiness == .preparing)
+        try server.sendNotification("$/progress", [
+            "token": "load-1",
+            "value": ["kind": "end"],
+        ])
+        #expect(switched())
+        #expect(session.readiness == .ready)
+    }
+}
+
+@Test
+func warmSwitchWhoseCheckoutFailsLeavesTheSessionUnavailable() throws {
+    try withSwitchableFakeSession(language: plainSwitchSpec(nil)) {
+        session, server, before, after in
+        _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        #expect(throws: CheckoutError.self) {
+            try session.switchSnapshot(
+                to: after,
+                profile: switchProfile(),
+                changes: switchChanges(before, after, server: before),
+                configChanged: false,
+                prepareFiles: {
+                    throw CheckoutError.sourceObjectsUnavailable("/gone")
+                }
+            )
+        }
+        guard case .unavailable = session.readiness else {
+            Issue.record("a failed switch left the session \(session.readiness)")
+            return
+        }
+        // No silent restart onto the half-written directory, and no
+        // document opened after the failure.
+        #expect(throws: ExactError.self) {
+            _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+        }
+        guard case .unavailable(let reason) = session.readiness,
+              reason.contains("switch failed")
+        else {
+            Issue.record("the request restarted the session: \(session.readiness)")
+            return
+        }
+        #expect(notificationMethods(server) == [
+            "textDocument/didOpen", "textDocument/didClose",
+        ])
+    }
 }
