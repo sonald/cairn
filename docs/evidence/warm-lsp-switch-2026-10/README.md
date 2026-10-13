@@ -1,6 +1,6 @@
 # 热语言服务器跨 commit 原地 checkout 探针（2026-10-12）
 
-为"切换阅读 commit 时精确分析慢、退化"立项前的原型测量。结论用于 [commit 阅读计划](../../plans/commit-reading-warm-exact.md)；它不是当前产品的验收结果。
+为"切换阅读 commit 时精确分析慢、退化"立项前的原型测量。结论已归入 [product.md](../../product.md)“只读与分析信任”与 [architecture.md](../../architecture.md)“精确分析会话与历史检出”（计划文件实现后已删除，可从 Git 历史查阅）；它不是当前产品的验收结果。
 
 ## 环境
 
@@ -13,7 +13,7 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 | 项 | 数值 |
 | --- | --- |
 | 索引切换（`codeinsight switch-stats`） | 相邻 commit 25 ms（内容复用 100%），HEAD~100→HEAD 86 ms（复用 5%） |
-| 整树导出（`git archive \| tar` 代理 Materializer） | 70 ms（530 文件）；tokio 1.47.1 100 ms（783 文件，6.9 MB） |
+| 整树导出（`git archive \| tar` 代理当时的导出缓存 Materializer，已退役） | 70 ms（530 文件）；tokio 1.47.1 100 ms（783 文件，6.9 MB） |
 | 增量 checkout | 相邻 10 ms，HEAD~100↔HEAD 70–90 ms |
 | rust-analyzer 冷启动到第一个 hover（`codeinsight exact-hover`，含沙箱） | 2.3–3.0 s |
 
@@ -62,7 +62,7 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 
 ## S0 门槛（2026-10-13）
 
-对应[计划](../../plans/commit-reading-warm-exact.md) S0 段的六项。全部实测；每项标 PASS / FAIL / BLOCKED。
+对应当时计划（已删除）S0 段的六项；下文“决定 N”指该计划的编号，现行结论见 architecture.md。全部实测；每项标 PASS / FAIL / BLOCKED。
 
 ### 环境与方法
 
@@ -76,7 +76,7 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 
 - 原生驱动：隔离副本 `dev.cairn.s0` 的 computer-use 访问请求被拒绝（`user_denied`）；已授权的 `dev.cairn.Cairn` 被另一会话正在跑的 Cairn 实例占用（窗口 "codex — Cairn"），不能用它做切换；版本选择器本来也需要全屏控制（见 memory）。因此"正文出现 / 基础索引可用 / 精确就绪 / 返回刚读过的版本"四段墙钟和双槽 RSS 都 **BLOCKED**，留给 S4 在用户在场时补。
 - 隔离副本确实在 toydb 上跑起来了：它拉起的 rust-analyzer（pid 71502）RSS 726 MB、CPU 4.57 s（加载完成后），进程环境 `TMPDIR=~/Library/Caches/CodeInsight/Exact/tmp`、`XDG_CACHE_HOME=~/Library/Caches/CodeInsight/Exact`、`CARGO_NET_OFFLINE=true`，与 `Sandbox.swift` 一致；`ps` 看不到 sandbox-exec 参数（它 exec 成服务器进程），所以沙箱保真度只能靠下面第 5 项的写入拒绝来证明。
-- CLI 代理（release 二进制，在用户仓库上、Safe 模式、经沙箱；每条 = Materializer 不参与的工作区快照 + 冷启动 RA + 第一个 hover，相当于今天每次切 commit 要重来的部分）：
+- CLI 代理（release 二进制，在用户仓库上、Safe 模式、经沙箱；每条 = 当时的导出缓存（已退役）不参与的工作区快照 + 冷启动 RA + 第一个 hover，相当于今天每次切 commit 要重来的部分）：
 
 | 命令 | 3 次 wall | user CPU |
 | --- | --- | --- |
@@ -177,3 +177,84 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 - S4 原生验收前要补第 1 项：在用户在场时用隔离 bundle id 的构建跑四段计时与双槽 RSS。
 
 复现：`docs/evidence/warm-lsp-switch-2026-10/s0_probe.py --help`；原始日志在本次会话 scratch 目录，未入库。
+
+## 实现后测量（2026-10-13）
+
+**测试层证据，非原生验收。** S1–S3 合入后（分支线性包含 a4f117d），用仓库里的真实语料测试复测热切换；它们走 `RustAnalyzerProvider` 的 Safe 模式（沙箱）、`CheckoutRoot` 检出目录与 `LSPLanguageSession.switchSnapshot` 的就绪确认，但不经 `ExactCoordinator` 与界面，不含正文、索引与状态栏时间。环境同 S0（M3 Pro，rust-analyzer 65ac641199，Xcode 27.0 / Swift 6.4）。
+
+| 用例（测试） | 冷启动 | 热切换返回（含就绪确认） | 首个正确答案 |
+| --- | --- | --- | --- |
+| toydb 46308de→babe5de，`execution/mod.rs:40:79` → `join.rs:142 HashJoin`（`rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb`） | 2.76–2.99 s（S2 报告）；本次复测 3.67 / 2.82 s | 0.46–0.49 s；复测 0.49 / 0.48 s | 0.50–0.54 s；复测 0.54 / 0.53 s |
+| toydb 69c46e5→5b72c04（Cargo.toml/Cargo.lock，tokio 0.2→1.6），`server.rs` `TcpListener`（`rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb`） | 复测 3.07 / 3.04 s | 1.8–2.0 s；复测 1.84 / 1.82 s | 返回后 +0.07 s，落在 tokio-1.6.2 |
+| 同上反向 5b72c04→69c46e5 | — | 0.78 s；复测 0.80 / 0.80 s | 返回后 +0.04–0.05 s，落在 tokio-0.2.19 |
+
+- 两组都没有出现旧 crate graph 的答案：S0 里通知发完 +0.46 s 会拿到旧 tokio，现在请求被挡到 Fetching→quiescent 确认之后。
+- 复测命令：`swift test --no-parallel --filter 'rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb|rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb'`，需要 `~/work/rust/toydb` 与本机 rust-analyzer，缺少时打印 SKIP；Cargo.lock 组还需要本机 registry 有两版 tokio（S0 做过 `cargo fetch`）。
+- 依赖借用（CLI，`codeinsight exact-hover --revision 1ed4fd3 --definition`，llm-tools）：TypeScript `tools/model-files-web/src/tokenizer.worker.ts:3:10` hover `(alias) class Tokenizer`，definition `…/tools/model-files-web/node_modules/@huggingface/tokenizers/types/core/Tokenizer.d.ts:21:15`；Python `main.py:233:43` hover `def is_available() -> bool`，definition `…/.venv/lib/python3.10/site-packages/torch/cuda/__init__.py:163:5`；两者标注 `dependenciesBorrowedFromWorkspace`，冷启动约 1.3–2.2 s。CLI 直接调用会话，不经协调器；`.d.ts` 被协调器保留为跳转目标由 `exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirDeclarationsAsDependencies` 覆盖。
+- 未测：codex 规模的应用内热切换、双槽 RSS、四段墙钟，见下文清单。
+
+## 原生验收清单（待执行）
+
+S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无法由后台自动化驱动）。每项记 PASS / FAIL / BLOCKED，写明构建 SHA、语料 commit、时间和截图文件名；不得用上文测试层数字代替。
+
+**准备**
+
+- 构建：`bash scripts/check-toolchain.sh`；`CAIRN_LIBGIT2=brew bash scripts/make-app.sh`；隔离数据副本 `CAIRN_LIBGIT2=brew CAIRN_BUNDLE_IDENTIFIER=dev.cairn.s4accept bash scripts/make-app.sh --output .build/s4accept`（不给 `--output` 会覆盖默认产物）。记录：构建 SHA ______，应用路径 ______。
+- 退出其他 Cairn 实例，或只用隔离副本。注意检出目录 `~/Library/Application Support/CodeInsight/checkouts/` 不随 bundle id 区分，两个实例共用父目录（各自持锁，不会互删）。
+- 记录工具版本：`rust-analyzer --version`、`pyright --version`、`typescript-language-server --version`、`node --version`。
+- 进程与内存：`ps -axo pid,ppid,rss,etime,command | grep -E 'rust-analyzer|pyright|typescript-language-server|tsserver' | grep -v grep`（rss 单位 KB）。检出目录：`ls -l ~/Library/Application\ Support/CodeInsight/checkouts/` 与 `du -sh` 同目录。
+- 计时：屏幕录像或秒表，从在版本选择器中按下回车/点击条目开始。四段 = 正文出现、基础索引可用（大纲出现且项目搜索可执行）、精确分析就绪（状态栏）、返回刚读过的版本（切回后正文与精确就绪）。
+
+**1. toydb 四段计时（`~/work/rust/toydb`）**
+
+1. 打开 toydb，等工作区精确就绪，打开 `src/sql/execution/mod.rs`。
+2. 版本选择器输入 `HEAD~5`，选“解析结果”；记四段中的前三段；再选回工作区，记第四段。重复 3 次。
+3. 同样做 `HEAD~100` 3 次（含 Cargo.toml/Cargo.lock 变化）。
+4. 预期：没有新的 rust-analyzer 冷启动（`ps` 中检出槽进程 pid 在同组重复中不变）；`HEAD~5` 精确就绪明显短于 S0 的冷启动 CLI 代理 3.6–4.1 s；切回工作区时待命槽即时可用（不出现新 pid）。
+5. 记录：12 组墙钟、每次切换后的 pid、截图（状态栏就绪）。
+
+**2. 跨文件正确性（toydb）**
+
+1. 停在 46308de，打开 `src/sql/execution/mod.rs`，切到 babe5de。
+2. 立即在第 40 行第 79 列（`HashJoin::new`）`⌘` 单击。
+3. 预期：打开 `src/sql/execution/join.rs` 第 142 行 `pub struct HashJoin`；不出现旧位置或空结果。记录从切换到正确跳转的时间（验收以此为准，不以状态栏为准）。
+4. Cargo.lock 组：停在 69c46e5，打开 `src/server.rs`，切到 5b72c04 后 `⌘` 单击 `TcpListener`，预期落到 `tokio-1.6.2/…/listener.rs`；反向预期 `tokio-0.2.19/…/listener.rs`。截图两次跳转结果。
+
+**3. 双槽与释放（toydb、codex）**
+
+1. toydb 停在任一 commit：`ps` 应看到两个 rust-analyzer（工作区待命 + 检出目录当前），记录两者 RSS。
+2. 停在 commit 不操作 10 分钟以上：预期工作区那个进程消失（每 30 秒检查一次）；再切回工作区时冷启动一个新 pid。
+3. codex（`codex-rs/` 单元）：切到 commit 后记录两槽 RSS；预期待命槽 RSS 超过 2 GB 时约 30 秒内被关闭。
+
+**4. codex 四段计时**
+
+1. 打开 codex，打开 `codex-rs/core/src/session/session.rs`，等工作区精确就绪。
+2. `HEAD~5`、`HEAD~100` 各 3 次，记四段；注意 codex 的索引切换本身 8.4–8.7 s（S0），与精确分析分开记录。
+3. 可选跨文件：71448a29e7→78ba047bda，`core/src/session/session.rs:586:59` `⌘` 单击，预期 `thread_lifecycle.rs:11 ThreadOriginator`。
+
+**5. llm-tools 历史 commit 的第三方依赖（`~/work/ai/llm-tools`，1ed4fd3）**
+
+1. 打开 llm-tools，版本选择器切到 1ed4fd3。
+2. TypeScript：打开 `tools/model-files-web/src/tokenizer.worker.ts`，悬停第 3 行 `Tokenizer`，预期 `(alias) class Tokenizer`，来源标注“依赖来自当前工作区，可能与该 commit 不一致”；`⌘` 单击，预期在新标签页只读打开 `node_modules/@huggingface/tokenizers/types/core/Tokenizer.d.ts` 并按 TypeScript 高亮。
+3. Python：打开 `main.py`，悬停第 233 行 `is_available`，预期 `def is_available() -> bool`；`⌘` 单击，预期打开 `.venv/lib/python3.10/site-packages/torch/cuda/__init__.py` 第 163 行。
+4. 关系展开：在依赖文件中的符号（或 `Tokenizer`）上查看引用/调用关系，预期列出结果或明确说明，不因快照缺少该文件而报错。
+5. 依赖标签页恢复：保留第 2 步打开的 `.d.ts` 标签，`⌘Q` 后重新启动，预期标签恢复、正文从磁盘显示、高亮正常。
+6. 离线标注：切回工作区，打开同一 TypeScript 文件，预期不再显示“离线依赖不可用”（单元根有 `node_modules`）。
+7. 截图：两处 hover、两次跳转后的路径栏、恢复后的标签。
+
+**6. 窗口隔离与目录生命周期**
+
+1. toydb 窗口停在 commit A，再打开 llm-tools 停在 commit B；`ls` 检出目录应有两个 UUID 子目录。
+2. 在一个窗口切换 commit，另一个窗口的精确分析不受影响（状态栏不变，hover 正常）。
+3. 再次打开 toydb：预期激活已有窗口，不新建。
+4. 关闭 llm-tools 窗口：其检出目录被删除，另一个保留。
+5. `kill -9` 应用后重新启动：预期残留目录在启动时被删除。
+
+**7. 刷新、恢复与清理后重建**
+
+1. 停在 commit 时 Refresh Index：精确分析重新就绪，hover 正常。
+2. 切回工作区：待命槽即时可用（无新 pid）。
+3. 停在 commit 时退出并重启（恢复会话）：精确分析在检出目录中重建并就绪。
+4. 设置 → 清除检出目录：显示的总大小与 `du` 一致；确认后所有窗口精确分析停止、目录删除；再切 commit 时重新检出并就绪。
+
+**结果**（执行后填写）：构建 SHA ______；各项 PASS / FAIL / BLOCKED ______；墙钟表 ______；RSS 表 ______；截图列表 ______。

@@ -52,6 +52,26 @@
 
 [ExactCoordinator](../Sources/CodeInsightAppModel/ExactCoordinator.swift) 处理语言会话、可用性、批次、内容校验与结果发布。Exact 定义、类型、hover 和关系能力各自协商；有 hover 不等于有 typeDefinition，provider ready 不等于结果完整。
 
+## 精确分析会话与历史检出
+
+阅读区、索引、搜索和比较只读 Git 对象快照；检出目录只给语言服务器看。行为承诺见 [product.md](product.md)“只读与分析信任”，测量依据见[热切换证据](evidence/warm-lsp-switch-2026-10/README.md)。
+
+**检出目录。** [CheckoutRoot](../Sources/CodeInsightGit/CheckoutRoot.swift) 在应用目录里 `git_repository_init`，把 `objects/info/alternates` 指向用户仓库的 `git_repository_commondir`（兼容用户自己的 worktree），不用 `git worktree add`（会写用户的 `.git/worktrees/`）或 `git_clone`。仓库配置 `core.autocrlf=false`、`core.symlinks=false`，`.git/info/attributes` 写 `* -text -eol -filter -ident`，优先于 tree 中的 `.gitattributes`。`checkout` 以当前 HEAD 为基线 `FORCE` 检出并 detach，之后按 tree 删除符号链接与 gitlink，只留普通文件。借用链接（见下）在检出前先删掉不再需要、指向别处或与 tracked 路径冲突的，检出后再补建，所以检出不会经链接写进工作区。目录存活期间持有 `.git/cairn.lock` 的 flock，另一进程（如打包自测）的启动清理不会误删。[CheckoutStore](../Sources/CodeInsightGit/CheckoutRoot.swift) 是应用共享的父目录，每个窗口的协调器以本进程内的 UUID 拥有一份；协调器关闭时等会话退出后再删目录；启动时删除无人持锁的目录；整体清除在有活动目录时拒绝，进行中挂起所有协调器的新 prepare。
+
+**两个会话槽。** [ExactCoordinator](../Sources/CodeInsightAppModel/ExactCoordinator.swift) 每窗口一份，按服务器读的根保留两个槽：工作区与检出目录。`prepare` 取走目标槽的会话，另一个槽保持待命，除非它服务的项目、语言、单元、特性选择或信任模式与这次不同（此时关闭）。待命槽每 30 秒检查一次，待命超过 `standbyIdleLimit`（600 s）或服务器常驻内存超过 `standbyMemoryLimit`（2 GiB）即关闭；阈值是常量，不是设置项。信任撤销、关窗、清除检出目录关闭两个槽，`slotEpoch` 让此时仍在进行的 prepare 关闭它拿走的会话而不是放回去。
+
+**热切换还是重启（复用条件）。** 槽里的会话只有在根、单元前缀与单元名、槽类型、Python 解释器都相同，且 `ReuseKey.allowsWarmSwitch` 成立时才热切换：语言、`featureSelection`、`trustMode` 相同，`environmentFingerprint` 相同（Rust 例外：它是 `Cargo.lock` 的哈希，rust-analyzer 会像 `Cargo.toml` 一样在 Fetching 门后重载；Python 是 `uv.lock`，TypeScript 是 `bun.lockb`，变化即重启）。`configFingerprint` 不比较，由服务器自己重载。`toolVersion` 实际不参与：候选键用槽内 provider 自己的版本构造，所以升级后的服务器只在冷启动时生效。切换后若“是否借用工作区依赖”变了也重启，因为 provider 在启动时决定这项标注。成功后整份 `Active`（profile、缓存键、归因、快照、依赖根）替换，不只换 commit ID；结果缓存仍按 commit 的 `ReuseKey.versionIdentity` 区分。
+
+**切换顺序与就绪确认。** [LSPLanguageSession](../Sources/CodeInsightExact/LSPLanguageSession.swift) 的 `switchSnapshot` 持操作锁完成：暂停新请求、取消在途请求、`didClose` 全部已开文档、由调用方检出并重算借用链接、更新快照引用、按 [ExactFileChange](../Sources/CodeInsightExact/ExactProvider.swift) 的差异发送 `workspace/didChangeWatchedFiles`（新增 1、修改 2、删除 3；变成符号链接或 gitlink 的路径算删除），再等服务器确认。确认规则是 `LSPSwitchReadiness`，来自 S0 实测：rust-analyzer 在 1 s 内等 `$/progress` `rustAnalyzer/Fetching` begin，等到了再等其后的 `serverStatus quiescent=true`（最多 120 s），1 s 内没有 Fetching 就视为就绪（沙箱内只改 `.rs` 不触发重载，首个答案已正确）；Fetching begin 会清掉 `LSPClient` 粘滞的 quiescent 状态；不能用 quiescent 的 false→true 翻转，清单切换时服务器不发 false。Pyright 没有进度通知：源码变化直接就绪，配置变化时在 5 s 内等 `window/logMessage` “Reloading configuration file”。tsserver 在 1 s 内看到 “Initializing JS/TS language features” begin 就等它的 end。等待期间到达的请求阻塞到切换结束并读新快照；`-32801 content modified` 重试保留。确认失败时会话不回到就绪，协调器关闭它并冷启动。
+
+**通知必须完整。** 沙箱拒绝 `mach-lookup com.apple.FSEvents`，rust-analyzer 在沙箱内没有自己的文件监视，Cairn 的 `didChangeWatchedFiles` 是唯一的变化来源，这也让切换不会触发整工作区重扫。差异在两个整项目快照之间计算；协调器自己用默认 `ProjectPathRules` 建快照，不应用用户排除规则，所以被用户排除的 tracked 文件照样在 commit 快照里、照样通知。工作区快照仍跳过内置目录（`target`、`build`、`dist` 等），重新激活工作区槽时这些目录里 tracked 文件的改动不会通知，是已知缺口。
+
+**依赖借用与路径分类。** [DependencyBorrowing](../Sources/CodeInsightExact/DependencyBorrowing.swift) 给出检出目录内的链接集合（TypeScript 是项目根与每个 tracked `package.json` 旁、工作区里存在的 `node_modules`；Python 是该 commit 自己配置的相对 `venvPath`；Rust 不借用）和 Pyright 的解释器（工作区单元根的 `.venv`/`venv`，工作区与 commit 两种模式都用）。服务器可能返回检出目录下的链接路径，也可能返回工作区的真实路径：位置落在检出目录或工作区下、且快照里有这个文件时才映射成项目相对路径，否则保留绝对路径作为依赖文件，从磁盘读取，不进 `snapshot.readBytes`。`ExactCoordinator.isDependencyFile` 认出工作区下的依赖根；`AppModel.isDependencyFile` 再加上会话恢复时以绝对路径打开的文件，因为恢复可能早于 Exact 准备完成。依赖目标的语言用 `dependencyFileLanguageMode`，它在项目语言分类之外接受 `.d.ts`（TypeScript）与 `.pyi`（Python）；`LanguageMode.classify` 本身不变，它决定项目语言探测与索引。离线标注由 provider 在启动时决定：借用了工作区依赖就是“依赖来自当前工作区”，否则 Pyright 没有解释器、TypeScript 单元根没有 `node_modules` 时是“离线依赖不可用”。
+
+**沙箱。** [Sandbox](../Sources/CodeInsightExact/Sandbox.swift) 禁网，只放行分析缓存目录写入（Trusted 的 Rust 另加项目 `target`）；检出目录、借用的真实目录、用户源码与 `.git` 不可写。长驻会话不设 `ulimit -t`：S0 实测 codex 加载已用约 52 s CPU，累计上限只够切一两次。保留 `ulimit -v`（512 GiB；VSZ 恒在 467 GiB 左右）、单次请求超时与崩溃重启。
+
+**窗口隔离。** 一个项目只有一个窗口（再次打开激活现有窗口），每个窗口有自己的协调器、两个会话槽和检出目录；信任登记与 `CheckoutStore` 是应用共享资源。
+
 ## Reader 工作量与生命周期
 
 源文档、折叠投影、阅读规划、标识符派生索引与 AppKit 几何是不同工作。优先复用已有事实，避免每次点击、滚动或改颜色重复做全文分析。
