@@ -329,6 +329,28 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
         ]
     }
 
+    /// A commit's borrowed `node_modules` is labelled as borrowed; otherwise
+    /// packages count as missing unless `node_modules` sits in the unit
+    /// root. ponytail: a monorepo whose `node_modules` is only in an
+    /// ancestor of the unit is still labelled offline.
+    static func baseEnvironment(
+        trustMode: TrustMode,
+        projectURL: URL,
+        borrowedFromWorkspace: Bool
+    ) -> ExactAnalysisEnvironment {
+        var isDirectory: ObjCBool = false
+        let installed = FileManager.default.fileExists(
+            atPath: projectURL.appendingPathComponent("node_modules").path,
+            isDirectory: &isDirectory
+        ) && isDirectory.boolValue
+        return ExactAnalysisEnvironment(
+            trustMode: trustMode,
+            limitations: borrowedFromWorkspace
+                ? [.dependenciesBorrowedFromWorkspace]
+                : installed ? [] : [.dependenciesUnavailableOffline]
+        )
+    }
+
     public func prepare(
         snapshot: any Snapshot,
         profile: ExactProfileKey,
@@ -340,11 +362,10 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
                     + "profile language \(String(describing: profile.language))"
             )
         }
-        let environment = ExactAnalysisEnvironment(
+        let environment = Self.baseEnvironment(
             trustMode: trustMode,
-            limitations: borrowedFromWorkspace
-                ? [.dependenciesBorrowedFromWorkspace]
-                : [.dependenciesUnavailableOffline]
+            projectURL: projectURL,
+            borrowedFromWorkspace: borrowedFromWorkspace
         )
         let launch = try safeLaunch()
         let client = try Self.client(for: launch, projectURL: projectURL)

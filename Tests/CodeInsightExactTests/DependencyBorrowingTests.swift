@@ -172,6 +172,32 @@ func pyrightIdentityNamesTheAnsweredInterpreterWithoutRunningIt() throws {
 }
 
 @Test
+func typeScriptIsLabelledOfflineOnlyWithoutNodeModulesInTheUnit() throws {
+    let unit = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ts-offline-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: unit, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: unit) }
+    func limitations(borrowed: Bool = false) -> Set<ExactAnalysisLimitation> {
+        TypeScriptLanguageServerProvider.baseEnvironment(
+            trustMode: .safe,
+            projectURL: unit,
+            borrowedFromWorkspace: borrowed
+        ).limitations
+    }
+    #expect(limitations() == [.dependenciesUnavailableOffline])
+    // A file named node_modules is not an installation.
+    try Data().write(to: unit.appendingPathComponent("node_modules"))
+    #expect(limitations() == [.dependenciesUnavailableOffline])
+    try FileManager.default.removeItem(at: unit.appendingPathComponent("node_modules"))
+    try FileManager.default.createDirectory(
+        at: unit.appendingPathComponent("node_modules"),
+        withIntermediateDirectories: true
+    )
+    #expect(limitations().isEmpty)
+    #expect(limitations(borrowed: true) == [.dependenciesBorrowedFromWorkspace])
+}
+
+@Test
 func locationsOutsideTheSnapshotResolveToTheirRealDependencyPath() throws {
     let root = try scratchDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
