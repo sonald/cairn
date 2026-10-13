@@ -5696,6 +5696,7 @@ func warmSwitchClosesOpenDocumentsBeforeTheCheckoutAndReportsEveryChange() throw
         #expect(changes.map(\.kind) == [.created, .changed, .deleted])
 
         var seenAtCheckout: [String] = []
+        var answered: (() -> Bool)?
         try session.switchSnapshot(
             to: after,
             profile: switchProfile(config: "config-2"),
@@ -5704,6 +5705,12 @@ func warmSwitchClosesOpenDocumentsBeforeTheCheckoutAndReportsEveryChange() throw
             prepareFiles: {
                 _ = eventually { notificationMethods(server).count >= 2 }
                 seenAtCheckout = notificationMethods(server)
+                // A request arriving mid-checkout must not read the old
+                // snapshot.
+                answered = inBackground {
+                    _ = try session.definition(file: "src/main.rs", byteOffset: 12)
+                }
+                Thread.sleep(forTimeInterval: 0.2)
             }
         )
         // The checkout ran after the open document closed, with nothing
@@ -5711,17 +5718,21 @@ func warmSwitchClosesOpenDocumentsBeforeTheCheckoutAndReportsEveryChange() throw
         #expect(seenAtCheckout == ["textDocument/didOpen", "textDocument/didClose"])
         #expect(session.readiness == .ready)
         #expect(session.attribution.configFingerprint == "config-2")
-        #expect(eventually { notificationMethods(server).count == 3 })
-        let watched = try #require(server.notifications.last)
-        #expect(watched.method == "workspace/didChangeWatchedFiles")
-        let reported = (watched.params["changes"] as? [[String: Any]])?.compactMap {
+        // The request made mid-checkout waited for the switch, then
+        // opened the new bytes.
+        #expect(answered?() == true)
+        #expect(eventually { notificationMethods(server).count == 4 })
+        #expect(notificationMethods(server) == [
+            "textDocument/didOpen", "textDocument/didClose",
+            "workspace/didChangeWatchedFiles", "textDocument/didOpen",
+        ])
+        let watched = server.notifications.first {
+            $0.method == "workspace/didChangeWatchedFiles"
+        }
+        let reported = (watched?.params["changes"] as? [[String: Any]])?.compactMap {
             $0["type"] as? Int
         }
         #expect(reported == [1, 2, 3])
-
-        // The next request opens the new bytes.
-        _ = try session.definition(file: "src/main.rs", byteOffset: 12)
-        #expect(eventually { notificationMethods(server).count == 4 })
         let reopened = try #require(server.notifications.last)
         let document = reopened.params["textDocument"] as? [String: Any]
         #expect(reopened.method == "textDocument/didOpen")
