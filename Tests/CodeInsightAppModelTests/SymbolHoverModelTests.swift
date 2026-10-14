@@ -38,6 +38,25 @@ func hoverDwellShowsSyntacticDocThenExactReplacesItInPlace() async {
 
 @MainActor
 @Test
+func hoverWithContentKeepsOnlyTheBorrowedDependenciesNote() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    await settle()
+    await harness.clock.advance()
+    await harness.releaseExact(.completed(
+        "```typescript\nclass Tokenizer\n```",
+        limitations: [.procMacrosDisabled, .dependenciesBorrowedFromWorkspace]
+    ))
+    guard case let .showing(_, doc) = harness.model.phase else {
+        Issue.record("expected exact card, got \(harness.model.phase)")
+        return
+    }
+    #expect(doc.source == .exact)
+    #expect(doc.notes == [.limitation("dependenciesBorrowedFromWorkspace")])
+}
+
+@MainActor
+@Test
 func hoverMovesInsideOneTokenWithoutRestartingAndCancelsWhenLeavingEarly() async {
     let harness = HoverHarness()
     harness.model.pointerMoved(over: tokenA)

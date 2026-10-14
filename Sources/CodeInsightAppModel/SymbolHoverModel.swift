@@ -327,7 +327,11 @@ public final class SymbolHoverModel {
             if doc.location == nil { doc.location = fallback?.location }
             if doc.isEmpty, let fallback { doc = fallback }
             doc.source = .exact
-            doc.notes = doc.isEmpty ? limitationNotes(limitations) : []
+            // Safe-mode limitations explain missing content, so a full answer
+            // drops them; borrowed dependencies qualify the content itself.
+            doc.notes = limitationNotes(
+                doc.isEmpty ? limitations : limitations.intersection([.dependenciesBorrowedFromWorkspace])
+            )
             return doc
         case .completed(nil, let limitations):
             if var fallback {
