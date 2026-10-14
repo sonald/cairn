@@ -326,3 +326,21 @@ S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无�
 - F5 文案：状态栏在冷启动期间已显示"就绪"（见上）；commit 模式路径栏仍显示"只读快照 · 工作区未改动"。
 
 **局限**：帧间隔 0.4 s、点击时刻按批处理推算；"基础索引可用"未单独计时；codex 只测了 `codex-core` 单元、未在 commit 上 hover；5.5、5.6 与可选 codex 跨文件未执行；`screencapture` 首次运行触发了 macOS 屏幕录制权限提示，未处理，帧仍可用。截图：本目录 8 张 `*.jpg`。
+
+## F2/F4 修复后原生复验（2026-10-14）
+
+构建：分支 `worktree-agent-a881d2fb9a769f306` 的 `dd1a998`，隔离副本 `dev.cairn.s4accept`，前台真实输入（computer-use 全控制）。上一节的 F2（应用内 `⌘` 单击不打开项目根下的依赖目标）与 F4（待命槽按 RSS 释放漏掉被压缩的进程）在此复验。中间构建 `bfc8220` 上 TypeScript 导入名的使用点和索引不认的标识符（`Option<TcpListener>`、`HashMap<…>`、`torch`）`⌘` 单击无反应，已在 `dd1a998` 修复，以下只列最终构建的结果。
+
+| 项 | 结果 |
+| --- | --- |
+| llm-tools 1ed4fd3 `⌘` 单击导入行 `Tokenizer`、`let tokenizer: Tokenizer`、`new Tokenizer(...)` | PASS：`Tokenizer.d.ts:21` / `:21` / `:38`（构造函数），TypeScript 高亮（`llm-tools-1ed4fd3-cmdclick-ts-usage-new-tokenizer.jpg`） |
+| 同 commit `main.py:233` 的 `is_available`、`torch` | PASS：`.venv/…/torch/cuda/__init__.py:163`、`torch/__init__.py:1`（`llm-tools-1ed4fd3-cmdclick-torch-module.jpg`） |
+| toydb a15a351 `server.rs:23` `Option<TcpListener>`、`:31` `HashMap<…>` | PASS：tokio-1.6.2 `listener.rs:52`（`toydb-a15a351-cmdclick-tcplistener-usage-tokio.jpg`）、rustup std `map.rs:246` |
+| 本地有声明：toydb `execution/mod.rs:40` `HashJoin::new` | PASS：直接到 `join.rs:144`，Context“精确 · 直接” |
+| 依赖标签页恢复：`__init__.py` 标签“保持打开”后退出重启 | PASS（在 `bfc8220` 上做，恢复路径之后未改）：标签与位置恢复、Python 高亮（`llm-tools-1ed4fd3-dependency-tab-restored.jpg`） |
+| F4 codex（`codex-core`）工作区→78ba047 | PASS（`bfc8220`，F4 代码之后未改）：停驻的工作区服务器（常驻 3.7 GB、footprint 3,989 MB）约 31 s 后关闭，最后一次采样常驻已降到 2,043 MB（旧口径低于 2 GiB 不会释放）；切回工作区后 4.6 GB 的检出槽约 37 s 后关闭 |
+| footprint 口径 | 同机真实进程对照：fileproviderd footprint 449 MB / 常驻 18 MB，wpsoffice 1,195 / 150 MB；footprint 与 `top` 的 MEM 列一致 |
+
+观察（未修）：`⌘` 单击 TypeScript 导入行跳到 `.d.ts` 后 Context 仍停在类型直达阶段并显示“未就绪”；普通单击索引不认的标识符时 Context 保持上一项（R4.3，按设计）。codex 那次状态栏为“依赖项不可用（离线）”，服务器照常加载，未深究。
+
+局限：每项一次；时间按 `ps` 每秒采样，误差约 1 s；hover 与 Context 不是本次验收对象。
