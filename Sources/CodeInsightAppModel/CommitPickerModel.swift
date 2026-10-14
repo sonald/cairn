@@ -11,8 +11,8 @@ public final class CommitPickerModel {
     public private(set) var commits: [CommitInfo]
     public private(set) var filteredCommits: [CommitInfo]
     public private(set) var query = ""
-    /// The commit the repository resolves the query to when no loaded commit
-    /// matches; shown above the list.
+    /// The commit the repository resolves the query to when it is not among
+    /// the filter hits; shown above the list.
     public private(set) var resolvedCommit: CommitInfo?
     public private(set) var currentRevision: String?
     public private(set) var currentCommit: CommitInfo?
@@ -156,14 +156,24 @@ public final class CommitPickerModel {
                 || $0.branchNames.contains { $0.lowercased().contains(needle) }
                 || $0.tagNames.contains { $0.lowercased().contains(needle) }
         }
-        guard filteredCommits.isEmpty, let repositoryURL else { return }
+        // Resolve even with filter hits: `HEAD` must not lose to summaries
+        // that merely contain "headers".
+        guard let repositoryURL else { return }
         let generation = queryGeneration
         let resolver = resolver
         let revision = query.trimmingCharacters(in: .whitespacesAndNewlines)
         resolveTask = Task { [weak self] in
             let commit = await resolver(repositoryURL, revision)
-            guard let self, !Task.isCancelled, queryGeneration == generation else { return }
-            resolvedCommit = commit
+            guard let self, !Task.isCancelled, queryGeneration == generation,
+                  let commit
+            else { return }
+            // Already a filter hit (typically a SHA prefix, already first):
+            // lift that row to the top instead of adding a second one.
+            if let index = filteredCommits.firstIndex(where: { $0.fullSHA == commit.fullSHA }) {
+                if index > 0 { filteredCommits.insert(filteredCommits.remove(at: index), at: 0) }
+            } else {
+                resolvedCommit = commit
+            }
         }
     }
 

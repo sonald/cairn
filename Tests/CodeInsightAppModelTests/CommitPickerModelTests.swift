@@ -44,7 +44,7 @@ func commitPickerResolvesUnloadedRevisionsAndDropsStaleResults() async {
         return revision == "HEAD~600" ? deep : nil
     }
 
-    // Loaded matches never trigger a resolution.
+    // A word that does not resolve leaves only the filter hits.
     picker.setQuery("Loaded")
     #expect(picker.resolvedCommit == nil)
 
@@ -64,6 +64,28 @@ func commitPickerResolvesUnloadedRevisionsAndDropsStaleResults() async {
     try? await Task.sleep(for: .milliseconds(50))
     #expect(picker.resolvedCommit == nil)
     #expect(picker.query == "other")
+}
+
+@MainActor
+@Test
+func commitPickerResolvesRevisionsDespiteSubstringHitsWithoutDuplicatingRows() async {
+    let tip = commit("aaaa111", "Tip", branches: ["main"])
+    let headers = commit("bbbb222", "Add headers")
+    let mainly = commit("cccc333", "Mainly docs")
+    let picker = CommitPickerModel(commits: [mainly, tip, headers]) { revision in
+        ["HEAD": tip, "main": tip][revision]
+    }
+
+    picker.setQuery("HEAD")
+    #expect(picker.filteredCommits == [headers])
+    #expect(await testWaitUntil("HEAD resolved") { picker.resolvedCommit == tip })
+    #expect(picker.filteredCommits == [headers])
+
+    // The resolved commit is itself a hit: one row, lifted to the top.
+    picker.setQuery("main")
+    #expect(await testWaitUntil("main lifted") { picker.filteredCommits.first == tip })
+    #expect(picker.filteredCommits == [tip, mainly])
+    #expect(picker.resolvedCommit == nil)
 }
 
 @MainActor
