@@ -191,9 +191,9 @@ Apple M3 Pro，macOS 27.0.1，git 2.54.0；rust-analyzer 65ac641199（2026-10-04
 - 两组都没有出现旧 crate graph 的答案：S0 里通知发完 +0.46 s 会拿到旧 tokio，现在请求被挡到 Fetching→quiescent 确认之后。
 - 复测命令：`swift test --no-parallel --filter 'rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb|rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb'`，需要 `~/work/rust/toydb` 与本机 rust-analyzer，缺少时打印 SKIP；Cargo.lock 组还需要本机 registry 有两版 tokio（S0 做过 `cargo fetch`）。
 - 依赖借用（CLI，`codeinsight exact-hover --revision 1ed4fd3 --definition`，llm-tools）：TypeScript `tools/model-files-web/src/tokenizer.worker.ts:3:10` hover `(alias) class Tokenizer`，definition `…/tools/model-files-web/node_modules/@huggingface/tokenizers/types/core/Tokenizer.d.ts:21:15`；Python `main.py:233:43` hover `def is_available() -> bool`，definition `…/.venv/lib/python3.10/site-packages/torch/cuda/__init__.py:163:5`；两者标注 `dependenciesBorrowedFromWorkspace`，冷启动约 1.3–2.2 s。CLI 直接调用会话，不经协调器；`.d.ts` 被协调器保留为跳转目标由 `exactCoordinatorBorrowsWorkspaceNodeModulesAndKeepsTheirDeclarationsAsDependencies` 覆盖。
-- 未测：codex 规模的应用内热切换、双槽 RSS、四段墙钟，见下文清单。
+- 应用内热切换、双槽 RSS、四段墙钟见下文"原生验收结果（2026-10-14）"。
 
-## 原生验收清单（待执行）
+## 原生验收清单（2026-10-14 已执行，结果见文末）
 
 S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无法由后台自动化驱动）。每项记 PASS / FAIL / BLOCKED，写明构建 SHA、语料 commit、时间和截图文件名；不得用上文测试层数字代替。
 
@@ -257,4 +257,72 @@ S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无�
 3. 停在 commit 时退出并重启（恢复会话）：精确分析在检出目录中重建并就绪。
 4. 设置 → 清除检出目录：显示的总大小与 `du` 一致；确认后所有窗口精确分析停止、目录删除；再切 commit 时重新检出并就绪。
 
-**结果**（执行后填写）：构建 SHA ______；各项 PASS / FAIL / BLOCKED ______；墙钟表 ______；RSS 表 ______；截图列表 ______。
+## 原生验收结果（2026-10-14）
+
+**构建与环境**：main `a0f7f13`，隔离副本 `.claude/worktrees/agent-a5889da1be75ee92d/.build/s4accept/Cairn.app`（bundle id `dev.cairn.s4accept`，由同一 SHA 构建）。rust-analyzer 0.0.0 (65ac641199 2026-10-04)、pyright 1.1.414、typescript-language-server 3.3.0 / typescript 5.0.2、node v26.11.1；macOS 27.0、M3 Pro；09:10–10:24 本地时间。语料：toydb `HEAD~5`=a15a351、`HEAD~100`=69c46e5、跨文件对 46308de→babe5de、Cargo.lock 对 69c46e5↔5b72c04；codex HEAD=315195492c、`HEAD~5`=78ba047bda、`HEAD~100`=325cf16194（与 HEAD 差 700 文件，含 14 个 Cargo.toml/Cargo.lock；`HEAD~5` 差 34 文件，无 Cargo 变化）；llm-tools 1ed4fd3。
+
+**执行方式**：由 agent 接管桌面（computer-use 全控制），版本选择器与 `⌘` 单击都是前台真实输入。计时用 `screencapture` 每约 0.4 s 截前窗一帧，按状态栏 / 正文 / 大纲 / 工具栏四个区域的哈希找变化帧；"点击"时刻取批处理里固定 1.5 s 等待后的点击，误差约 ±0.4 s。"就绪"以状态栏回到就绪文案的那一帧为准。每秒记录语言服务器 pid/RSS（`ps`），原始帧与日志在会话 scratch 目录，未入库。
+
+| 项 | 结果 |
+| --- | --- |
+| 1 toydb 四段计时 | PASS。12 次切换无新 rust-analyzer pid（检出槽 30675 自首次切换起一直复用），正文与大纲同帧出现、≤0.45 s；返回工作区 ≤0.45 s、无准备中、无新 pid |
+| 2 跨文件正确性 | PASS（babe5de `HashJoin::new` → `join.rs:142 pub struct HashJoin`，Cargo.lock 对两个方向分别落在 tokio-0.2.19 / tokio-1.6.2 的 `listener.rs`）；"切换后立即 `⌘` 单击"一次 INCOMPLETE（见下） |
+| 3 双槽与释放 | PASS（10 分钟释放 ×2、RSS > 2 GB 释放 ×6）；发现 F4 |
+| 4 codex 四段计时 | 已测 11 次有效；每次切换都冷启动检出槽，点击→状态栏就绪 11.1–12.5 s（原因见 F4），commit 上的 hover 未验证。可选跨文件未执行 |
+| 5 llm-tools 依赖 | hover PASS ×2；来源标注 FAIL（F3）；`⌘` 单击打开依赖源码 FAIL ×2（F2，既有缺口）；关系展开 PASS（带保留）；标签恢复 BLOCKED（F2 之后没有可恢复的标签）；离线标注（5.6）未执行 |
+| 6 窗口隔离与目录生命周期 | PASS ×5 |
+| 7 刷新、恢复、清理 | 7.1、7.3、7.4 PASS；7.2 的"无新 pid"条件不适用（待命槽已按 10 分钟规则释放，切回冷启动但正文即时） |
+
+**toydb 墙钟**（点击→正文；状态栏准备中可见时长；pid）
+
+| 切换 | 正文 | 准备中→就绪 | rust-analyzer |
+| --- | --- | --- | --- |
+| 工作区→HEAD~5（首次） | ≤0.45 s | 未出现：状态栏始终"就绪"，但检出槽是冷启动（新 pid 30675，RSS 约 5 s 内升到 947 MB） | 25434 待命 + 30675 新 |
+| HEAD~5→工作区 ×3 | ≤0.45 s | 无 | 不变 |
+| 工作区→HEAD~5 第 2、3 次 | ≤0.45 s | 无 / 一帧（<0.45 s） | 不变 |
+| 工作区→HEAD~100（首次，Cargo.lock 变化） | 0.4 s | 2.5 s | 不变 |
+| HEAD~100→工作区 ×2 | ≤0.45 s（第 2 次 0.8 s 后再重绘一次） | 无 | 不变 |
+| 工作区→HEAD~100 第 2、3 次（检出槽仍停在 69c46e5） | ≤0.45 s | 无 | 不变 |
+| HEAD~100→HEAD~5 直接 | ≤0.55 s | 1.4 s | 不变 |
+| HEAD~5→HEAD~100 直接 | ≤0.45 s | 1.3 s | 不变 |
+| 46308de→babe5de | 0.4 s | 0.8 s | 不变 |
+| 69c46e5→5b72c04、反向 | ≤0.45 s | 1.2 s / 未单独计时 | 不变 |
+
+"基础索引可用"没有单独计时：大纲区域总与正文同帧变化，项目搜索未在切换中执行。状态栏在冷启动时不可信：协调器在 provider 准备完成时就把会话标为就绪（`ExactCoordinator.activate`），首次切换的 rust-analyzer 还在加载时状态栏已显示"就绪"。
+
+**跨文件**：切到 babe5de 后约 17 s `⌘` 单击 `HashJoin::new`，直接打开 `join.rs:142`，上下文面板标"精确 · 直接"（`toydb-babe5de-cmdclick-hashjoin-join142.jpg`）。切换后约 1.5 s 的盲点 `⌘` 单击（弹出框尚在关闭）10 s 内没有任何跳转，无法区分是点击没落到正文还是查询为空，记 INCOMPLETE。Cargo.lock 对：69c46e5 的 `TcpListener` → `…/tokio-0.2.19/src/net/tcp/listener.rs`，5b72c04 → `…/tokio-1.6.2/src/net/tcp/listener.rs:52`（两张 `toydb-*-tcplistener-*.jpg`，路径在上下文面板标"外部"）。
+
+**双槽与 RSS**
+
+| 场景 | 观察 |
+| --- | --- |
+| toydb 停在 commit | 两个 rust-analyzer：工作区待命 25434 约 649 MB，检出槽 30675 约 947 MB |
+| 10 分钟释放 | 待命槽在最后一次离开工作区（09:24:4x）后 10 分钟消失（最后一次出现 09:34:45）；期间 commit↔commit 切换不重置计时。之后切回工作区冷启动新 pid 57042（正文仍 ≤0.45 s，状态栏无准备中）。kill -9 重启后同样：65019 在 10:00:49 启动、10:11:05 消失 |
+| codex（`codex-core` 单元；选择器按 crate 列单元，没有 `codex-rs` 工作区单元） | 工作区服务器 67267 加载中 4.2–4.3 GB，峰值 5.19 GB。切到 `HEAD~5` 后检出槽新 pid 69454（峰值 5.05 GB）；切回工作区后 69454 在约 21 s 内被关闭（RSS > 2 GB 规则生效）。之后每次 commit 访问都新起一个检出槽进程（72705、75216、77487、79790、82521，峰值 4.2–5.0 GB），切回时都在 20–60 s 内关闭 |
+
+**codex 墙钟**（点击→正文 / 点击→状态栏就绪；`HEAD~5` 第 3 次的帧因弹出框成为前窗而作废）
+
+| 切换 | 正文 | 状态栏就绪 | 检出槽 pid |
+| --- | --- | --- | --- |
+| 工作区→HEAD~5 ×2 | 0.4、0.9 s | 12.5、11.5 s | 69454、72705 新 |
+| HEAD~5→工作区 ×3 | 0.8、0.8、0.9 s | 11.6、11.6、11.3 s | 复用 67267 |
+| 工作区→HEAD~100 ×3 | 0.9、0.9、0.9 s | 11.6、11.4、11.4 s | 77487、79790、82521 新 |
+| HEAD~100→工作区 ×3 | 0.6、0.8、0.85 s | 11.1、11.7、11.9 s | 复用 67267 |
+
+状态栏序列固定为"准备中"（约 10 s）→"准备中 · 安全模式"（约 1 s）→"就绪 · 安全模式（受限）"（`codex-325cf16-status-preparing.jpg`）。切回工作区虽复用 67267，仍要 11 s 多才就绪，与切到 commit 的冷启动相当，说明 codex 规模下索引切换（S0 测 8.4 s）与会话激活合起来主导，热槽本身省下的时间不可见。状态栏数字在冷启动时只是下界（见上）：按 `ps` 日志，六个新检出槽进程从启动到 RSS 达峰值 90% 用了 8–13 s（峰值 4.1–4.9 GB），与状态栏就绪时刻大致重合，但 commit 上的 hover 没有做，精确结果何时可用未验证。
+
+**llm-tools 1ed4fd3**：检出目录含借来的 `tools/model-files-web/node_modules` 与 `.venv`（16 MB）。TypeScript hover 卡片 `class Tokenizer` / `import Tokenizer`、"没有文档注释"（`llm-tools-1ed4fd3-hover-tokenizer.jpg`）；Python hover `def is_available() -> bool` 带 docstring（`llm-tools-1ed4fd3-hover-is_available.jpg`）。两张卡片都没有"依赖来自当前工作区，可能与该 commit 不一致"脚注（F3）。`⌘` 单击 `Tokenizer`：阅读区停在 import 行，上下文面板显示"Tokenizer → 类型需要精确分析 · 未就绪 … 高可信度 · 直接 · 导入绑定"，没有打开 `.d.ts`（`llm-tools-1ed4fd3-cmdclick-tokenizer-context.jpg`）；`⌘` 单击 `is_available` 没有任何导航。同时用 debug CLI `exact-hover --revision 1ed4fd3 --definition` 复核，两处 definition 都正确落到 `Tokenizer.d.ts` / `torch/cuda/__init__.py:163`，问题在应用的点击路径（F2）。关系面板在该 commit 上列出 47 条引用、带"已验证 / 直接"标签、无报错（`llm-tools-1ed4fd3-references-tokenizer.jpg`），但面板主题显示为所在函数 `reply`（`tokenizer.worker.ts:228`）而不是 `Tokenizer`，未深究。切回工作区再回 1ed4fd3 各起一对新的 tsserver 进程（50997/50998 → 52085/52086），旧对保留到关窗。
+
+**窗口隔离与生命周期**：toydb 停 5b72c04、llm-tools 停 1ed4fd3 时检出目录有两个 UUID 子目录（3.9 MB、16 MB）。llm-tools 切换期间 toydb 状态栏保持就绪、`TcpListener` 上下文仍指向 tokio-1.6.2、rust-analyzer 30675 不变。`open -a … toydb` 激活已有窗口（仍两个窗口）。通过"文件 → 关闭窗口"关闭 llm-tools 后约 9 s 其目录删除、tsserver 退出，toydb 目录保留（`⌘⇧W` 键击在接管下没有关闭窗口，未查原因）。`kill -9` 后目录残留，重启时被删除并为恢复的窗口新建目录。
+
+**刷新、恢复、清理**：停在 5b72c04 `⌘R`：状态栏经"准备中"约 0.5 s 回到就绪，pid 不变，hover 正常。之后切回工作区：待命槽已按 10 分钟规则释放，所以冷启动了新 pid（正文 ≤0.45 s）。停在 a15a351 退出再启动：新目录、两个新 rust-analyzer，窗口恢复到 a15a351 的 `server.rs`、状态栏就绪。设置 → 精确分析显示"2.4 MB"，等于目录的 apparent size（`du -sh` 磁盘占用 3.9 M）；确认清除后显示"检出目录已清除"，停在 commit 的窗口在约 9 s 内重新检出（同一 UUID 目录重建）、新 pid 64206、状态栏就绪。
+
+**发现**
+
+- F1 版本选择器：输入 `HEAD` 只显示摘要含 "headers" 的子串命中（80de019），没有解析行；因为有过滤命中就不解析（`CommitPickerModel`）。输入 `HEAD~5`、`HEAD~100` 正常解析。
+- F2 应用内 `⌘` 单击不会打开项目根目录下的依赖目标（借来的 `node_modules/*.d.ts`、`.venv/*.py`），commit 与工作区模式都如此，是既有缺口不是本次回归：`ContextWindowModel.explicitJump` 只跳本地索引候选，没有候选即返回；精确结果只经 `applyExact` 进入，而 `projectPath()` 把项目根下的绝对路径相对化，候选因此失去 `exactLocationIsInDependency`，不作为依赖目标呈现。registry 等项目根之外的路径不受影响（toydb 的 tokio 跳转正常）。
+- F3 借用依赖的 hover 脚注（`reader.hover.note.borrowed`）在两处 hover 都没有显示。
+- F4 待命槽按 RSS 释放会漏掉驻留集被系统收走的进程：codex 工作区服务器停驻后 RSS 读数从 4.3 GB 降到 80 MB（疑为内存压缩，未直接观察），没有触发 > 2 GB 释放；而检出槽每次都超限被关，导致每次访问 commit 都冷启动。双槽同时驻留时实际峰值 5.19 + 5.05 GB。
+- F5 文案：状态栏在冷启动期间已显示"就绪"（见上）；commit 模式路径栏仍显示"只读快照 · 工作区未改动"。
+
+**局限**：帧间隔 0.4 s、点击时刻按批处理推算；"基础索引可用"未单独计时；codex 只测了 `codex-core` 单元、未在 commit 上 hover；5.5、5.6 与可选 codex 跨文件未执行；`screencapture` 首次运行触发了 macOS 屏幕录制权限提示，未处理，帧仍可用。截图：本目录 8 张 `*.jpg`。
