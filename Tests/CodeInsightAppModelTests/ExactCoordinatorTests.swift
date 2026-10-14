@@ -2190,6 +2190,191 @@ func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
     ))
 }
 
+/// A venv package under the project root, outside the index (F2).
+private let underRootDependencySource = """
+    def helper():
+        pass
+
+    def is_available():
+        return True
+    """
+private let underRootDependencyPath = ".venv/lib/python3.10/site-packages/pkg/__init__.py"
+private let underRootMainSource = """
+    from pkg import helper
+    import pkg
+
+    def local_fn():
+        pass
+
+    helper()
+    local_fn()
+    pkg.cuda.is_available()
+    """
+
+@MainActor
+private func underRootDependencyModel(
+    exactResolver: @escaping ContextWindowModel.ExactResolver,
+    readiness: (() -> String?)? = nil
+) throws -> (model: ContextWindowModel, root: URL, dependency: String) {
+    let root = try exactTemporaryPythonProject([
+        "main.py": underRootMainSource,
+        underRootDependencyPath: underRootDependencySource,
+    ])
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: exactResolver,
+        typeDefinitionReadiness: readiness
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+    return (model, root, root.appendingPathComponent(underRootDependencyPath).path)
+}
+
+@MainActor
+@Test
+func contextKeepsAnUnindexedFileUnderTheRootAsADependencyTarget() async throws {
+    let gate = ContextExactGate()
+    let (model, root, dependency) = try underRootDependencyModel(exactResolver: gate.resolve)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    model.tokenClicked(
+        file: "main.py",
+        offset: exactByteOffset(of: "helper()", in: underRootMainSource)
+    )
+    #expect(await testWaitUntil("local import candidate pending exact") {
+        model.candidateCount == 1 && gate.count == 1
+    })
+    gate.complete(0, with: exactEntry(
+        file: dependency,
+        byteOffset: exactByteOffset(of: "helper", in: underRootDependencySource)
+    ))
+
+    #expect(await testWaitUntil("dependency candidate displayed") {
+        model.displayedCandidate?.path == dependency
+    })
+    #expect(exactLocationIsInDependency(model.displayedCandidate?.path ?? ""))
+    #expect(model.displayedCandidate?.label == "External · in dependency")
+    #expect(model.candidateCount == 2)
+}
+
+@MainActor
+@Test
+func contextStillReadsAnIndexedAbsolutePathAsTheProjectFile() async throws {
+    let gate = ContextExactGate()
+    let (model, root, _) = try underRootDependencyModel(exactResolver: gate.resolve)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    model.tokenClicked(
+        file: "main.py",
+        offset: exactByteOffset(of: "local_fn()\n", in: underRootMainSource)
+    )
+    #expect(await testWaitUntil("local candidate pending exact") {
+        model.candidateCount == 1 && gate.count == 1
+    })
+    gate.complete(0, with: exactEntry(
+        file: root.appendingPathComponent("main.py").path,
+        byteOffset: exactByteOffset(of: "local_fn():", in: underRootMainSource)
+    ))
+
+    #expect(await testWaitUntil("project candidate upgraded to Exact") {
+        model.displayedCandidate?.certainty == .exact
+    })
+    #expect(model.displayedCandidate?.path == "main.py")
+    #expect(model.candidateCount == 1)
+}
+
+@MainActor
+@Test
+func commandClickOnAnImportBindingJumpsToTheExactDependencyWhenReady() async throws {
+    let dependencyOffset = exactByteOffset(of: "helper", in: underRootDependencySource)
+    let clicked = exactByteOffset(of: "helper\n", in: underRootMainSource)
+    var dependency = ""
+    let exact: ContextWindowModel.ExactResolver = { _, _, _, _ in
+        .completed([exactEntry(file: dependency, byteOffset: dependencyOffset)])
+    }
+
+    let ready = try underRootDependencyModel(exactResolver: exact)
+    defer { try? FileManager.default.removeItem(at: ready.root) }
+    dependency = ready.dependency
+    let jump = await ready.model.explicitJump(file: "main.py", offset: clicked)
+    #expect(jump?.path == ready.dependency)
+
+    let notReady = try underRootDependencyModel(
+        exactResolver: exact,
+        readiness: { "preparing" }
+    )
+    defer { try? FileManager.default.removeItem(at: notReady.root) }
+    dependency = notReady.dependency
+    let local = await notReady.model.explicitJump(file: "main.py", offset: clicked)
+    #expect(local?.path == "main.py")
+    #expect(local?.line == 1)
+}
+
+/// TypeScript binds an import specifier lexically, not as an import binding.
+@MainActor
+@Test
+func commandClickOnATypeScriptImportSpecifierJumpsToTheDeclarationFile() async throws {
+    let source = "import { Tokenizer } from \"tok\";\nnew Tokenizer();\n"
+    let declaration = "export declare class Tokenizer {}\n"
+    let root = try exactTemporaryTypeScriptProject([
+        "main.ts": source,
+        "node_modules/tok/index.d.ts": declaration,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let dependency = root.appendingPathComponent("node_modules/tok/index.d.ts").path
+    let session = try ProjectIndexer().index(root: root, language: .typescript)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _, _ in
+            .completed([exactEntry(
+                file: dependency,
+                byteOffset: exactByteOffset(of: "Tokenizer", in: declaration)
+            )])
+        }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+
+    let jump = await model.explicitJump(
+        file: "main.ts",
+        offset: exactByteOffset(of: "Tokenizer }", in: source)
+    )
+
+    #expect(jump?.path == dependency)
+}
+
+@MainActor
+@Test
+func commandClickWithoutALocalCandidateJumpsToAndShowsTheExactTarget() async throws {
+    var dependency = ""
+    let dependencyOffset = exactByteOffset(of: "is_available", in: underRootDependencySource)
+    let (model, root, path) = try underRootDependencyModel(exactResolver: { _, _, _, _ in
+        .completed([exactEntry(file: dependency, byteOffset: dependencyOffset)])
+    })
+    defer { try? FileManager.default.removeItem(at: root) }
+    dependency = path
+
+    let jump = await model.explicitJump(
+        file: "main.py",
+        offset: exactByteOffset(of: "is_available()", in: underRootMainSource)
+    )
+
+    #expect(jump?.path == path)
+    #expect(await testWaitUntil("Context shows the Exact target") {
+        model.displayedCandidate?.path == path
+    })
+    #expect(model.candidateCount == 1)
+}
+
 @MainActor
 @Test
 func contextExactUpgradeRejectsStaleRequestAndGeneration() async throws {

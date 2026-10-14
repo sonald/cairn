@@ -46,7 +46,7 @@
 - 可比较且不同的目标可修正主结果，但保留原候选证据。Safe/离线限制不否定 provider 已给出的正向目标。
 - 捕获的导航说明不可随随后 Exact 升级改变；当前说明可以更新。阅读集与轨迹恢复不得重新查询后冒充原来的冻结证据。
 
-[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile 的新会话对象）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。
+[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile 的新会话对象）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。`explicitJump`（`⌘` 单击）在本地无候选、或首个候选是被点名字自己的导入/绑定时，用自己的 `ExactRequestBatch` 请求 definition（不取消 Context 的升级，做同样的 generation 与内容漂移检查），精确层未就绪时直接返回本地结果；无本地候选的点击照常发起 Context 升级，`applyExact` 在该请求的 `.idle` 阶段把结果作为唯一候选。
 
 鼠标命中方法名才走方法解析；`receiverRange` 用于推断方法接收者，不能把接收者 token 变成方法 token。语法层类型剥离用于阅读预览，不应顺便改变原来的方法分派 `targetHint` 语义。
 
@@ -66,7 +66,7 @@
 
 **通知必须完整。** 沙箱拒绝 `mach-lookup com.apple.FSEvents`，rust-analyzer 在沙箱内没有自己的文件监视，Cairn 的 `didChangeWatchedFiles` 是唯一的变化来源，这也让切换不会触发整工作区重扫。差异在两个整项目快照之间计算；协调器自己用默认 `ProjectPathRules` 建快照，不应用用户排除规则，所以被用户排除的 tracked 文件照样在 commit 快照里、照样通知。工作区快照仍跳过内置目录（`target`、`build`、`dist` 等），重新激活工作区槽时这些目录里 tracked 文件的改动不会通知，是已知缺口。
 
-**依赖借用与路径分类。** [DependencyBorrowing](../Sources/CodeInsightExact/DependencyBorrowing.swift) 给出检出目录内的链接集合（TypeScript 是项目根与每个 tracked `package.json` 旁、工作区里存在的 `node_modules`；Python 是该 commit 自己配置的相对 `venvPath`；Rust 不借用）和 Pyright 的解释器（工作区单元根的 `.venv`/`venv`，工作区与 commit 两种模式都用）。服务器可能返回检出目录下的链接路径，也可能返回工作区的真实路径：位置落在检出目录或工作区下、且快照里有这个文件时才映射成项目相对路径，否则保留绝对路径作为依赖文件，从磁盘读取，不进 `snapshot.readBytes`。`ExactCoordinator.isDependencyFile` 认出工作区下的依赖根；`AppModel.isDependencyFile` 再加上会话恢复时以绝对路径打开的文件，因为恢复可能早于 Exact 准备完成。依赖目标的语言用 `dependencyFileLanguageMode`，它在项目语言分类之外接受 `.d.ts`（TypeScript）与 `.pyi`（Python）；`LanguageMode.classify` 本身不变，它决定项目语言探测与索引。离线标注由 provider 在启动时决定：借用了工作区依赖就是“依赖来自当前工作区”，否则 Pyright 没有解释器、TypeScript 单元根没有 `node_modules` 时是“离线依赖不可用”。
+**依赖借用与路径分类。** [DependencyBorrowing](../Sources/CodeInsightExact/DependencyBorrowing.swift) 给出检出目录内的链接集合（TypeScript 是项目根与每个 tracked `package.json` 旁、工作区里存在的 `node_modules`；Python 是该 commit 自己配置的相对 `venvPath`；Rust 不借用）和 Pyright 的解释器（工作区单元根的 `.venv`/`venv`，工作区与 commit 两种模式都用）。服务器可能返回检出目录下的链接路径，也可能返回工作区的真实路径：位置落在检出目录或工作区下、且快照里有这个文件时才映射成项目相对路径，否则保留绝对路径作为依赖文件，从磁盘读取，不进 `snapshot.readBytes`。`ContextWindowModel.projectPath` 对项目根下的绝对路径用同一规则：会话索引里有该文件才相对化。`ExactCoordinator.isDependencyFile` 认出工作区下的依赖根；`AppModel.isDependencyFile` 再加上会话恢复时以绝对路径打开的文件，因为恢复可能早于 Exact 准备完成。依赖目标的语言用 `dependencyFileLanguageMode`，它在项目语言分类之外接受 `.d.ts`（TypeScript）与 `.pyi`（Python）；`LanguageMode.classify` 本身不变，它决定项目语言探测与索引。离线标注由 provider 在启动时决定：借用了工作区依赖就是“依赖来自当前工作区”，否则 Pyright 没有解释器、TypeScript 单元根没有 `node_modules` 时是“离线依赖不可用”。
 
 **沙箱。** [Sandbox](../Sources/CodeInsightExact/Sandbox.swift) 禁网，只放行分析缓存目录写入（Trusted 的 Rust 另加项目 `target`）；检出目录、借用的真实目录、用户源码与 `.git` 不可写。长驻会话不设 `ulimit -t`：S0 实测 codex 加载已用约 52 s CPU，累计上限只够切一两次。保留 `ulimit -v`（512 GiB；VSZ 恒在 467 GiB 左右）、单次请求超时与崩溃重启。
 

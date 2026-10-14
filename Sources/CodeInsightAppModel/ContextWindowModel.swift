@@ -864,12 +864,43 @@ public final class ContextWindowModel {
     }
 
     public func explicitJump(file: String, offset: UInt32) async -> Candidate? {
+        let token = Token(file: file, offset: offset)
         // Pinned or tracking the enclosing scope: answer the jump without
         // replacing what the lens shows (R6.2, R5.3).
-        if mode == .pinned || tracking == .enclosing {
-            return await resolvedCandidate(file: file, offset: offset)
+        let local = if mode == .pinned || tracking == .enclosing {
+            await resolvedCandidate(file: file, offset: offset)
+        } else {
+            await lookup(token)
         }
-        return await lookup(Token(file: file, offset: offset))
+        // On a symbol with no local declaration, or only its own import/use
+        // binding: the language server's definition (often a dependency)
+        // is the jump. A not-ready Exact layer is not waited for.
+        guard case let .ready(session, context) = projectState,
+              let pathID = pathID(file, in: session),
+              let range = try? session.tokenRange(file: pathID, offset: offset, context: context),
+              local.map({ pointsBack($0, at: token, range: range, session: session) }) ?? true
+        else { return local }
+        return await exactDefinitionTarget(token, session: session, context: context) ?? local
+    }
+
+    /// Whether `candidate` is a binding that names the clicked token (whose
+    /// name spans `range`) itself: its import/use binding or its own `let`.
+    /// A declaration never is.
+    private func pointsBack(
+        _ candidate: Candidate,
+        at token: Token,
+        range: ByteRange,
+        session: EngineSession
+    ) -> Bool {
+        guard candidate.path == token.file else { return false }
+        if let symbol = candidate.symbol, symbol.localKind == .importBinding {
+            // `use a::b::C` binds the whole path; `C` lies inside it.
+            guard let (_, index) = session.content(at: symbol.pathID),
+                  index.imports.indices.contains(Int(symbol.localIndex))
+            else { return false }
+            return index.imports[Int(symbol.localIndex)].range.contains(token.offset)
+        }
+        return candidate.bindingKind != nil && range.contains(candidate.targetByteOffset)
     }
 
     public func resolvedCandidate(file: String, offset: UInt32) async -> Candidate? {
@@ -1011,24 +1042,26 @@ public final class ContextWindowModel {
                 context: context
             )
             guard requestID == currentRequest else { return nil }
-            guard !candidates.isEmpty else {
-                stage = .idle
-                isShowingPreviousToken = false
-                unansweredToken = (token, trigger)
-                return nil
-            }
-            stage = .candidates(candidates, selected: 0)
-            displayedToken = token
-            unansweredToken = nil
             isShowingPreviousToken = false
-            var wantsTypeDefinition = await applyTypeHop(
-                firstCandidate: candidates[0],
-                file: pathID,
-                offset: token.offset,
-                session: session,
-                context: context,
-                request: currentRequest
-            )
+            var wantsTypeDefinition = false
+            if candidates.isEmpty {
+                // No local candidate: the Exact layer may still name one (a
+                // dependency); `applyExact` shows it as the only candidate.
+                stage = .idle
+                unansweredToken = (token, trigger)
+            } else {
+                stage = .candidates(candidates, selected: 0)
+                displayedToken = token
+                unansweredToken = nil
+                wantsTypeDefinition = await applyTypeHop(
+                    firstCandidate: candidates[0],
+                    file: pathID,
+                    offset: token.offset,
+                    session: session,
+                    context: context,
+                    request: currentRequest
+                )
+            }
             if trigger == .caret {
                 // R4.2: delay exact requests until the caret dwells on this
                 // token; leaving the token cancels the pending request.
@@ -1061,7 +1094,7 @@ public final class ContextWindowModel {
                     requestTypeDefinition: wantsTypeDefinition
                 )
             }
-            return symbolCandidate ?? candidates[0]
+            return candidates.isEmpty ? nil : symbolCandidate ?? candidates[0]
         } catch {
             guard requestID == currentRequest else { return nil }
             locatedToken = nil
@@ -1323,7 +1356,7 @@ public final class ContextWindowModel {
             guard let exact = entries.first,
                   let targetOffset = UInt32(exactly: exact.location.byteOffset)
             else { return .failed(localized("model.typehop.noType")) }
-            let targetPath = projectPath(exact.location.file)
+            let targetPath = projectPath(exact.location.file, in: session)
             let sourceIsCurrent = await indexContentIsCurrent(file, session: session)
             let targetIsCurrent = await indexContentIsCurrent(targetPath, session: session)
             guard sourceIsCurrent && targetIsCurrent else {
@@ -1343,6 +1376,44 @@ public final class ContextWindowModel {
         case .cancelled, .unsupported, .unavailable, nil:
             return .failed(localized("model.typehop.needsExact"))
         }
+    }
+
+    /// The Exact `definition` answer for ⌘-click, held to the lens's
+    /// generation and content-drift checks. Like the type jump it uses its
+    /// own batch, so it never cancels the lens's in-flight upgrade.
+    private func exactDefinitionTarget(
+        _ token: Token,
+        session: EngineSession,
+        context: QueryContext
+    ) async -> Candidate? {
+        // `typeDefinitionReadiness` reports the coordinator's readiness.
+        guard let exactResolver, typeDefinitionReadiness?() == nil else { return nil }
+        let batch = ExactRequestBatch()
+        guard case let .completed(entries) = await exactResolver(
+                  token.file,
+                  token.offset,
+                  context.generation,
+                  batch
+              ),
+              sessionIsCurrent(session, context),
+              let exact = entries.first,
+              let targetOffset = UInt32(exactly: exact.location.byteOffset)
+        else { return nil }
+        let targetPath = projectPath(exact.location.file, in: session)
+        let sourceIsCurrent = await indexContentIsCurrent(token.file, session: session)
+        let targetIsCurrent = await indexContentIsCurrent(targetPath, session: session)
+        guard sourceIsCurrent && targetIsCurrent else {
+            onStaleIndexContent?(sourceIsCurrent ? targetPath : token.file)
+            return nil
+        }
+        guard sessionIsCurrent(session, context) else { return nil }
+        return await exactCandidate(
+            at: targetPath,
+            offset: targetOffset,
+            attribution: exact.attribution,
+            origin: exact.origin,
+            session: session
+        )
     }
 
     private func startExactUpgrade(
@@ -1485,14 +1556,14 @@ public final class ContextWindowModel {
     ) async {
         // Candidates are identified by (path, targetByteOffset), never by a
         // captured index: every await below may interleave with user
-        // selection, so the stage is re-read after each one.
+        // selection, so the stage is re-read after each one. An idle stage
+        // under this request means it found no local candidate.
         guard requestID == request,
               sessionIsCurrent(session, context),
-              case let .candidates(entryCandidates, entrySelected) = stage,
-              entryCandidates.indices.contains(entrySelected),
+              stageAcceptsExact,
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
         else { return }
-        let targetPath = projectPath(exact.location.file)
+        let targetPath = projectPath(exact.location.file, in: session)
         // The provider answered against the captured bytes; matching profile
         // and snapshot alone does not prove the query source and target still
         // hold those bytes. Drift suspends the upgrade instead of presenting
@@ -1507,8 +1578,7 @@ public final class ContextWindowModel {
         )
         guard requestID == request,
               sessionIsCurrent(session, context),
-              case let .candidates(current, selected) = stage,
-              current.indices.contains(selected)
+              stageAcceptsExact
         else { return }
         guard sourceIsCurrent && targetIsCurrent else {
             onStaleIndexContent?(
@@ -1516,7 +1586,8 @@ public final class ContextWindowModel {
             )
             return
         }
-        if let index = current.firstIndex(where: {
+        if case let .candidates(current, selected) = stage,
+           let index = current.firstIndex(where: {
             $0.path == targetPath && $0.targetByteOffset == targetOffset
         }) {
             var candidates = current
@@ -1550,15 +1621,34 @@ public final class ContextWindowModel {
                   session: session
               ),
               requestID == request,
-              sessionIsCurrent(session, context),
-              case let .candidates(latest, latestSelected) = stage
+              sessionIsCurrent(session, context)
         else { return }
-        let keepsUserChoice = selectionEpoch != requestSelectionEpoch
-            && latest.indices.contains(latestSelected)
-        stage = .candidates(
-            [candidate] + latest,
-            selected: keepsUserChoice ? latestSelected + 1 : 0
-        )
+        switch stage {
+        case let .candidates(latest, latestSelected):
+            let keepsUserChoice = selectionEpoch != requestSelectionEpoch
+                && latest.indices.contains(latestSelected)
+            stage = .candidates(
+                [candidate] + latest,
+                selected: keepsUserChoice ? latestSelected + 1 : 0
+            )
+        case .idle where tracking == .symbol:
+            stage = .candidates([candidate], selected: 0)
+            displayedToken = token
+            unansweredToken = nil
+        default:
+            return
+        }
+    }
+
+    private var stageAcceptsExact: Bool {
+        switch stage {
+        case let .candidates(candidates, selected):
+            candidates.indices.contains(selected)
+        case .idle:
+            tracking == .symbol
+        case .indexBuilding, .typeHop, .enclosing:
+            false
+        }
     }
 
     /// P2: applies a `typeDefinition` reply. In a `.typeHop` stage the
@@ -1577,7 +1667,7 @@ public final class ContextWindowModel {
               sessionIsCurrent(session, context),
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
         else { return }
-        let targetPath = projectPath(exact.location.file)
+        let targetPath = projectPath(exact.location.file, in: session)
         let sourceIsCurrent = await indexContentIsCurrent(
             token.file,
             session: session
@@ -1770,14 +1860,18 @@ public final class ContextWindowModel {
         )
     }
 
-    private func projectPath(_ path: String) -> String {
+    /// An absolute Exact location under the root is a project path only
+    /// when the session indexes that file; anything else there (a borrowed
+    /// `node_modules`, the venv) stays an absolute dependency path.
+    private func projectPath(_ path: String, in session: EngineSession) -> String {
         guard path.hasPrefix("/"), let root else { return path }
         let file = URL(fileURLWithPath: path).standardizedFileURL
         guard file.pathComponents.starts(with: root.pathComponents) else {
             return path
         }
-        return file.pathComponents.dropFirst(root.pathComponents.count)
+        let relative = file.pathComponents.dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+        return pathID(relative, in: session) == nil ? path : relative
     }
 
     /// Whether a result computed against `session`/`context` may still be
