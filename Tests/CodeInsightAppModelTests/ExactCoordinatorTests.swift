@@ -2374,6 +2374,61 @@ func commandClickOnATypeScriptImportSpecifierJumpsToTheDeclarationFile() async t
 
 @MainActor
 @Test
+func commandClickOnAUseOfATypeScriptImportedNameJumpsToTheDeclarationFile() async throws {
+    let source = "import { Tokenizer } from \"tok\";\nlet t: Tokenizer | null = null;\n"
+    let declaration = "export declare class Tokenizer {}\n"
+    let root = try exactTemporaryTypeScriptProject([
+        "main.ts": source,
+        "node_modules/tok/index.d.ts": declaration,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let dependency = root.appendingPathComponent("node_modules/tok/index.d.ts").path
+    let session = try ProjectIndexer().index(root: root, language: .typescript)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _, _ in
+            .completed([exactEntry(
+                file: dependency,
+                byteOffset: exactByteOffset(of: "Tokenizer", in: declaration)
+            )])
+        }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+
+    let jump = await model.explicitJump(
+        file: "main.ts",
+        offset: exactByteOffset(of: "Tokenizer |", in: source)
+    )
+
+    #expect(jump?.path == dependency)
+}
+
+/// `pkg` in `pkg.cuda.is_available()` is a name the index never records.
+@MainActor
+@Test
+func commandClickOnAnIdentifierTheIndexDoesNotRecordAsksExact() async throws {
+    var dependency = ""
+    let (model, root, path) = try underRootDependencyModel(exactResolver: { _, _, _, _ in
+        .completed([exactEntry(file: dependency, byteOffset: 0)])
+    })
+    defer { try? FileManager.default.removeItem(at: root) }
+    dependency = path
+
+    let jump = await model.explicitJump(
+        file: "main.py",
+        offset: exactByteOffset(of: "pkg.cuda", in: underRootMainSource)
+    )
+
+    #expect(jump?.path == path)
+}
+
+@MainActor
+@Test
 func commandClickWithoutALocalCandidateJumpsToAndShowsTheExactTarget() async throws {
     var dependency = ""
     let dependencyOffset = exactByteOffset(of: "is_available", in: underRootDependencySource)

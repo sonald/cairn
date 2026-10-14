@@ -47,6 +47,9 @@ public final class ContextWindowModel {
         public let basis: Basis
         /// Explanatory badge text, e.g. why the lens stays on a primitive.
         public let note: String?
+        /// The local answer is an import binding: the index did not resolve
+        /// past the import to a declaration.
+        public let isImportBinding: Bool
 
         public init(
             symbol: SymbolOccurrenceID?,
@@ -57,7 +60,8 @@ public final class ContextWindowModel {
             bindingKind: String?,
             targetByteOffset: UInt32,
             basis: Basis,
-            note: String? = nil
+            note: String? = nil,
+            isImportBinding: Bool = false
         ) {
             self.symbol = symbol
             self.path = path
@@ -68,6 +72,7 @@ public final class ContextWindowModel {
             self.targetByteOffset = targetByteOffset
             self.basis = basis
             self.note = note
+            self.isImportBinding = isImportBinding
         }
 
         func withCertainty(_ certainty: Certainty) -> Candidate {
@@ -84,7 +89,8 @@ public final class ContextWindowModel {
                     dispatch: resolutionDispatch ?? .direct,
                     provenance: provenance
                 ),
-                note: note
+                note: note,
+                isImportBinding: isImportBinding
             )
         }
 
@@ -98,7 +104,8 @@ public final class ContextWindowModel {
                 bindingKind: bindingKind,
                 targetByteOffset: targetByteOffset,
                 basis: basis,
-                note: note
+                note: note,
+                isImportBinding: isImportBinding
             )
         }
 
@@ -877,10 +884,21 @@ public final class ContextWindowModel {
         // the language server's definition (often a dependency) is the jump.
         // A not-ready Exact layer is not waited for.
         guard case let .ready(session, context) = projectState,
-              let pathID = pathID(file, in: session),
-              let range = try? session.tokenRange(file: pathID, offset: offset, context: context),
-              local.map({ stopsShortOfADeclaration($0, at: token, range: range) }) ?? true
+              let pathID = pathID(file, in: session)
         else { return local }
+        if let range = try? session.tokenRange(file: pathID, offset: offset, context: context) {
+            guard local.map({ stopsShortOfADeclaration($0, at: token, range: range) }) ?? true
+            else { return local }
+        } else {
+            // The index records no name here (`TcpListener` in a type,
+            // `torch` in `torch.cuda`), yet the server may know the
+            // identifier; on anything else it answers nothing.
+            guard local == nil,
+                  let bytes = session.sourceBytes(at: pathID),
+                  bytes.indices.contains(Int(offset)),
+                  isIdentifierByte(bytes[Int(offset)])
+            else { return local }
+        }
         return await exactDefinitionTarget(token, session: session, context: context) ?? local
     }
 
@@ -893,7 +911,7 @@ public final class ContextWindowModel {
         at token: Token,
         range: ByteRange
     ) -> Bool {
-        if candidate.symbol?.localKind == .importBinding { return true }
+        if candidate.isImportBinding { return true }
         return candidate.path == token.file
             && candidate.bindingKind != nil
             && range.contains(candidate.targetByteOffset)
@@ -1125,6 +1143,9 @@ public final class ContextWindowModel {
             let targetRange: ByteRange
             let targetOffset: UInt32
             let bindingKind: String?
+            // TypeScript binds an imported name lexically; Rust and Python
+            // resolve to the import binding itself.
+            var isImportBinding = resolution.target.localKind == .importBinding
             // A class attribute reached through its receiver (Python): a
             // field, with no engine facet behind it.
             let isMember = resolution.evidence.contains {
@@ -1137,6 +1158,7 @@ public final class ContextWindowModel {
                 let binding = index.bindings[Int(bindingIndex)]
                 targetRange = binding.declarationRange
                 targetOffset = binding.declarationRange.lowerBound
+                isImportBinding = !isMember && binding.kind == .importBinding
                 bindingKind = isMember
                     ? localized("model.typehop.field")
                     : bindingLabel(binding.kind)
@@ -1203,7 +1225,8 @@ public final class ContextWindowModel {
                     certainty: resolution.certainty,
                     dispatch: resolution.dispatch,
                     provenance: resolution.provenance
-                )
+                ),
+                isImportBinding: isImportBinding
             ))
         }
         return candidates
@@ -2030,6 +2053,13 @@ public final class ContextWindowModel {
         case .nonlocalDecl: localized("model.binding.nonlocalDecl")
         }
     }
+}
+
+/// Letters, digits, `_`, and any non-ASCII byte (a UTF-8 letter's).
+private func isIdentifierByte(_ byte: UInt8) -> Bool {
+    byte >= 0x80 || byte == UInt8(ascii: "_")
+        || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
+        || (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(byte | 0x20)
 }
 
 private func dependencyCrateName(_ path: String) -> String? {

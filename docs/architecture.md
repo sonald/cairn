@@ -46,7 +46,7 @@
 - 可比较且不同的目标可修正主结果，但保留原候选证据。Safe/离线限制不否定 provider 已给出的正向目标。
 - 捕获的导航说明不可随随后 Exact 升级改变；当前说明可以更新。阅读集与轨迹恢复不得重新查询后冒充原来的冻结证据。
 
-[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile 的新会话对象）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。`explicitJump`（`⌘` 单击）在本地无候选、首个候选是导入绑定（导入行或同文件的使用点）、或是被点的绑定本身时，用自己的 `ExactRequestBatch` 请求 definition（不取消 Context 的升级，做同样的 generation 与内容漂移检查），精确层未就绪时直接返回本地结果；无本地候选的点击照常发起 Context 升级，`applyExact` 在该请求的 `.idle` 阶段把结果作为唯一候选。
+[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile 的新会话对象）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。`explicitJump`（`⌘` 单击）在本地无候选、首个候选是导入绑定（`Candidate.isImportBinding`：Rust/Python 的导入绑定或 TypeScript 的导入词法绑定，导入行或同文件的使用点）、是被点的绑定本身，或 `tokenRange` 为 nil 但点击处的源字节是标识符字符时，用自己的 `ExactRequestBatch` 请求 definition（不取消 Context 的升级，做同样的 generation 与内容漂移检查），精确层未就绪时直接返回本地结果；无本地候选的点击照常发起 Context 升级，`applyExact` 在该请求的 `.idle` 阶段把结果作为唯一候选。
 
 鼠标命中方法名才走方法解析；`receiverRange` 用于推断方法接收者，不能把接收者 token 变成方法 token。语法层类型剥离用于阅读预览，不应顺便改变原来的方法分派 `targetHint` 语义。
 
