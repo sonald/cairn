@@ -53,6 +53,32 @@ func exactCoordinatorAttributionObservationTracksPrepareAndInvalidate()
     #expect(coordinator.attribution == nil)
 }
 
+/// The status bar must not say ready while a cold-started server loads,
+/// yet requests keep going to it as before.
+@MainActor
+@Test
+func exactCoordinatorReportsPreparingUntilALoadingServerIsReady() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState(startsLoading: true)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in ExactTestProvider(state: state) },
+        snapshotFactory: { _, _ in ExactTestSnapshot(files: fixture.files) },
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await testWaitUntil("session activated") { coordinator.attribution != nil })
+    #expect(coordinator.readiness == .preparing)
+    #expect(coordinator.acceptsRequests)
+
+    state.finishLoading()
+    #expect(await testWaitUntil("coordinator.readiness == .ready") {
+        coordinator.readiness == .ready
+    })
+}
+
 @MainActor
 @Test
 func exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile()
@@ -2678,6 +2704,9 @@ final class ExactProviderState: @unchecked Sendable {
     /// Sessions switch warm only when set; otherwise the protocol default
     /// refuses and the coordinator starts a new one.
     let supportsSwitch: Bool
+    /// Sessions start preparing (a server still loading) until
+    /// `finishLoading()`.
+    let startsLoading: Bool
     private var recordedSwitches: [(ordinal: Int, changes: [ExactFileChange], configChanged: Bool)] = []
 
     init(
@@ -2685,11 +2714,17 @@ final class ExactProviderState: @unchecked Sendable {
             ExactLocation(file: "main.rs", byteOffset: 0, line: 1, column: 1)
         },
         references: [ExactLocation]? = nil,
-        supportsSwitch: Bool = false
+        supportsSwitch: Bool = false,
+        startsLoading: Bool = false
     ) {
         self.behavior = behavior
         referencesValue = references
         self.supportsSwitch = supportsSwitch
+        self.startsLoading = startsLoading
+    }
+
+    func finishLoading() {
+        locked { latestSession }?.finishLoading()
     }
 
     var switches: [(ordinal: Int, changes: [ExactFileChange], configChanged: Bool)] {
@@ -2774,8 +2809,14 @@ final class ExactStateSession: ExactSession, @unchecked Sendable {
             ? [.definition, .references]
             : [.definition]
     }
-    let readiness: ExactReadiness = .ready
+    var readiness: ExactReadiness {
+        lock.lock()
+        defer { lock.unlock() }
+        return loading ? .preparing : .ready
+    }
     private let lock = NSLock()
+    private var loading: Bool
+    private var readyObserver: (@Sendable () -> Void)?
     private var storedAttribution: ExactAttribution
     private var environmentObserver: (@Sendable (ExactAnalysisEnvironment) -> Void)?
     private let ordinal: Int
@@ -2810,6 +2851,30 @@ final class ExactStateSession: ExactSession, @unchecked Sendable {
         storedAttribution = attribution
         self.ordinal = ordinal
         self.state = state
+        loading = state.startsLoading
+    }
+
+    var onReady: (@Sendable () -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return readyObserver
+        }
+        set {
+            lock.lock()
+            readyObserver = newValue
+            let ready = !loading
+            lock.unlock()
+            if ready { newValue?() }
+        }
+    }
+
+    func finishLoading() {
+        lock.lock()
+        loading = false
+        let observer = readyObserver
+        lock.unlock()
+        observer?()
     }
 
     func definition(

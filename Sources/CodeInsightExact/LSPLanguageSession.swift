@@ -132,6 +132,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     private var baseAttribution: ExactAttribution
     private var currentEnvironment: ExactAnalysisEnvironment
     private var environmentObserver: (@Sendable (ExactAnalysisEnvironment) -> Void)?
+    private var readyObserver: (@Sendable () -> Void)?
     /// True while a switch runs; requests wait before reading the snapshot.
     private var switching = false
     /// Advances with every switch; a request that read the snapshot under
@@ -170,6 +171,21 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             let environment = currentEnvironment
             stateLock.unlock()
             newValue?(environment)
+        }
+    }
+
+    var onReady: (@Sendable () -> Void)? {
+        get {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return readyObserver
+        }
+        set {
+            stateLock.lock()
+            readyObserver = newValue
+            let ready = state == .ready
+            stateLock.unlock()
+            if ready { newValue?() }
         }
     }
 
@@ -231,6 +247,10 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         self.closeGrace = closeGrace
         baseAttribution = attribution
         currentEnvironment = attribution.environment
+        // rust-analyzer loads the workspace after `initialize` and says so
+        // with `quiescent`; the others have nothing to wait for until a
+        // request, which they answer once loaded.
+        state = language.requestFlow == .awaitQuiescence ? .preparing : .ready
         observe(client)
     }
 
@@ -1022,14 +1042,36 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             }
             stateLock.unlock()
         }
-        guard let onDiagnostic = language.onDiagnostic else { return }
+        let onDiagnostic = language.onDiagnostic
+        // `experimental/serverStatus` reaches the diagnostics observer too.
+        let watchesQuiescence = language.requestFlow == .awaitQuiescence
+        guard onDiagnostic != nil || watchesQuiescence else { return }
         observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
             guard let self, let observedClient else { return }
-            publishEnvironment(
-                onDiagnostic(baseAttribution.environment, diagnostic),
-                from: observedClient
-            )
+            if let onDiagnostic {
+                publishEnvironment(
+                    onDiagnostic(baseAttribution.environment, diagnostic),
+                    from: observedClient
+                )
+            }
+            if watchesQuiescence, observedClient.isQuiescent {
+                markLoaded(observedClient)
+            }
         }
+    }
+
+    /// The first quiescence after start (or a crash restart): the same
+    /// signal requests wait for. A switch confirms its own readiness.
+    private func markLoaded(_ observedClient: LSPClient) {
+        stateLock.lock()
+        guard client === observedClient, !switching, state == .preparing else {
+            stateLock.unlock()
+            return
+        }
+        state = .ready
+        let observer = readyObserver
+        stateLock.unlock()
+        observer?()
     }
 
     private func publishEnvironment(

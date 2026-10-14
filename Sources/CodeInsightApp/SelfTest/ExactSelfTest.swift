@@ -1977,7 +1977,8 @@ extension AppDelegate {
             )
             return ("skipped:sandbox-unavailable", true, [:])
         }
-        let initialStatusSafe = waitUntil(timeout: 5, condition: {
+        // Ready now means rust-analyzer finished loading, not just started.
+        let initialStatusSafe = waitUntil(timeout: 45, condition: {
             coordinator.readiness == .ready
                 && controller.selfTestExactStatusText.contains("Safe")
         })

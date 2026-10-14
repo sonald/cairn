@@ -2069,7 +2069,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let restart = NSButton(title: localized("main.restart.analysis"), target: self, action: #selector(restartExactAnalysis(_:)))
         restart.bezelStyle = .rounded
         restart.isEnabled = model.snapshotPhase == .fullReady
-            && model.exactCoordinator.readiness != .preparing
+            && (model.exactCoordinator.readiness != .preparing
+                || model.exactCoordinator.acceptsRequests)
         let stack = NSStackView(views: [scroll, restart])
         stack.orientation = .vertical
         stack.alignment = .leading

@@ -1012,8 +1012,37 @@ public final class ExactCoordinator {
             readiness = .unavailable(reason)
         case .closed:
             readiness = .unavailable(localized("model.exact.closed"))
-        case .preparing, .ready:
+        case .preparing:
+            // A cold-started server still loading; `onReady` ends it.
+            readiness = .preparing
+        case .ready:
             readiness = .ready
+        }
+        observeReady(from: next)
+    }
+
+    private func observeReady(from source: Active) {
+        let sessionID = ObjectIdentifier(source.session)
+        source.session.onReady = { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.readiness == .preparing,
+                      let active = self.active,
+                      ObjectIdentifier(active.session) == sessionID
+                else { return }
+                self.readiness = .ready
+            }
+        }
+    }
+
+    /// Whether requests may go out without waiting for a prepare. The
+    /// status bar says preparing while an activated server loads, but
+    /// requests went to it before that was shown and still do: it answers
+    /// once loaded.
+    public var acceptsRequests: Bool {
+        switch readiness {
+        case .ready: true
+        case .preparing: prepareTask == nil && active?.session.readiness == .preparing
+        case .unavailable, .off: false
         }
     }
 

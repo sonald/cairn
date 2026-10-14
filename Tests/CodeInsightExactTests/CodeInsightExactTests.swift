@@ -3238,6 +3238,22 @@ func rustAnalyzerPreservesEveryDefinitionTarget() throws {
     }
 }
 
+/// A cold-started rust-analyzer is ready once it reports quiescence, with
+/// no request needed; the coordinator learns it through `onReady`.
+@Test
+func rustAnalyzerSessionBecomesReadyOnQuiescenceWithoutARequest() throws {
+    try withFakeRustAnalyzerSession(
+        serverCheck: { server in
+            #expect(!server.requestMethods.contains("textDocument/definition"))
+        }
+    ) { session in
+        let notified = DispatchSemaphore(value: 0)
+        session.onReady = { notified.signal() }
+        #expect(notified.wait(timeout: .now() + 5) == .success)
+        #expect(session.readiness == .ready)
+    }
+}
+
 @Test
 func rustAnalyzerCancelledReadinessWaitDoesNotSendRequest() throws {
     try withFakeRustAnalyzerSession(

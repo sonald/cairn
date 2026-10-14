@@ -392,7 +392,7 @@ public final class ContextWindowModel {
             )
         }
         typeDefinitionReadiness = { [weak coordinator] in
-            guard let coordinator else { return nil }
+            guard let coordinator, !coordinator.acceptsRequests else { return nil }
             return switch coordinator.readiness {
             case .ready: nil
             case .preparing: localized("model.typehop.pendingExact")
