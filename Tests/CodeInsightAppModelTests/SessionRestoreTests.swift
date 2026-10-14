@@ -447,7 +447,11 @@ func mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() 
     }
     let model = AppModel(
         sessionURL: sessionURL,
-        indexService: SessionRestoreIndexService()
+        indexService: SessionRestoreIndexService(),
+        exactCoordinator: ExactCoordinator(checkoutStore: CheckoutStore(
+            parentURL: sessionURL.deletingLastPathComponent()
+                .appendingPathComponent("checkouts", isDirectory: true)
+        ))
     )
     await model.openProject(root: root).value
     try #require(await testWaitUntil("mixed fullReady") {
@@ -1537,6 +1541,7 @@ private actor GatedSessionRestoreIndexService: IndexService {
 }
 
 private func sessionRestoreProject(_ files: [String: String]) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightSessionRestore-\(UUID().uuidString)",
         isDirectory: true

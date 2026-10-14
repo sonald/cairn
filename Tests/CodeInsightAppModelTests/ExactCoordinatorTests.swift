@@ -3328,6 +3328,7 @@ private func exactSymbols(_ model: ContextWindowModel) -> [SymbolOccurrenceID] {
 }
 
 private func exactTemporaryProject(_ files: [String: String]) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightExactCoordinatorTests-\(UUID().uuidString)",
         isDirectory: true

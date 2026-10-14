@@ -1668,6 +1668,7 @@ private final class SnapshotGitFixture {
     let root: URL
 
     init() throws {
+        _ = isolatedIndexCacheRoot
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "CodeInsightSnapshotSwitchTests-\(UUID().uuidString)",
             isDirectory: true
@@ -1712,6 +1713,7 @@ private final class SnapshotGitFixture {
 }
 
 private func snapshotTemporaryProject(_ files: [String: String]) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightSnapshotSwitchTests-\(UUID().uuidString)",
         isDirectory: true

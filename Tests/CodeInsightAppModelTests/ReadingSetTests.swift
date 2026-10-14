@@ -348,6 +348,7 @@ private func readingSetInspector(
 }
 
 private func readingSetTemporaryProject(source: String) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("ReadingSetTests-\(UUID().uuidString)")
     let file = root.appendingPathComponent("src/lib.rs")

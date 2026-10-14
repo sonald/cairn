@@ -1084,6 +1084,7 @@ private func bookmarkModelRecord(
 }
 
 private func bookmarkModelTemporaryGitProject(source: String) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("BookmarkModelTests-\(UUID().uuidString)")
     let file = root.appendingPathComponent("src/main.rs")

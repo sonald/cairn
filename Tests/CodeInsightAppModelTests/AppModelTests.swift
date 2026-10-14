@@ -2188,6 +2188,7 @@ private enum Failure: Error {
 }
 
 private func temporaryProject(_ files: [String: String]) throws -> URL {
+    _ = isolatedIndexCacheRoot
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightAppModelTests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

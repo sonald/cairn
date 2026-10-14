@@ -609,6 +609,7 @@ private struct SearchPanelFixture {
     let typescript: (session: EngineSession, context: QueryContext, pathID: PathID)
 
     init(workspace: Bool = false) async throws {
+        _ = isolatedIndexCacheRoot
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "SearchPanelModelTests-\(UUID().uuidString)"
         )

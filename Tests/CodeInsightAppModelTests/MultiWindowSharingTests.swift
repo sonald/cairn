@@ -666,6 +666,7 @@ private func multiWindowTemporaryDirectory() -> URL {
 }
 
 private func multiWindowGitFixture(files: [String: String]) throws -> URL {
+    _ = isolatedIndexCacheRoot
     var files = files
     // ExactProfileKey requires a Cargo manifest for Rust projects.
     files["Cargo.toml"] = files["Cargo.toml"]
