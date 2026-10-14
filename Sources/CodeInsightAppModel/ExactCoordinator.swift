@@ -300,8 +300,8 @@ public final class ExactCoordinator {
     /// rust-analyzer at 4–5 GB on codex). Constants, not settings.
     static let standbyIdleLimit: TimeInterval = 600
     static let standbyMemoryLimit: UInt64 = 2 << 30
-    /// Reads a server's resident memory; tests substitute their own.
-    @ObservationIgnored var residentMemory: (Int32) -> UInt64? = residentBytes(of:)
+    /// Reads a server's memory footprint; tests substitute their own.
+    @ObservationIgnored var memoryFootprint: (Int32) -> UInt64? = physicalFootprint(of:)
 
     public private(set) var readiness: Readiness = .off(localized("model.exact.noProject"))
     public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
@@ -588,10 +588,10 @@ public final class ExactCoordinator {
                 standbySince[slot] = nil
                 continue
             }
-            let resident = parked.session.processIdentifier
-                .flatMap(residentMemory) ?? 0
+            let footprint = parked.session.processIdentifier
+                .flatMap(memoryFootprint) ?? 0
             guard now.timeIntervalSince(since) > Self.standbyIdleLimit
-                || resident > Self.standbyMemoryLimit
+                || footprint > Self.standbyMemoryLimit
             else { continue }
             slots[slot] = nil
             standbySince[slot] = nil
@@ -1958,14 +1958,17 @@ private func snapshotPath(for file: URL, under root: URL) -> String? {
     return components.dropFirst(rootComponents.count).joined(separator: "/")
 }
 
-/// Resident memory of a process, for the standby limit; nil when unknown.
-private func residentBytes(of pid: Int32) -> UInt64? {
-    var info = proc_taskinfo()
-    let size = Int32(MemoryLayout<proc_taskinfo>.size)
-    guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else {
-        return nil
+/// A process's physical footprint (Activity Monitor's Memory column), for
+/// the standby limit; nil when unknown. Unlike the resident size it keeps
+/// counting pages the system compressed, which a parked server soon is.
+func physicalFootprint(of pid: Int32) -> UInt64? {
+    var info = rusage_info_v4()
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+            proc_pid_rusage(pid, RUSAGE_INFO_V4, $0)
+        }
     }
-    return info.pti_resident_size
+    return result == 0 ? info.ri_phys_footprint : nil
 }
 
 private func makeSnapshot(root: URL, revision: String?) throws -> any Snapshot {

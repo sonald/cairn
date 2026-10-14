@@ -2772,7 +2772,7 @@ final class ExactStateSession: ExactSession, @unchecked Sendable {
     }
 
     /// The ordinal stands in for a pid; tests read memory through
-    /// `ExactCoordinator.residentMemory`.
+    /// `ExactCoordinator.memoryFootprint`.
     var processIdentifier: Int32? { Int32(ordinal) }
     func cancel() {}
     func close() { state.close(ordinal: ordinal) }
@@ -3638,8 +3638,8 @@ func exactCoordinatorReleasesAParkedSlotWhoseServerHoldsMoreThanTheMemoryLimit()
     defer { fixture.remove() }
     let state = ExactProviderState(supportsSwitch: true)
     let coordinator = fixture.coordinator(state: state)
-    var resident: [Int32: UInt64] = [:]
-    coordinator.residentMemory = { resident[$0] }
+    var footprint: [Int32: UInt64] = [:]
+    coordinator.memoryFootprint = { footprint[$0] }
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
     #expect(await testWaitUntil("workspace ready") { coordinator.readiness == .ready })
@@ -3649,16 +3649,34 @@ func exactCoordinatorReleasesAParkedSlotWhoseServerHoldsMoreThanTheMemoryLimit()
     })
 
     // Session 1 (workspace) is parked, session 2 (checkout) is active.
-    resident = [1: ExactCoordinator.standbyMemoryLimit, 2: 8 << 30]
+    footprint = [1: ExactCoordinator.standbyMemoryLimit, 2: 8 << 30]
     coordinator.releaseStandby(now: Date())
     #expect(coordinator.hasSession(in: .worktree))
     #expect(coordinator.hasSession(in: .checkout))
 
-    resident[1] = ExactCoordinator.standbyMemoryLimit + 1
+    footprint[1] = ExactCoordinator.standbyMemoryLimit + 1
     coordinator.releaseStandby(now: Date())
     #expect(!coordinator.hasSession(in: .worktree))
     #expect(coordinator.hasSession(in: .checkout))
     #expect(await testWaitUntil("parked server closed") { state.closedSessions == [1] })
+}
+
+/// The standby limit reads a real process's footprint. Compression, the
+/// reason for footprint over resident size, cannot be forced here.
+@Test
+func physicalFootprintGrowsWithTouchedMemoryAndIsNilForAMissingProcess() throws {
+    let pid = getpid()
+    let before = try #require(physicalFootprint(of: pid))
+    let size = 256 << 20
+    let buffer = UnsafeMutableRawPointer.allocate(byteCount: size, alignment: 4096)
+    defer { buffer.deallocate() }
+    for page in stride(from: 0, to: size, by: 4096) {
+        buffer.storeBytes(of: 1, toByteOffset: page, as: UInt8.self)
+    }
+    let after = try #require(physicalFootprint(of: pid))
+
+    #expect(after > before + (200 << 20))
+    #expect(physicalFootprint(of: Int32.max) == nil)
 }
 
 @MainActor
