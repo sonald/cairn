@@ -872,35 +872,31 @@ public final class ContextWindowModel {
         } else {
             await lookup(token)
         }
-        // On a symbol with no local declaration, or only its own import/use
-        // binding: the language server's definition (often a dependency)
-        // is the jump. A not-ready Exact layer is not waited for.
+        // On a symbol the index cannot carry to a declaration (no candidate,
+        // an import it could not resolve past, or the clicked `let` itself):
+        // the language server's definition (often a dependency) is the jump.
+        // A not-ready Exact layer is not waited for.
         guard case let .ready(session, context) = projectState,
               let pathID = pathID(file, in: session),
               let range = try? session.tokenRange(file: pathID, offset: offset, context: context),
-              local.map({ pointsBack($0, at: token, range: range, session: session) }) ?? true
+              local.map({ stopsShortOfADeclaration($0, at: token, range: range) }) ?? true
         else { return local }
         return await exactDefinitionTarget(token, session: session, context: context) ?? local
     }
 
-    /// Whether `candidate` is a binding that names the clicked token (whose
-    /// name spans `range`) itself: its import/use binding or its own `let`.
-    /// A declaration never is.
-    private func pointsBack(
+    /// Whether the local answer for the clicked token (whose name spans
+    /// `range`) stops short of a declaration: an import binding, from the
+    /// import line or any use of the imported name, or the clicked binding
+    /// itself. A declaration never does.
+    private func stopsShortOfADeclaration(
         _ candidate: Candidate,
         at token: Token,
-        range: ByteRange,
-        session: EngineSession
+        range: ByteRange
     ) -> Bool {
-        guard candidate.path == token.file else { return false }
-        if let symbol = candidate.symbol, symbol.localKind == .importBinding {
-            // `use a::b::C` binds the whole path; `C` lies inside it.
-            guard let (_, index) = session.content(at: symbol.pathID),
-                  index.imports.indices.contains(Int(symbol.localIndex))
-            else { return false }
-            return index.imports[Int(symbol.localIndex)].range.contains(token.offset)
-        }
-        return candidate.bindingKind != nil && range.contains(candidate.targetByteOffset)
+        if candidate.symbol?.localKind == .importBinding { return true }
+        return candidate.path == token.file
+            && candidate.bindingKind != nil
+            && range.contains(candidate.targetByteOffset)
     }
 
     public func resolvedCandidate(file: String, offset: UInt32) async -> Candidate? {

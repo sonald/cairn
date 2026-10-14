@@ -2315,6 +2315,26 @@ func commandClickOnAnImportBindingJumpsToTheExactDependencyWhenReady() async thr
     #expect(local?.line == 1)
 }
 
+@MainActor
+@Test
+func commandClickOnAUseOfAnImportedNameJumpsToTheExactDependency() async throws {
+    var dependency = ""
+    let dependencyOffset = exactByteOffset(of: "helper", in: underRootDependencySource)
+    let (model, root, path) = try underRootDependencyModel(exactResolver: { _, _, _, _ in
+        .completed([exactEntry(file: dependency, byteOffset: dependencyOffset)])
+    })
+    defer { try? FileManager.default.removeItem(at: root) }
+    dependency = path
+
+    // The local answer is the import line, not a declaration.
+    let jump = await model.explicitJump(
+        file: "main.py",
+        offset: exactByteOffset(of: "helper()", in: underRootMainSource)
+    )
+
+    #expect(jump?.path == path)
+}
+
 /// TypeScript binds an import specifier lexically, not as an import binding.
 @MainActor
 @Test
