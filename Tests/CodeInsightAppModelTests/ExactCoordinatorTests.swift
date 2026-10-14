@@ -2372,6 +2372,62 @@ func commandClickOnATypeScriptImportSpecifierJumpsToTheDeclarationFile() async t
     #expect(jump?.path == dependency)
 }
 
+/// TypeScript and Pyright never answer typeDefinition: the import must not
+/// park in a "not ready" type hop while the jump already opened the target.
+@MainActor
+@Test
+func commandClickOnATypeScriptImportShowsTheDependencyTargetWhenTypeDefinitionIsUnsupported() async throws {
+    let source = "import { Tokenizer } from \"tok\";\nnew Tokenizer();\n"
+    let declaration = "export declare class Tokenizer {}\n"
+    let root = try exactTemporaryTypeScriptProject([
+        "main.ts": source,
+        "node_modules/tok/index.d.ts": declaration,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let dependency = root.appendingPathComponent("node_modules/tok/index.d.ts").path
+    let session = try ProjectIndexer().index(root: root, language: .typescript)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _, _ in
+            .completed([exactEntry(
+                file: dependency,
+                byteOffset: exactByteOffset(of: "Tokenizer", in: declaration)
+            )])
+        },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            let spelling = try? session.bindingSpelling(
+                file: file, offset: offset, context: context
+            )
+            return ContextWindowModel.TypeHopAnswer(
+                result: result,
+                viaText: spelling?.text,
+                viaKind: spelling?.kind,
+                boundNote: spelling?.boundNote
+            )
+        },
+        typeDefinitionResolver: { _, _, _, _ in .unsupported },
+        typeDefinitionReadiness: { nil }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+
+    let jump = await model.explicitJump(
+        file: "main.ts",
+        offset: exactByteOffset(of: "Tokenizer }", in: source)
+    )
+
+    #expect(jump?.path == dependency)
+    #expect(await testWaitUntil("Context shows the dependency target") {
+        model.displayedCandidate?.path == dependency
+    })
+    #expect(model.activeTypeHop == nil)
+}
+
 @MainActor
 @Test
 func commandClickOnAUseOfATypeScriptImportedNameJumpsToTheDeclarationFile() async throws {

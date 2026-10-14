@@ -1481,17 +1481,20 @@ public final class ContextWindowModel {
             if requestID == request { markTypeHopExactUnavailable() }
             return
         }
-        if case .completed(let entries) = result {
-            for exact in entries {
-                await applyExact(
-                    exact,
-                    token: token,
-                    session: session,
-                    context: context,
-                    request: request,
-                    selectionEpoch: requestSelectionEpoch
-                )
-            }
+        let definitions: [ExactOverlay.Entry] = if case .completed(let entries) = result {
+            entries
+        } else {
+            []
+        }
+        for exact in definitions {
+            await applyExact(
+                exact,
+                token: token,
+                session: session,
+                context: context,
+                request: request,
+                selectionEpoch: requestSelectionEpoch
+            )
         }
         // P2: the typeDefinition request rides the same batch as the
         // definition upgrade.
@@ -1522,7 +1525,26 @@ public final class ContextWindowModel {
                         selectionEpoch: requestSelectionEpoch
                     )
                 }
-            case nil, .cancelled, .unsupported, .unavailable:
+            case .unsupported:
+                // The server never answers typeDefinition (TypeScript,
+                // Pyright): that is not "not ready". Leave the pending hop
+                // for the candidates and show the definition it refused.
+                guard requestID == request,
+                      case let .typeHop(hop, _) = stage,
+                      hop.pendingExact, hop.targets.isEmpty
+                else { return }
+                stage = .candidates([hop.via], selected: 0)
+                for exact in definitions {
+                    await applyExact(
+                        exact,
+                        token: token,
+                        session: session,
+                        context: context,
+                        request: request,
+                        selectionEpoch: requestSelectionEpoch
+                    )
+                }
+            case nil, .cancelled, .unavailable:
                 // A cancelled batch normally means a newer click already
                 // replaced the stage; when it was the final reply, stop the
                 // resolving state instead of spinning forever.
