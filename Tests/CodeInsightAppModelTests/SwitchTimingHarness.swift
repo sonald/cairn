@@ -33,6 +33,7 @@ private func ms(_ start: ContinuousClock.Instant) -> Int {
 @MainActor
 @Test(.enabled(if: harnessRoot != nil))
 func switchTimingHarnessEndToEnd() async throws {
+    _ = isolatedIndexCacheRoot
     let root = URL(fileURLWithPath: harnessRoot!, isDirectory: true).standardizedFileURL
     let scratch = FileManager.default.temporaryDirectory
         .appendingPathComponent("cairn-switch-harness-\(UUID().uuidString)")
@@ -93,6 +94,7 @@ func switchTimingHarnessEndToEnd() async throws {
 /// main actor, so each stage can be timed on its own.
 @Test(.enabled(if: harnessRoot != nil))
 func switchTimingHarnessStages() async throws {
+    _ = isolatedIndexCacheRoot
     let root = URL(fileURLWithPath: harnessRoot!, isDirectory: true).standardizedFileURL
     let scratch = FileManager.default.temporaryDirectory
         .appendingPathComponent("cairn-switch-stages-\(UUID().uuidString)")
