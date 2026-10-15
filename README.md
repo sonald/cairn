@@ -14,7 +14,7 @@
 - Optional rust-analyzer, Pyright, and typescript-language-server analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
 - Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes plus bundled and user-supplied base16 themes, and English/Simplified Chinese UI.
-- Read-only Markdown, restricted HTML, image, PDF, and UTF-8 text previews.
+- Read-only Markdown, restricted HTML, image, PDF, and UTF-8 text previews; configuration, scripts, and unanalyzed languages such as C/C++, Java, Go, and JS are syntax-colored.
 
 Exact analysis of a past commit runs in a checkout directory Cairn owns (one per window, deleted when the window closes) and borrows the workspace's `node_modules` and virtual environment; language servers follow commit switches without restarting when nothing but the commit and configuration content changed.
 

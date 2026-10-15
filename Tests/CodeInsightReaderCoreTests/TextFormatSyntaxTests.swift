@@ -314,5 +314,76 @@ func codeSnippetHighlighterCoversReaderLanguagesAndFormats() {
     #expect(!CodeSnippetHighlighter.spans(for: "def f(): pass", languageHint: "python").isEmpty)
     #expect(!CodeSnippetHighlighter.spans(for: "const a = 1", languageHint: "js").isEmpty)
     #expect(!CodeSnippetHighlighter.spans(for: "a: 1", languageHint: "yaml").isEmpty)
-    #expect(CodeSnippetHighlighter.spans(for: "int main() {}", languageHint: "c").isEmpty)
+    #expect(!CodeSnippetHighlighter.spans(for: "int main() {}", languageHint: "c").isEmpty)
+    #expect(CodeSnippetHighlighter.spans(for: "x", languageHint: "brainfuck").isEmpty)
+}
+
+@Test
+func textFormatDetectsSourceLanguagesCairnDoesNotAnalyze() {
+    #expect(TextFormat.detect(fileName: "main.c") == .code(.c))
+    #expect(TextFormat.detect(fileName: "list.h") == .code(.cpp))
+    #expect(TextFormat.detect(fileName: "View.mm") == .code(.objectiveC))
+    #expect(TextFormat.detect(fileName: "Main.java") == .code(.java))
+    #expect(TextFormat.detect(fileName: "server.go") == .code(.go))
+    #expect(TextFormat.detect(fileName: "Unit1.PAS") == .code(.pascal))
+    #expect(TextFormat.detect(fileName: "boot.S") == .code(.assembly))
+    #expect(TextFormat.detect(fileName: "app.jsx") == .javascript)
+    #expect(TextFormat.detect(fileName: "index.cjs") == .javascript)
+    #expect(TextFormat.detect(fileName: "query.sql.j2") == .jinja(host: .code(.sql)))
+    #expect(TextFormat.fromLanguageHint("cpp") == .code(.cpp))
+    #expect(TextFormat.fromLanguageHint("js") == nil)
+    for language in CodeLanguage.allCases {
+        _ = TextFormat.code(language).highlight("x = 1 // a\n")
+    }
+}
+
+@Test
+func cFamilyHighlightsDirectivesCommentsStringsNumbersAndCalls() {
+    let text = """
+    #include "list.h"
+    /* multi
+       line */
+    static int count(const char *s) { // trailing
+        return strlen(s) + 0x1F + 1e-3 + '\\'';
+    }
+    """
+    let result = tokens(.code(.c), text)
+    #expect(result.contains("macro:#include"))
+    #expect(result.contains("string:\"list.h\""))
+    #expect(result.contains("comment:/* multi\n   line */"))
+    #expect(result.contains("comment:// trailing"))
+    #expect(result.contains("keyword:static"))
+    #expect(result.contains("keyword:const"))
+    #expect(result.contains("functionCall:count"))
+    #expect(result.contains("functionCall:strlen"))
+    #expect(result.contains("number:0x1F"))
+    #expect(result.contains("number:1e-3"))
+    #expect(result.contains("string:'\\''"))
+    #expect(kind(.code(.c), text, of: "s") == nil)
+}
+
+@Test
+func codeLanguagesUseTheirOwnCommentAndKeywordRules() {
+    let pascal = "{ note } (* old *) BEGIN x := 'it''s'; END."
+    #expect(tokens(.code(.pascal), pascal) == [
+        "comment:{ note }", "comment:(* old *)", "keyword:BEGIN",
+        "string:'it'", "string:'s'", "keyword:END",
+    ])
+    #expect(kind(.code(.visualBasic), "Dim x ' note", of: "' note") == .comment)
+    #expect(kind(.code(.sql), "SELECT 1 -- note", of: "-- note") == .comment)
+    #expect(kind(.code(.java), "@Override void f()", of: "@Override") == .attribute)
+    #expect(kind(.code(.objectiveC), "@interface Foo", of: "@interface") == .keyword)
+    #expect(kind(.code(.go), "s := `a\n\"b\"`", of: "`a\n\"b\"`") == .string)
+    #expect(kind(.code(.kotlin), "val s = \"\"\"\n\"x\"\n\"\"\"", of: "\"\"\"\n\"x\"\n\"\"\"") == .string)
+}
+
+@Test
+func javascriptPreviewUsesTheSyntaxTreeIncludingJSX() {
+    let text = "const el = <App title={`hi ${name}`} />;\nfunction run() { return el; }\n"
+    let result = tokens(.javascript, text)
+    #expect(result.contains("keyword:const"))
+    #expect(result.contains("keyword:function"))
+    #expect(result.contains("property:title"))
+    #expect(result.contains("string:hi "))
+    #expect(result.contains("functionName:run"))
 }

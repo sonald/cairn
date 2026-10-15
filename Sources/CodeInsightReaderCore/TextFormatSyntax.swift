@@ -26,6 +26,11 @@ public enum TextFormat: Equatable, Hashable, Sendable {
     case makefile
     case diff
     case markup
+    /// Source languages Cairn does not analyze, colored lexically.
+    case code(CodeLanguage)
+    /// `.js`/`.jsx`/`.mjs`/`.cjs`, colored by the vendored TSX grammar
+    /// (it parses JavaScript and JSX without errors).
+    case javascript
     /// Jinja-family templates, lexed over the host format named by the inner
     /// extension (`values.yaml.j2`); `nil` hosts use markup-style tags.
     indirect case jinja(host: TextFormat?)
@@ -41,6 +46,8 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         case .makefile: "Makefile"
         case .diff: "Diff"
         case .markup: "XML"
+        case .code(let language): language.displayName
+        case .javascript: "JavaScript"
         case .jinja: "Jinja"
         }
     }
@@ -94,7 +101,7 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         case "xml", "html", "svg", "plist", "xhtml": return .markup
         case "jinja", "jinja2", "j2", "django", "twig", "nunjucks", "njk", "tera", "liquid":
             return .jinja(host: nil)
-        default: return nil
+        default: return CodeLanguage.fromLanguageHint(hint).map { .code($0) }
         }
     }
 
@@ -116,6 +123,15 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         case .makefile: lexer.makefile()
         case .diff: lexer.diff()
         case .markup: lexer.markup()
+        case .code(let language): lexer.code(language.syntax)
+        case .javascript:
+            // Parsing runs on the main thread with the preview; past the
+            // snippet limit (~0.4 s in a debug build) the file stays plain.
+            guard units.count <= CodeSnippetHighlighter.snippetUTF16Limit else { return [] }
+            let text = String(utf16CodeUnits: units, count: units.count)
+            return CodeSnippetHighlighter.syntaxSpans(
+                for: text, mode: LanguageMode(language: .typescript, variant: "tsx")
+            )
         case .jinja(let host):
             return Self.jinja(units: units, host: host)
         }
@@ -177,7 +193,8 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         "diff": .diff, "patch": .diff,
         "xml": .markup, "plist": .markup, "xsd": .markup, "xsl": .markup,
         "xslt": .markup, "svg": .markup, "html": .markup, "htm": .markup,
-    ]
+        "js": .javascript, "jsx": .javascript, "mjs": .javascript, "cjs": .javascript,
+    ].merging(CodeLanguage.byExtension.mapValues { .code($0) }) { format, _ in format }
     private static let exactNames: [String: TextFormat] = [
         "cargo.lock": .toml, "pipfile": .toml, "poetry.lock": .toml, "uv.lock": .toml,
         ".editorconfig": .ini, ".gitconfig": .ini, ".gitmodules": .ini, ".npmrc": .ini,
@@ -1292,6 +1309,10 @@ public enum CodeSnippetHighlighter {
             mode = LanguageMode(language: .typescript, variant: "tsx")
         default: return []
         }
+        return syntaxSpans(for: text, mode: mode)
+    }
+
+    static func syntaxSpans(for text: String, mode: LanguageMode) -> [TextFormatSpan] {
         let bytes = Array(text.utf8)
         guard let highlighted = try? DocumentLoader.highlightWithFolds(
             bytes: bytes,

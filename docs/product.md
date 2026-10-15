@@ -196,6 +196,8 @@ Settings → 快捷键提供搜索、按键搜索、录制、冲突替换及恢�
 
 Markdown 使用只读富文本，HTML 使用受控 WKWebView（关闭 JavaScript、网络及本地子资源），图片和 PDF 使用只读预览，其余严格 UTF-8 文本可选择复制；未知二进制明确为不支持。
 
+配置、脚本，以及 Cairn 不分析的源码语言（C/C++、Objective-C、C#、Java、Kotlin、Go、Swift、PHP、Perl、CSS、SQL、Pascal、Visual Basic、Ada、汇编）按后缀做词法着色：关键字、注释、字符串、数字、预处理指令、注解和形如 `name(` 的调用，与 Source Insight 语言文件同一层次，不提供跳转。`.h` 按 C++ 着色。JS/JSX（`.js`、`.jsx`、`.mjs`、`.cjs`）用内置的 TSX 语法树着色，超过约 20 万 UTF-16 单元时显示为不着色等宽文本（预览在主线程同步着色）；其他格式的上限为 150 万。Markdown 代码块使用同一套规则。纯 C/C++ 等仓库目前仍因没有受支持语言而无法打开，只在混合语言项目中受益。
+
 Markdown 按 GitHub 规则为标题生成锚点（小写、去标点、空格变连字符、重名加 `-1`），`#标题` 链接在当前预览内滚动到该标题，`other.md#标题` 先打开文件再滚动；页内跳转不进入前进/后退历史。中文正文里 `**` 紧贴标点与汉字时（如 ``**命令`code`**继续``）按加粗处理，`_` 仍按 CommonMark。解析器为 Foundation：脚注 `[^1]` 与 `$…$` 公式按原文显示，链接文字内的加粗/斜体丢失，`<kbd>`/`<sub>` 等内联标签只保留文字。
 
 Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commit 标签读取对应快照字节。非源码预览不提供符号大纲、折叠、关系、书签、比较、Reading Height 或搜索控件；不打开外链或内联本地资源。
@@ -206,7 +208,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 
 | 项目 | 当前依据与限制 |
 | --- | --- |
-| 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`；`.pyi`、`.d.ts`、`.mts`、`.cts` 不是项目源码，不因 CLI 能选择语言就获得索引支持。`.d.ts` 与 `.pyi` 只在作为依赖跳转目标时只读打开与高亮。JS/JSX 未开放语言分析。 |
+| 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`；`.pyi`、`.d.ts`、`.mts`、`.cts` 不是项目源码，不因 CLI 能选择语言就获得索引支持。`.d.ts` 与 `.pyi` 只在作为依赖跳转目标时只读打开与高亮。JS/JSX 未开放语言分析，只在预览中按语法树着色。 |
 | 自动探测的混合语言项目 | 2026-10-10 在打包应用（分支 `mixed-auto-detect`，0bdca4f 构建）上验收：真实混合仓库（两个 Rust 单元、两个 TypeScript 单元、根 `pyproject.toml`）无对话框打开，分析配置菜单列出三门语言与单元根，按文件切换 profile，Rust 显示缺少根 `Cargo.toml`、Python/TypeScript 精确分析就绪，Refresh 后集合不变，关窗后从最近打开恢复会话；单语言仓库、非 Git 混合目录、零源码目录按设计表现。在同一应用上用版本选择器切到历史 commit（工具栏显示 commit、路径栏“只读快照”，分析配置仍为 Rust）再切回工作区，均正常。后续三个提交（部分索引期间的点击、CLI `index` 默认语言、自测断言）由对应测试与自测通道验证，未重新原生验收。 |
 | 每语言多个分析单元 | 单元数没有上限：N 个 `pyproject.toml` 的 Python monorepo 产生 N 个单元，每次索引每门语言把 manifest 走一遍分给各单元（每个文件按目录深度查单元根表，与单元数无关），但每个单元各建一个 session，这部分开销仍随单元数增长（codex 的 132 个 Rust 单元一遍约 0.1 s）；首帧建一遍，提取完成后只在确有新内容装入时再建一遍，持久缓存已覆盖全部内容时首帧的会话就是完整会话；分析配置菜单列 N 行；Exact 一次只在一个单元运行。同一语言两个单元的 `projectUnitName` 可能相同（TypeScript 有 `tsconfig.json` 时单元名固定为 `tsconfig.json`），工具栏与分析配置菜单头无法区分当前是哪个单元，只有菜单行列出单元根；单元名不能改成相对路径（Exact 用目录名重算 profile 校验），待后续在界面上补单元根。2026-10-10 在打包应用（分支 `multi-unit`，db1c1aa 构建，独立标识 `dev.cairn.Cairn.v2accept`）上验收 llm-tools HEAD bb6e992：无对话框打开；分析配置菜单 5 行（Rust 11 `crates/qrcode2txt`、Rust 22 `tools/semantic-json-viewer/src-tauri`、Python 8 `.`、TypeScript 49 `tools/model-files-web`、TypeScript 21 `tools/semantic-json-viewer`），Rust 两行之和等于仓库 `.rs` 数；打开 `crates/qrcode2txt/src/main.rs` 后 profile 为 qrcode2txt、精确分析就绪（安全模式离线依赖提示），hover `std::process` 得到 std 文档；切到 src-tauri 的文件时 profile 变为 semantic-json-viewer；切到两个 TypeScript 单元的文件时精确分析各重启一次后就绪，但工具栏与菜单头对两个 TypeScript 单元都显示 `tsconfig.json`，只能从菜单行的单元根区分；项目搜索 `"fn main("` 覆盖 111 个源码文件（33+8+70，不重复计数），结果同时来自两个 Rust 单元；Refresh 前后搜索范围（111）与命中数（8）不变，Refresh 后菜单 5 行；关闭最后一个窗口后应用退出，重新启动即恢复 llm-tools 并停在同一文件；版本选择器切到 457b66e 变为 3 行、切回工作区恢复 5 行；tokio 仍是一个单元。未验：TypeScript 单元内的 hover；`run-self-tests.sh` 的 typescript 通道在 main 上同样失败（fuzzy-relative 断言，与本功能无关），diff 通道一次挂起后重跑通过。 |
 | TypeScript 类型直达 | 句法联合类型当前取首个非 `null`/`undefined` 成员，不承诺 `A \| B` 全候选；interface、type alias、enum 是声明种类，但类型直达仍不以它们为句法目标，相关目标依赖 Exact。 |
@@ -228,6 +230,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 | 文档面板 | 2026-10-08 打包应用（rlm-minimal、sdb，Dash 8.1.1，API 开启）实测：右键 `threading` 直接加载模块页并隐藏导航；卡片链接 `getenv` 带接收者后直接命中 `os.getenv`；Rust `lock` 经卡片链接和 `⌃⇧D` 直接命中 std 的 `Mutex::lock`；面板内链接跳转、后退、外链交浏览器；深浅主题切换与深色下快速拖滚动条无白块；API 未开启与 Dash 未运行两种状态且不自动启动 Dash；`×` 后重开、重启后位置保留与空状态；`lsof` 抽查无非 loopback 连接。未实测：Dash 试用期过期状态、Dash 未安装时入口隐藏（本机装有 Dash）。 |
 | base16 主题 | 2026-10-09 打包应用（rlm-minimal，内建显示器，后台控制）实测：Nord、Dracula、Catppuccin Latte/Mocha、用户目录的 Tokyo Night 经重启生效，阅读区、侧栏、大纲、状态栏、标签栏与 Dash 面板（Mocha 下反色）全部跟随；安静开关在主窗口与设置预览即时重着色（预览最初不重绘，已修）；Auto 配对在浅色系统下落到 Latte；“打开主题文件夹”创建目录；8 色坏文件被跳过不崩溃；删除选中的用户文件后重开回到 Auto，存储值要到下次保存才改写；Light、Dark、SI Classic 与改动前构建同位置截图 0 像素差异。未实测：从设置弹出菜单选主题（后台控制打不开弹出菜单，用 defaults 预置代替）、系统明暗切换驱动 Auto 配对。 |
 | Markdown 预览 | 2026-10-09 打包应用（live-sing 的 H3 README 与临时锚点演示项目，T2752U 显示器，真实鼠标点击）实测：中文旁 `**` 加粗；`#中文标题`、重复标题 `#faq-1`、跨文件 `docs/other.md#deep-section` 均滚到目标标题（靠近文末时停在最底）。目标文件已在另一标签页打开时的跳转只有集成测试；未实测：commit 快照下的锚点跳转。 |
+| 未分析语言着色 | 2026-10-15 打包应用（基于 7e08891 的未提交工作树，隔离 bundle id，Rust 演示项目内含 `list.c`、`Main.java`、`app.jsx`，后台控制）实测：三者在预览中分别着色，C 的 `#include`、块注释、关键字、字符串、数字，Java 的 `@Override` 与 `"""` 文本块，JSX 的 import、模板字符串与属性值均可见。未实测：深色与 SI Classic 主题、超过 20 万单元的 JS 文件、其余语言（仅进程内测试）。 |
 | 分发 | 默认 ad-hoc 签名；Developer ID、公证和 staple 需要独立配置与验证。 |
 
 图形调用图导出、SCIP 导入、TS7 provider、跨 commit 符号映射和完整类型推断不属于现有能力，也没有仅因旧路线图出现就必须实施的要求。
