@@ -158,6 +158,13 @@ public final class GitRepository {
         try? LibGit2Executor.sync { git_repository_free(raw) }
     }
 
+    /// Identifies this repository's object store for blob reuse: object IDs
+    /// are only shared between captures of the same repository.
+    var reuseKey: String {
+        let path = git_repository_path(raw).map { String(cString: $0) } ?? ""
+        return "\(objectFormat.rawValue):\(path)"
+    }
+
     func readBlob(oid: git_oid) throws -> [UInt8] {
         try LibGit2Executor.sync {
             var oid = oid
@@ -175,6 +182,11 @@ public final class GitRepository {
 
 public final class CommitSnapshot: Snapshot, Sendable {
     private let files: [String: CapturedFile]
+    /// Every blob this capture holds, by object ID, for the next capture of
+    /// the same repository to take instead of reading it again.
+    private let blobs: [GitOID: CapturedBlob]
+    /// Blobs taken from a live earlier capture instead of read; diagnostic.
+    package let reusedBlobCount: Int
     public let ruleExcludedPaths: [String]
 
     public let snapshotID: SnapshotID
@@ -187,15 +199,22 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let languages: [LanguageID]
 
     /// Built-in skipped directories never hide tracked files here; only the
-    /// user's rules do, and excluded blobs are never read.
+    /// user's rules do, and excluded blobs are never read. A blob the
+    /// repository's latest live capture already holds is taken from it: an
+    /// object ID names one content, so its bytes and content ID are the same.
     public init(
         repositoryURL: URL,
         revision: String = "HEAD",
         pathRules: ProjectPathRules = ProjectPathRules()
     ) throws {
-        let loaded: ([String: CapturedFile], GitObjectFormat, GitOID, [String]) =
+        let loaded: (
+            [String: CapturedFile], [GitOID: CapturedBlob], Int,
+            GitObjectFormat, GitOID, [String], String
+        ) =
             try LibGit2Executor.sync {
                 let repository = try GitRepository(url: repositoryURL)
+                let reuseKey = repository.reuseKey
+                let earlier = liveCommitSnapshots.latest(for: reuseKey)?.blobs ?? [:]
 
                 var object: OpaquePointer?
                 try revision.withCString { spec in
@@ -246,34 +265,52 @@ public final class CommitSnapshot: Snapshot, Sendable {
                 )
 
                 var captured: [String: CapturedFile] = [:]
+                var blobs: [GitOID: CapturedBlob] = [:]
+                var reused = 0
                 var excluded: [String] = []
                 for entry in collector.entries {
                     if pathRules.verdict(for: entry.path, isDirectory: false, appliesDefaults: false).isExcluded {
                         excluded.append(entry.path)
                         continue
                     }
-                    let bytes = if entry.fileMode == .gitlink {
-                        Array(entry.oid.hex.utf8)
+                    // A gitlink names a commit, not a blob; its bytes are
+                    // the object ID itself.
+                    let blob: CapturedBlob
+                    if entry.fileMode == .gitlink {
+                        let bytes = Array(entry.oid.hex.utf8)
+                        blob = CapturedBlob(bytes: bytes, contentID: ContentID.sha256(of: bytes))
+                    } else if let known = blobs[entry.oid] {
+                        blob = known
+                    } else if let known = earlier[entry.oid] {
+                        blob = known
+                        blobs[entry.oid] = known
+                        reused += 1
                     } else {
-                        try repository.readBlob(oid: entry.rawOID)
+                        let bytes = try repository.readBlob(oid: entry.rawOID)
+                        blob = CapturedBlob(bytes: bytes, contentID: ContentID.sha256(of: bytes))
+                        blobs[entry.oid] = blob
                     }
+                    // The mode is this entry's own: one blob can be a file
+                    // in one place and a symlink target in another.
                     captured[entry.path] = CapturedFile(
-                        bytes: bytes,
-                        contentID: ContentID.sha256(of: bytes),
-                        fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
+                        bytes: blob.bytes,
+                        contentID: blob.contentID,
+                        fileMode: capturedFileMode(blob.bytes, fallback: entry.fileMode)
                     )
                 }
                 return (
-                    captured, repository.objectFormat, oidString(commitID),
-                    Self.topmostExcluded(excluded, rules: pathRules)
+                    captured, blobs, reused, repository.objectFormat, oidString(commitID),
+                    Self.topmostExcluded(excluded, rules: pathRules), reuseKey
                 )
             }
 
         snapshotID = SnapshotID(rawValue: UUID())
-        objectFormat = loaded.1
+        blobs = loaded.1
+        reusedBlobCount = loaded.2
+        objectFormat = loaded.3
         self.revision = revision
-        commitOID = loaded.2
-        ruleExcludedPaths = loaded.3
+        commitOID = loaded.4
+        ruleExcludedPaths = loaded.5
         projectRootName = repositoryURL.standardizedFileURL.lastPathComponent
         let capturedFiles = loaded.0
         files = capturedFiles
@@ -288,6 +325,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
             }
             .sorted()
         languages = detectedLanguages(in: capturedFiles.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
+        liveCommitSnapshots.register(self, for: loaded.6)
     }
 
     public func listFiles() -> [(
@@ -494,6 +532,33 @@ private struct CapturedFile: Sendable {
     let contentID: ContentID
     let fileMode: FileMode
 }
+
+private struct CapturedBlob: Sendable {
+    let bytes: [UInt8]
+    let contentID: ContentID
+}
+
+/// The latest commit snapshot of each repository, held weakly: a capture
+/// takes the blobs a still-open one already read (the commit the window
+/// shows, the language server's checkout), and keeps nothing alive itself.
+private final class LiveCommitSnapshots: @unchecked Sendable {
+    private struct Entry {
+        weak var snapshot: CommitSnapshot?
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: Entry] = [:]
+
+    func latest(for key: String) -> CommitSnapshot? {
+        lock.withLock { entries[key]?.snapshot }
+    }
+
+    func register(_ snapshot: CommitSnapshot, for key: String) {
+        lock.withLock { entries[key] = Entry(snapshot: snapshot) }
+    }
+}
+
+private let liveCommitSnapshots = LiveCommitSnapshots()
 
 private let lfsPointerPrefix = Array(
     "version https://git-lfs.github.com/spec".utf8

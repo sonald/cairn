@@ -241,6 +241,165 @@ func commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() throws {
     #expect(headContents != previousContents)
 }
 
+/// One commit of the seeded history: path → (content, mode), as written.
+private typealias ModelCommit = [String: (content: String, mode: FileMode)]
+
+private let lfsPointerFixture = """
+    version https://git-lfs.github.com/spec/v1
+    oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    size 12
+
+    """
+
+/// Commits a seeded history whose few contents recur: one blob sits at
+/// several paths, a path changes content between commits, a symlink's
+/// target bytes equal a regular file's, a gitlink comes and goes. Returns
+/// each commit's OID with the files written, the independent reference.
+private func commitSeededHistory(
+    in fixture: GitFixture,
+    seed: UInt64,
+    commits: Int
+) throws -> [(oid: String, files: ModelCommit)] {
+    var state = seed
+    func next(_ bound: Int) -> Int {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return Int((state >> 33) % UInt64(bound))
+    }
+    let paths = ["a.rs", "src/b.rs", "src/c.rs", "dup/a.rs", "Cargo.toml", "notes.txt", "big.bin"]
+    // "a.rs" is also the symlink's target, so that blob is both a file and
+    // a link; the LFS pointer marks a file by its bytes.
+    let contents = ["fn a() {}\n", "fn b() {}\n", "[package]\n", "a.rs", "x", lfsPointerFixture]
+    var history: [(oid: String, files: ModelCommit)] = []
+    var anchor: String?
+    for index in 0..<commits {
+        var files: ModelCommit = [:]
+        for path in paths where next(4) != 0 {
+            files[path] = (contents[next(contents.count)], .regular)
+        }
+        if next(2) == 0 { files["link"] = ("a.rs", .symlink) }
+        if let anchor, next(2) == 0 { files["dependency"] = (anchor, .gitlink) }
+
+        try fixture.git("rm", "-r", "-q", "--cached", "--ignore-unmatch", ".")
+        for item in try FileManager.default.contentsOfDirectory(atPath: fixture.root.path)
+            where item != ".git"
+        {
+            try FileManager.default.removeItem(at: fixture.root.appendingPathComponent(item))
+        }
+        for (path, file) in files where file.mode != .gitlink {
+            let url = fixture.root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            if file.mode == .symlink {
+                try FileManager.default.createSymbolicLink(
+                    atPath: url.path,
+                    withDestinationPath: file.content
+                )
+            } else {
+                try Data(file.content.utf8).write(to: url)
+            }
+        }
+        try fixture.git("add", "-A", ".")
+        if let gitlink = files["dependency"] {
+            try fixture.git("update-index", "--add", "--cacheinfo", "160000,\(gitlink.content),dependency")
+        }
+        try fixture.git(
+            "-c", "user.name=CodeInsight", "-c", "user.email=codeinsight@example.com",
+            "commit", "-q", "--allow-empty", "-m", "commit \(index)"
+        )
+        let oid = try fixture.git("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+        anchor = anchor ?? oid
+        history.append((oid, files))
+    }
+    return history
+}
+
+/// The capture's files must be exactly the model's: bytes as written,
+/// content ID their SHA-256 (a gitlink's is its commit ID's text), and the
+/// mode of the tree entry at that path.
+private func expectCapture(
+    _ snapshot: CommitSnapshot,
+    matches files: ModelCommit,
+    _ label: String
+) throws {
+    let listed = snapshot.listFiles()
+    #expect(listed.map(\.path) == files.keys.sorted(), "\(label)")
+    for file in listed {
+        let expected = try #require(files[file.path], "\(label) \(file.path)")
+        let bytes = Array(expected.content.utf8)
+        let mode: FileMode = expected.mode == .regular && expected.content == lfsPointerFixture
+            ? .lfsPointer : expected.mode
+        #expect(try snapshot.readBytes(path: file.path) == bytes, "\(label) \(file.path)")
+        #expect(file.contentID == ContentID.sha256(of: bytes), "\(label) \(file.path)")
+        #expect(file.fileMode == mode, "\(label) \(file.path)")
+    }
+}
+
+@Test
+func commitCapturesTakingBlobsFromALiveCaptureMatchTheWrittenHistory() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let history = try commitSeededHistory(in: fixture, seed: 0xB10B, commits: 8)
+    // The seed covers every case the reuse must keep apart.
+    #expect(history.contains { commit in
+        commit.files["link"] != nil
+            && commit.files.values.contains { $0.mode == .regular && $0.content == "a.rs" }
+    })
+    #expect(history.contains { $0.files["dependency"] != nil })
+    #expect(history.contains { $0.files.values.contains { $0.content == lfsPointerFixture } })
+    #expect(history.contains { commit in
+        Dictionary(grouping: commit.files.values.filter { $0.mode == .regular }, by: \.content)
+            .values.contains { $0.count > 1 }
+    })
+    #expect(Set(history.compactMap { $0.files["a.rs"]?.content }).count > 1)
+
+    // Nothing of this repository is alive: every blob is read.
+    for (index, commit) in history.enumerated() {
+        let fresh = try CommitSnapshot(repositoryURL: fixture.root, revision: commit.oid)
+        #expect(fresh.reusedBlobCount == 0)
+        try expectCapture(fresh, matches: commit.files, "fresh \(index)")
+    }
+
+    // Each capture keeps the one before alive, in a seeded order that
+    // revisits commits, so most blobs come from it.
+    var state: UInt64 = 0x0DDBA11
+    var previous: CommitSnapshot?
+    var reused = 0
+    for step in 0..<24 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        let index = Int((state >> 33) % UInt64(history.count))
+        let snapshot = try CommitSnapshot(repositoryURL: fixture.root, revision: history[index].oid)
+        try expectCapture(snapshot, matches: history[index].files, "step \(step) commit \(index)")
+        reused += snapshot.reusedBlobCount
+        withExtendedLifetime(previous) {}
+        previous = snapshot
+    }
+    #expect(reused > 0)
+}
+
+@Test
+func commitCaptureNeverTakesBlobsFromAnotherRepository() throws {
+    let first = try GitFixture()
+    let second = try GitFixture()
+    defer {
+        first.remove()
+        second.remove()
+    }
+    // Identical histories: every blob has the same object ID in both.
+    let history = try commitSeededHistory(in: first, seed: 0x5A5E, commits: 1)
+    _ = try commitSeededHistory(in: second, seed: 0x5A5E, commits: 1)
+
+    let alive = try CommitSnapshot(repositoryURL: first.root)
+    let again = try CommitSnapshot(repositoryURL: first.root)
+    #expect(again.reusedBlobCount > 0)
+    let other = try CommitSnapshot(repositoryURL: second.root)
+    #expect(other.reusedBlobCount == 0)
+    try expectCapture(other, matches: history[0].files, "other repository")
+    withExtendedLifetime(alive) {}
+    withExtendedLifetime(again) {}
+}
+
 @Test
 func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
     let fixture = try GitFixture()
