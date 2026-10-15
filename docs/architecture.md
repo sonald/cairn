@@ -23,11 +23,11 @@
 
 `ContentIndexKey` 包含内容身份、语言模式、grammar 版本和 extractor 版本。同一内容可跨路径/快照复用提取结果；解析出的路径目标必须仍属于查询快照，内容相同不等于语义环境相同。
 
-语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`（提取单位），其中每个分析单元一个 session，共享同一 store 和同一次提取。单元划分见 [product.md](product.md)“项目、快照与窗口”：有 marker 目录包含该语言全部源码时取最浅的那个，否则每个源码归入最深的 marker 祖先或项目根。`ProjectIndexer.unitSessions` 每门语言把 manifest 走一遍，每个源码沿自身祖先目录查单元根表，交给最深的那个单元的 `SnapshotView`（代价与单元数无关），所以同一语言内每个文件恰好属于一个单元，各单元合起来就是全部源码；manifest 仍是整个快照，但项目文本搜索只扫 session 自己的活动文件（`SnapshotContentSource.searchIncludes`），所以多单元不会把同一命中列两次。Exact 的 profile 前缀等于所在单元根。`AnalysisProfileID` 不含单元路径，同一语言两个单元身份相同时整门语言回退为一个项目根单元。
+语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`（提取单位），其中每个分析单元一个 session，共享同一 store 和同一次提取。`completeSnapshot` 在没有待提取或待装入的内容、且共享 store 自首帧会话建成后没有增长时直接返回首帧会话，否则为每个单元重建。单元划分见 [product.md](product.md)“项目、快照与窗口”：有 marker 目录包含该语言全部源码时取最浅的那个，否则每个源码归入最深的 marker 祖先或项目根。`ProjectIndexer.unitSessions` 每门语言把 manifest 走一遍，每个源码沿自身祖先目录查单元根表，交给最深的那个单元的 `SnapshotView`（代价与单元数无关），所以同一语言内每个文件恰好属于一个单元，各单元合起来就是全部源码；manifest 仍是整个快照，但项目文本搜索只扫 session 自己的活动文件（`SnapshotContentSource.searchIncludes`），所以多单元不会把同一命中列两次。Exact 的 profile 前缀等于所在单元根。`AnalysisProfileID` 不含单元路径，同一语言两个单元身份相同时整门语言回退为一个项目根单元。
 
 `DeclarationFacet.visibility`（`public`/`restricted`/`private`，`nil` 为不适用）记录声明处的句法修饰，由三个抽取器写入、codec 格式 5 编码，不判断外部可达性。`EngineSession.projectSymbols` 按 `SnapshotView` 活动文件把以内容为键的索引展开成每文件一行，附 `ModuleMap.modulePath`/`crateRoot`；项目符号面板（`ProjectSymbolsPanelModel`，CLI `symbols`）只读这份列表，不重新解析、不发 Exact 请求，多 session 结果中任一个抛错即整次作废。
 
-`SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化，读不出来的文件被跳过并以 `unreadablePathCount` 计数（未知为 nil，不伪造为零）。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
+`CommitSnapshot` 捕获时，同一仓库（按 `.git` 目录与对象格式区分）最近一次仍存活的 commit 快照里已有的 blob（按对象 ID）直接取其字节与 content ID，不再读取和哈希；登记只持弱引用，不延长任何快照的生命周期；gitlink 不走复用，文件模式总取当前树条目的。`SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化，读不出来的文件被跳过并以 `unreadablePathCount` 计数（未知为 nil，不伪造为零）。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
 
 `AnalysisProfile` 记录语言、项目配置、环境指纹、features 与信任。`QueryContext` 使用 snapshot、profile、generation 拒绝过期结果；切项目、切快照、刷新、切分析配置后，旧请求不能发布到新上下文。信任变化还需停止/restart 相应 Exact 会话，不能仅凭内容缓存相同继续使用旧执行权限。
 
@@ -46,7 +46,7 @@
 - 可比较且不同的目标可修正主结果，但保留原候选证据。Safe/离线限制不否定 provider 已给出的正向目标。
 - 捕获的导航说明不可随随后 Exact 升级改变；当前说明可以更新。阅读集与轨迹恢复不得重新查询后冒充原来的冻结证据。
 
-[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile 的新会话对象）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。`explicitJump`（`⌘` 单击）在本地无候选、首个候选是导入绑定（`Candidate.isImportBinding`：Rust/Python 的导入绑定或 TypeScript 的导入词法绑定，导入行或同文件的使用点）、是被点的绑定本身，或 `tokenRange` 为 nil 但点击处的源字节是标识符字符时，用自己的 `ExactRequestBatch` 请求 definition（不取消 Context 的升级，做同样的 generation 与内容漂移检查），精确层未就绪时直接返回本地结果；无本地候选的点击照常发起 Context 升级，`applyExact` 在该请求的 `.idle` 阶段把结果作为唯一候选。
+[ContextWindowModel](../Sources/CodeInsightAppModel/ContextWindowModel.swift) 分开 `symbolCandidate` 与 `displayedCandidate`：语义动作取前者，正文/打开显示目标取后者。工作区先发布缓存会话、再发布完整会话（同一快照、同一 profile；有内容待提取时是新会话对象，缓存已覆盖全部内容时就是首帧那组会话，此时没有更多索引可等）；部分索引期间没有答案的点击被记住，完整会话到来时在跟随、符号模式下重查一次，快照、profile、generation 变化或离开就绪状态时清掉记录，不能让首帧期间的点击永久丢失。类型直达先解析绑定，再在绑定所在文件解析类型；跨文件字段/类属性的绑定下标不能在查询文件解释。Python `.memberBinding` 与本地 `.lexicalBinding` 的区别因此必须保留。`explicitJump`（`⌘` 单击）在本地无候选、首个候选是导入绑定（`Candidate.isImportBinding`：Rust/Python 的导入绑定或 TypeScript 的导入词法绑定，导入行或同文件的使用点）、是被点的绑定本身，或 `tokenRange` 为 nil 但点击处的源字节是标识符字符时，用自己的 `ExactRequestBatch` 请求 definition（不取消 Context 的升级，做同样的 generation 与内容漂移检查），精确层未就绪时直接返回本地结果；无本地候选的点击照常发起 Context 升级，`applyExact` 在该请求的 `.idle` 阶段把结果作为唯一候选。
 
 鼠标命中方法名才走方法解析；`receiverRange` 用于推断方法接收者，不能把接收者 token 变成方法 token。语法层类型剥离用于阅读预览，不应顺便改变原来的方法分派 `targetHint` 语义。
 
