@@ -377,3 +377,16 @@ S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无�
 状态栏帧见 `codex-head5-switch-status-before-after.jpg`。修后另测一次切回工作区：正文即时，文件树与大纲 +3.5 s，"准备中"3.5 s，工作区待命服务器已按 2 GiB 规则释放，冷启动后 +21.5 s 就绪。10-14 记录的 11–12.5 s"就绪"是在服务器加载完之前显示的（已由 c432924 修正），不能与本表的就绪列直接比较。
 
 局限：每个方向一次；首帧到回车的时刻按工具栏变化帧定位，误差约 ±0.4 s；两次之间 rust-analyzer 冷加载本身有波动（修后 16 s，修前约 19 s）。新打包构建首次启动时 cargo 读 `~/.gitconfig`（链到 `~/Documents`）会停在系统"文稿"访问询问上，两个构建都等用户允许后才开始计时。
+
+## 剩余切换浪费修复后的原生复核（2026-10-15 晚）
+
+构建：eecdb3c（4fb414d blob 复用、30dc526 去掉逐路径 `getcwd`、75f089d complete 复用首帧会话），`dev.cairn.s4accept` 隔离副本。计时方法同上（窗口 id 截帧、区域哈希），各一次。
+
+| 项 | 结果 |
+| --- | --- |
+| codex 78ba047→工作区 | 切换正常；文件树、大纲与"准备中"结束同帧 +4.2 s，就绪 +22.7 s（冷启动） |
+| codex 工作区→`HEAD~5` | 切换正常；同帧 +3.3 s，就绪 +20.8 s（冷启动） |
+| 主线程采样（6 s，覆盖一次切回工作区） | 基本空闲；`AppModel.switchSnapshot` 约 138 ms，其中 `EngineSession` 析构约 123 ms（在主线程释放约 130 个旧会话） |
+| llm-tools 1ed4fd3 分析配置菜单 | 5 行：Rust 11 / 22、Python 8、TypeScript 49 / 19，与多单元验收一致（`llm-tools-1ed4fd3-analysis-units-after-session-reuse.jpg`） |
+
+局限：当时 load average 5–7（远程桌面在编码屏幕、另一实现任务在编译与计时），与上午无负载下 86002d7 的 3.1 / 3.5 s 不可比，本节不作为时间收益证据；收益以进程内 harness（`SwitchTimingHarness.swift`，codex `HEAD~5`"准备中"中位数 3127 → 2279 ms）为准。项目搜索命中数未在原生应用中复核，由集成测试 `revisitedCommitShowsTheSameUnitsAtEveryPhaseWhenNothingNeedsExtracting` 与 46 个 CLI 输出逐字节对照覆盖。
