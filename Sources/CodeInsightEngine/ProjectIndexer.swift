@@ -369,6 +369,18 @@ public struct ProjectIndexer: Sendable {
         _ prepared: PreparedSnapshot
     ) throws -> [EngineSession] {
         try Task.checkCancellation()
+        // Every content was already installed for the cached sessions and
+        // the store has not grown since: they are the complete sessions.
+        if prepared.missingInputs.isEmpty, prepared.deferredDrafts.isEmpty,
+           let state = prepared.cachedSessions.first?.snapshotView.storeState
+        {
+            let now = prepared.store.snapshot()
+            if now.contentIndexes.count == state.contentIndexes.count,
+               now.sourceBytesByContent.count == state.sourceBytesByContent.count
+            {
+                return prepared.cachedSessions
+            }
+        }
         let extractedDrafts = try extract(
             prepared.missingInputs,
             using: prepared.extractor

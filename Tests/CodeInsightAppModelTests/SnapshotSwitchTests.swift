@@ -55,6 +55,120 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     #expect(await service.preparedLanguages() == [.rust, .rust])
 }
 
+/// The real index service, with each complete step held at a gate and its
+/// result recorded beside the prepare that fed it.
+private actor GatedIndexService: IndexService {
+    private let wrapped = ProjectIndexService()
+    private var holdsComplete = false
+    private var waiting = 0
+    private(set) var completedFromCached: [Bool] = []
+
+    func hold(_ hold: Bool) { holdsComplete = hold }
+    func isWaiting() -> Bool { waiting > 0 }
+    func resetRecord() { completedFromCached = [] }
+
+    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+        try await wrapped.captureSnapshot(root: root, revision: revision)
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        try await wrapped.prepareSnapshots(snapshot, root: root, languages: languages)
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> [EngineSession] {
+        waiting += 1
+        while holdsComplete { await Task.yield() }
+        waiting -= 1
+        let sessions = try await wrapped.completeSnapshot(prepared)
+        completedFromCached.append(zip(sessions, prepared.cachedSessions).allSatisfy { $0 === $1 })
+        return sessions
+    }
+}
+
+/// What a reader can tell about the installed sessions: each unit's root,
+/// its source files, and the files a project search reaches through it.
+@MainActor
+private func observedUnits(_ model: AppModel) async throws -> [String] {
+    var units: [String] = []
+    for (session, context) in model.querySessions {
+        let root = session.paths.resolve(session.analysisProfile.projectRoot)
+        let active = session.activePathIDs.map { session.paths.resolve($0) }.sorted()
+        var searched: [String] = []
+        for try await batch in try session.search(ContentSearchQuery(pattern: "marker"), context: context) {
+            searched += batch.matchesByPath.keys.map { session.paths.resolve($0) }
+        }
+        units.append("\(session.analysisProfile.language) \(root): \(active) search \(searched.sorted())")
+    }
+    return units
+}
+
+@MainActor
+@Test
+func revisitedCommitShowsTheSameUnitsAtEveryPhaseWhenNothingNeedsExtracting() async throws {
+    let fixture = try SnapshotGitFixture()
+    let files = [
+        "a/Cargo.toml": "[package]\nname = \"a\"\n",
+        "a/src/lib.rs": "// marker\npub fn a() {}\n",
+        "b/Cargo.toml": "[package]\nname = \"b\"\n",
+        "b/src/lib.rs": "// marker\npub fn b() {}\n",
+        "tool.rs": "// marker\nfn tool() {}\n",
+        "tool.py": "# marker\ndef tool():\n    pass\n",
+    ]
+    for (path, contents) in files {
+        try snapshotWrite(contents, to: fixture.root.appendingPathComponent(path))
+    }
+    try fixture.git("add", "-A")
+    try fixture.commit("old")
+    try snapshotWrite("// marker\npub fn b2() {}\n", to: fixture.root.appendingPathComponent("b/src/lib.rs"))
+    try fixture.git("add", "-A")
+    try fixture.commit("new")
+    let cachePaths = snapshotIndexCachePaths(for: fixture.root)
+    defer {
+        fixture.remove()
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let service = GatedIndexService()
+    let model = AppModel(indexService: service)
+    await model.openProject(root: fixture.root).value
+
+    // First visit: the old b/src/lib.rs was never extracted, so the
+    // complete step builds new sessions. Second visit: everything is
+    // cached, and the cached sessions are already the complete ones.
+    var visits: [(cached: [String], full: [String], fromCached: [Bool])] = []
+    for _ in 0..<2 {
+        await service.resetRecord()
+        await service.hold(true)
+        model.switchToCommit("HEAD~1")
+        #expect(await testWaitUntil("complete held") { await service.isWaiting() })
+        #expect(model.snapshotPhase == .cachedReady)
+        let cached = try await observedUnits(model)
+        await service.hold(false)
+        #expect(await testWaitUntil("full ready") { model.snapshotPhase == .fullReady })
+        #expect(model.coverage.filesIndexed == model.coverage.filesTotal)
+        visits.append((cached, try await observedUnits(model), await service.completedFromCached))
+        model.switchToWorktree()
+        #expect(await testWaitUntil("worktree ready") {
+            model.snapshotPhase == .fullReady && model.currentRevision == nil
+        })
+    }
+    #expect(visits[0].fromCached == [false, false])
+    #expect(visits[1].fromCached == [true, true])
+    #expect(visits[1].full == visits[0].full)
+    #expect(visits[1].cached == visits[1].full)
+    #expect(visits[0].full == [
+        "rust .: [\"tool.rs\"] search [\"tool.rs\"]",
+        "rust a: [\"a/src/lib.rs\"] search [\"a/src/lib.rs\"]",
+        "rust b: [\"b/src/lib.rs\"] search [\"b/src/lib.rs\"]",
+        "python .: [\"tool.py\"] search [\"tool.py\"]",
+    ])
+}
+
 @MainActor
 @Test
 func mixedWorkspaceOpenDetectsItsLanguagesAndInstallsSharedSessions() async throws {
@@ -1755,6 +1869,20 @@ private func snapshotJumpRecord(
 private enum SnapshotTestError: Error {
     case missing(String)
     case git(String)
+}
+
+/// The persistent index cache files the real service writes for `root`.
+private func snapshotIndexCachePaths(for root: URL) -> [String] {
+    let resolvedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+    let digest = ContentID.sha256(of: Data(resolvedPath.utf8)).bytes
+        .map { String(format: "%02x", $0) }
+        .joined()
+    let directory = ProcessInfo.processInfo.environment["CODEINSIGHT_INDEX_CACHE_ROOT"]
+        .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+        ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("CodeInsight/index-cache", isDirectory: true)
+    let cache = directory.appendingPathComponent("\(digest).sqlite3")
+    return ["", "-wal", "-shm"].map { cache.path + $0 }
 }
 
 // MARK: - S2c Refresh Index
