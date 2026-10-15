@@ -124,9 +124,8 @@ enum ProfileDetector {
         }
         // ponytail: no cap on the unit count; merge into `.` or page the
         // menu if repositories with dozens of units show up.
-        return Set(sources.map {
-            deepestUnitRoot(containing: $0, among: markerRoots) ?? "."
-        }).sorted()
+        let unitRoot = deepestUnitRootLookup(among: markerRoots)
+        return Set(sources.map { unitRoot($0) ?? "." }).sorted()
     }
 
     private static func validateRelativePaths(_ paths: [String]) throws {

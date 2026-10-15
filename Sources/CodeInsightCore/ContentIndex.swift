@@ -84,11 +84,29 @@ package func isWithin(root: String, path: String) -> Bool {
 /// The deepest of `roots` that holds `path`. A source belongs to exactly
 /// this one unit of its language, so nested units never share files.
 package func deepestUnitRoot(containing path: String, among roots: [String]) -> String? {
-    func depth(_ root: String) -> Int {
-        root == "." || root.isEmpty ? 0 : root.split(separator: "/").count
+    deepestUnitRootLookup(among: roots)(path)
+}
+
+/// `deepestUnitRoot(containing:among:)` prepared once for many paths. A
+/// lookup walks the path and its ancestor directories, deepest first,
+/// through a table of the roots, so it costs the path's depth rather than
+/// the root count. `.` and the empty root hold everything; the first of
+/// them in `roots` is the fallback. Duplicate roots keep their first
+/// spelling, as the scan did.
+package func deepestUnitRootLookup(among roots: [String]) -> (String) -> String? {
+    let projectRoot = roots.first { $0 == "." || $0.isEmpty }
+    let nested = Dictionary(
+        roots.lazy.filter { $0 != "." && !$0.isEmpty }.map { (Substring($0), $0) },
+        uniquingKeysWith: { first, _ in first }
+    )
+    return { path in
+        var candidate = Substring(path)
+        while true {
+            if let root = nested[candidate] { return root }
+            guard let slash = candidate.lastIndex(of: "/") else { return projectRoot }
+            candidate = candidate[..<slash]
+        }
     }
-    return roots.filter { isWithin(root: $0, path: path) }
-        .max { depth($0) < depth($1) }
 }
 
 public struct ContentIndexKey: Codable, Hashable, Sendable {

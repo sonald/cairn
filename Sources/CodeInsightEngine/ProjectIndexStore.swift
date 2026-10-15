@@ -102,16 +102,16 @@ struct SnapshotView: Sendable {
     let moduleMap: ModuleMap
     let storeState: ProjectIndexStore.State
 
-    /// `unitRoots` lists every unit root of this language, this one
-    /// included; a source is active here only when this is the deepest
-    /// unit holding it. Omitted, the unit is alone.
+    /// `unitFiles` are this unit's sources in manifest order, already split
+    /// among the language's units (`ProjectIndexer.unitSessions`). Omitted,
+    /// the unit is alone and holds every source under its root.
     init(
         store: ProjectIndexStore,
         manifest: SnapshotManifest,
         stats: IndexStats,
         analysisProfile: AnalysisProfile,
         extractor: any LanguageExtractor,
-        unitRoots: [String]? = nil
+        unitFiles: [FileOccurrence]? = nil
     ) {
         precondition(extractor.language == analysisProfile.language)
         self.store = store
@@ -121,14 +121,12 @@ struct SnapshotView: Sendable {
         self.extractor = extractor
         storeState = store.snapshot()
         let rootPath = store.paths.resolve(analysisProfile.projectRoot)
-        let unitRoots = unitRoots ?? [rootPath]
-        let activeFiles = manifest.files.filter { file in
+        let activeFiles = unitFiles ?? manifest.files.filter { file in
             let path = store.paths.resolve(file.pathID)
-            guard LanguageMode.classify(
+            return LanguageMode.classify(
                 path: path,
                 language: analysisProfile.language
-            ) != nil else { return false }
-            return deepestUnitRoot(containing: path, among: unitRoots) == rootPath
+            ) != nil && isWithin(root: rootPath, path: path)
         }
         activePathIDs = Set(activeFiles.map(\.pathID))
         let activeManifest = SnapshotManifest(

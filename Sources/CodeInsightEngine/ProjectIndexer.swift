@@ -399,7 +399,9 @@ public struct ProjectIndexer: Sendable {
         )
     }
 
-    /// Stats are language-level facts shared by every unit's view.
+    /// Stats are language-level facts shared by every unit's view. One pass
+    /// over the manifest gives each source to the deepest unit holding it,
+    /// so nested units never share files and each view only reads its own.
     private func unitSessions(
         store: ProjectIndexStore,
         manifest: SnapshotManifest,
@@ -408,14 +410,23 @@ public struct ProjectIndexer: Sendable {
         extractor: any LanguageExtractor
     ) -> [EngineSession] {
         let roots = profiles.map { store.paths.resolve($0.projectRoot) }
-        return profiles.map { profile in
+        let unitRoot = deepestUnitRootLookup(among: roots)
+        var filesByRoot: [String: [FileOccurrence]] = [:]
+        for file in manifest.files {
+            let path = store.paths.resolve(file.pathID)
+            guard LanguageMode.classify(path: path, language: extractor.language) != nil,
+                  let root = unitRoot(path)
+            else { continue }
+            filesByRoot[root, default: []].append(file)
+        }
+        return zip(profiles, roots).map { profile, root in
             EngineSession(store: store, snapshotView: SnapshotView(
                 store: store,
                 manifest: manifest,
                 stats: stats,
                 analysisProfile: profile,
                 extractor: extractor,
-                unitRoots: roots
+                unitFiles: filesByRoot[root] ?? []
             ))
         }
     }
