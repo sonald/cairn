@@ -344,3 +344,18 @@ S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无�
 观察（未修）：`⌘` 单击 TypeScript 导入行跳到 `.d.ts` 后 Context 仍停在类型直达阶段并显示“未就绪”；普通单击索引不认的标识符时 Context 保持上一项（R4.3，按设计）。codex 那次状态栏为“依赖项不可用（离线）”，服务器照常加载，未深究。
 
 局限：每项一次；时间按 `ps` 每秒采样，误差约 1 s；hover 与 Context 不是本次验收对象。
+
+## 收尾修复后原生复验（2026-10-15）
+
+构建：5ae30e7（a99c46f、13139db、78456ff、c432924、5ae30e7 五个修复），`CAIRN_LIBGIT2=brew CAIRN_BUNDLE_IDENTIFIER=dev.cairn.s4accept bash scripts/make-app.sh`，M3 Pro，macOS 27。F1、冷启动与文案用后台自动化（聚焦搜索框后输入、按窗口 id `screencapture -l` 每约 0.4 s 一帧、`ps` 每秒采样）；hover 与 `⌘` 单击用全屏控制。新构建首次启动时 cargo 读 `~/.gitconfig`（符号链接到 `~/Documents`）阻塞在系统的“文稿”访问询问上，用户允许后继续；这段时间状态栏一直是“准备中”。
+
+| 项 | 结果 |
+| --- | --- |
+| F1 选择器输入 `HEAD`（toydb） | PASS：解析行 5b72c04（master，“解析结果”）在顶部，"headers" 命中 80de019 在其下（`toydb-picker-head-resolved.jpg`） |
+| 冷启动状态栏（toydb 退出重启，恢复到 a15a351） | PASS：+0.8 s“准备中”→ +1.3 s“准备中 · 安全模式”→ +4.9 s“就绪 · 安全模式（受限）”；检出槽 rust-analyzer 常驻 19 → 199 → 515 → 973 MB，在 +5 s 那一秒到峰值后持平（`toydb-cold-start-status-sequence.jpg`）。修复前此处在准备完成（约 +1.3 s）即显示就绪 |
+| F3 借用脚注（llm-tools 1ed4fd3，`let tokenizer: Tokenizer` 上 hover） | PASS：`class Tokenizer` 卡片底部有“依赖来自当前工作区，可能与该 commit 不一致”（`llm-tools-1ed4fd3-hover-borrowed-note.jpg`）。观察：本地符号 `const workerLocale: string` 的卡片同样带这条脚注（`llm-tools-1ed4fd3-hover-local-borrowed-note.jpg`），脚注按会话而非按符号生效。Python hover 未复验 |
+| `⌘` 单击 TS 导入后的 Context | PASS：导入行与 `let tokenizer: Tokenizer` 两处，Context 1/2 为 `Tokenizer.d.ts:21`（外部），2/2 为导入绑定 `tokenizer.worker.ts:3`，不再显示“未就绪”（`llm-tools-1ed4fd3-cmdclick-import-context.jpg`） |
+| 普通单击无注解绑定（范围变化） | PASS：单击 `workerLocale` 使用点，Context 显示声明 `tokenizer.worker.ts:29:7`“精确 · 直接 · 局部绑定”（`llm-tools-1ed4fd3-click-untyped-binding-context.jpg`） |
+| 路径栏标签 | PASS：中文“历史提交 · 只读”，英文（`-AppleLanguages (en)`）“Past commit · read-only”（`toydb-commit-badge-en.jpg`） |
+
+未执行：Pyright/TS 冷启动的状态栏（这两者启动即就绪，无加载信号）；待命槽释放后切回工作区的“准备中”；加载期间 `⌘` 单击。局限：每项一次；冷启动时刻按帧文件名时间戳与 `ps` 每秒采样对齐，误差约 1 s。
