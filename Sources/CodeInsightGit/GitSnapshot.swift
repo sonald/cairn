@@ -317,7 +317,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
         configurationPaths = capturedFiles.keys
             .filter { entry in
                 guard configurationLanguage(
-                    for: URL(fileURLWithPath: entry).lastPathComponent
+                    for: fileName(of: entry)
                 ) != nil,
                       capturedFiles[entry]?.fileMode != .symlink
                 else { return false }
@@ -435,7 +435,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         unreadablePaths = unreadable.sorted()
         configurationPaths = captured.keys.filter { entry in
             configurationLanguage(
-                for: URL(fileURLWithPath: entry).lastPathComponent
+                for: fileName(of: entry)
             ) != nil
         }.sorted()
         languages = detectedLanguages(in: captured.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
@@ -512,6 +512,13 @@ public enum ProjectTreeWalk {
             }
         }
     }
+}
+
+/// The last component of a snapshot-relative path. Plain string work: a
+/// relative file URL would ask the system for the working directory on
+/// every one of thousands of paths.
+private func fileName(of path: String) -> String {
+    path.split(separator: "/").last.map(String.init) ?? path
 }
 
 private func configurationLanguage(for name: String) -> LanguageID? {
