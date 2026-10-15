@@ -116,20 +116,12 @@ func draftCodecRejectsOutOfRangeTypeRef() throws {
         strings: strings,
         containsErrorNodes: false
     )
-    let encoded = try ContentIndexDraftCodec.encode(draft)
+    _ = try ContentIndexDraftCodec.decode(
+        ContentIndexDraftCodec.encode(draft), order: 0, bytes: bytes, expectedKey: key
+    )
 
     // Tamper: give a binding a typeRef whose range lies past the byte count.
-    let decompressed = try (Data(encoded.dropFirst(5)) as NSData)
-        .decompressed(using: .lzfse) as Data
-    struct Payload: Codable {
-        let formatVersion: UInt32
-        let index: ContentIndex
-        let names: [String]
-        let strings: [String]
-        let containsErrorNodes: Bool
-    }
-    let original = try JSONDecoder().decode(Payload.self, from: decompressed)
-    var bindings = original.index.bindings
+    var bindings = index.bindings
     let psIndex = try #require(bindings.firstIndex {
         names.resolve($0.localNameID) == "ps"
     })
@@ -142,27 +134,27 @@ func draftCodecRejectsOutOfRangeTypeRef() throws {
         targetHint: bindings[psIndex].targetHint,
         typeRef: .named(ByteRange(lowerBound: 1, upperBound: UInt32(bytes.count) + 5))
     )
-    let tampered = Payload(
-        formatVersion: original.formatVersion,
+    let tampered = ExtractionDraft(
+        order: 0,
+        bytes: bytes,
         index: ContentIndex(
-            key: original.index.key,
-            scopes: original.index.scopes,
+            key: index.key,
+            scopes: index.scopes,
             bindings: bindings,
-            executableRegions: original.index.executableRegions,
-            symbols: original.index.symbols,
-            implRelations: original.index.implRelations,
-            calls: original.index.calls,
-            imports: original.index.imports,
-            exports: original.index.exports,
-            lineTable: original.index.lineTable
+            executableRegions: index.executableRegions,
+            symbols: index.symbols,
+            implRelations: index.implRelations,
+            calls: index.calls,
+            imports: index.imports,
+            exports: index.exports,
+            lineTable: index.lineTable,
+            regions: index.regions
         ),
-        names: original.names,
-        strings: original.strings,
-        containsErrorNodes: original.containsErrorNodes
+        names: names,
+        strings: strings,
+        containsErrorNodes: false
     )
-    let tamperedJSON = try JSONEncoder().encode(tampered)
-    var data = Data(encoded.prefix(5))
-    data.append(try (tamperedJSON as NSData).compressed(using: .lzfse) as Data)
+    let data = ContentIndexDraftCodec.encode(tampered)
 
     #expect(throws: DraftCodecError.self) {
         _ = try ContentIndexDraftCodec.decode(

@@ -9,7 +9,7 @@ final class IndexCache: @unchecked Sendable {
     }
 
     static let defaultQuotaBytes = 512 * 1024 * 1024
-    private static let schemaVersion: UInt32 = 2
+    private static let schemaVersion: UInt32 = 3
 
     let metadata: Metadata
     private let fileURL: URL
@@ -121,11 +121,8 @@ final class IndexCache: @unchecked Sendable {
         guard !drafts.isEmpty else { return }
         let lastAccess = Self.now
         queue.async {
-            let entries = drafts.compactMap { draft -> (String, Data, Int64)? in
-                guard let payload = try? ContentIndexDraftCodec.encode(draft) else {
-                    return nil
-                }
-                return (cacheKey(for: draft.index.key), payload, lastAccess)
+            let entries = drafts.map { draft in
+                (cacheKey(for: draft.index.key), ContentIndexDraftCodec.encode(draft), lastAccess)
             }
             self.storeSynchronously(entries)
         }

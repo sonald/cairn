@@ -73,13 +73,13 @@ func draftCodecKeepsVisibilityAndRejectsFormatFourPayloads() throws {
     let index = try RustExtractor().extract(
         bytes: bytes, key: key, interner: ExtractionInterners(names: names, strings: strings)
     )
-    let data = try ContentIndexDraftCodec.encode(ExtractionDraft(
+    let data = ContentIndexDraftCodec.encode(ExtractionDraft(
         order: 0, bytes: bytes, index: index, names: names, strings: strings, containsErrorNodes: false
     ))
     let decoded = try ContentIndexDraftCodec.decode(data, order: 0, bytes: bytes, expectedKey: key)
     #expect(decoded.index.symbols.map(\.visibility) == [.public, nil, .restricted])
 
-    // A format-4 cache (old magic byte) is rebuilt, never decoded.
+    // An older format byte is rebuilt, never decoded.
     var old = data
     old[old.startIndex + 4] = 0x04
     #expect(throws: DraftCodecError.self) {
@@ -107,7 +107,7 @@ func malformedContentRegionCacheCannotEnterSearchIndex() throws {
                 calls: [], imports: [], exports: [], lineTable: LineTable(bytes: bytes), regions: ranges
             ), names: Interner<NameID>(), strings: Interner<StringID>(), containsErrorNodes: false
         )
-        let data = try ContentIndexDraftCodec.encode(draft)
+        let data = ContentIndexDraftCodec.encode(draft)
         #expect(throws: DraftCodecError.self) {
             try ContentIndexDraftCodec.decode(data, order: 0, bytes: bytes, expectedKey: key)
         }

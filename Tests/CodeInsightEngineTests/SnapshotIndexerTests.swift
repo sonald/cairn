@@ -4,6 +4,7 @@ import CodeInsightGit
 import CodeInsightPythonExtractor
 import CodeInsightTypeScriptExtractor
 import Foundation
+import SQLite3
 import Testing
 
 private let snapshotIndexerRepositoryRoot = URL(fileURLWithPath: #filePath)
@@ -1256,9 +1257,9 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
     ).index(root: fixture.root)
 
     #expect(first.stats.extractedCount == 2)
-    // Draft format v5 persists content regions and declaration visibility.
+    // Draft format 6 is the binary row.
     #expect(cache.payload(for: cacheKey(for: storedKey))?
-        .starts(with: Data([0x43, 0x49, 0x44, 0x58, 0x05])) == true)
+        .starts(with: Data([0x43, 0x49, 0x44, 0x42, 0x06])) == true)
     #expect(reloaded.stats.extractedCount == 0)
     #expect(reloaded.stats.reusedCount == 2)
     try expectEquivalentContent(direct, reloaded)
@@ -1378,7 +1379,156 @@ func schemaMismatchRebuildsTheWholeDatabase() throws {
 
     let bumped = try IndexCache(fileURL: cacheURL)
     #expect(bumped.payload(for: "old") == nil)
-    #expect(bumped.metadata == IndexCache.Metadata(schemaVersion: 2))
+    #expect(bumped.metadata == IndexCache.Metadata(schemaVersion: 3))
+}
+
+@Test
+func schemaTwoDatabaseIsClearedOnOpenAndRebuiltFromExtraction() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
+    let direct = try ProjectIndexer(parallelism: 1).indexSnapshot(snapshot, into: ProjectIndexStore())
+    let contentCount = direct.contentIndexes.count
+
+    // The database an upgrading user has: schema 2, JSON rows of codec
+    // format 5 under today's keys.
+    var old: IndexCache? = try IndexCache(fileURL: cacheURL, schemaVersionOverride: 2)
+    old?.storeSynchronously(try direct.contentIndexes.values.map { index in
+        (cacheKey(for: index.key), try formatFiveRow(index, names: direct.names.values, strings: direct.strings.values), 1)
+    })
+    old?.flush()
+    old = nil
+    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [2], contentCount: contentCount))
+
+    let cache = try IndexCache(fileURL: cacheURL)
+    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [3], contentCount: 0))
+    let indexer = ProjectIndexer(parallelism: 1, cache: cache)
+    let rebuilt = try indexer.indexSnapshot(snapshot, into: ProjectIndexStore())
+    indexer.flushPersistentWrites()
+    #expect(rebuilt.stats.reusedCount == 0)
+    #expect(rebuilt.stats.extractedCount == contentCount)
+    try expectEquivalentContent(direct, rebuilt)
+    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [3], contentCount: contentCount))
+}
+
+@Test
+func draftsReadBackThroughAFreshCacheEqualAnUncachedIndexInEveryLanguage() throws {
+    func fixture(_ path: String) throws -> [UInt8] {
+        try [UInt8](Data(contentsOf: snapshotIndexerRepositoryRoot.appendingPathComponent(path)))
+    }
+    let snapshot = CountingSnapshot(files: [
+        "src/workload.rs": try fixture("fixtures/readonly/workload.rs"),
+        "src/type_hop.rs": try fixture("goldset/fixtures/type-hop/main.rs"),
+        "src/workload.py": try fixture("fixtures/readonly/workload.py"),
+        "src/lib.py": try fixture("goldset/fixtures/type-hop-py/lib.py"),
+        "src/workload.ts": try fixture("fixtures/readonly/workload.ts"),
+        "src/index.ts": try fixture("goldset/fixtures/type-hop-ts/index.ts"),
+        "src/workload.tsx": try fixture("fixtures/readonly/workload.tsx"),
+        "Cargo.toml": Array("[package]\nname = \"x\"\n".utf8),
+        "pyproject.toml": Array("[project]\nname = \"x\"\n".utf8),
+        "tsconfig.json": Array("{}".utf8),
+    ], configurationPaths: ["Cargo.toml", "pyproject.toml", "tsconfig.json"])
+    let languages: [LanguageID] = [.rust, .python, .typescript]
+    func index(_ indexer: ProjectIndexer) throws -> (pending: [Int], sessions: [EngineSession]) {
+        let prepared = try indexer.prepareSnapshots(snapshot, into: ProjectIndexStore(), languages: languages)
+        return (prepared.map(\.pendingExtractionCount), try prepared.map { try indexer.completeSnapshot($0)[0] })
+    }
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+
+    let direct = try index(ProjectIndexer(parallelism: 1)).sessions
+    let writer = ProjectIndexer(parallelism: 1, cache: try IndexCache(fileURL: cacheURL))
+    let cold = try index(writer).sessions
+    writer.flushPersistentWrites()
+    #expect(cold.map(\.stats.extractedCount) == [2, 2, 3])
+
+    let hot = try index(ProjectIndexer(parallelism: 1, cache: try IndexCache(fileURL: cacheURL)))
+    #expect(hot.pending == [0, 0, 0])
+    #expect(hot.sessions.map(\.stats.reusedCount) == [2, 2, 3])
+    #expect(hot.sessions.map(\.stats.extractedCount) == [0, 0, 0])
+    for (uncached, cached) in zip(direct, hot.sessions) {
+        try expectEquivalentContent(uncached, cached)
+    }
+}
+
+@Test
+func damagedCachedRowIsDroppedThenExtractedAgain() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let cache = try IndexCache(fileURL: cacheURL)
+    let indexer = ProjectIndexer(parallelism: 1, cache: cache)
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
+    let direct = try ProjectIndexer(parallelism: 1).indexSnapshot(snapshot, into: ProjectIndexStore())
+    _ = try indexer.indexSnapshot(snapshot, into: ProjectIndexStore())
+    indexer.flushPersistentWrites()
+    let key = cacheKey(for: try #require(direct.contentIndexes.keys.first))
+    var damaged = try #require(cache.payload(for: key))
+    damaged[damaged.count / 2] ^= 0x40
+    cache.storeSynchronously([(key, damaged, 1)])
+
+    let prepared = try indexer.prepareSnapshot(snapshot, into: ProjectIndexStore())
+    #expect(prepared.pendingExtractionCount == 1)
+    cache.flush()
+    #expect(cache.payload(for: key) == nil, "the damaged row is dropped, not decoded again")
+    let recovered = try indexer.completeSnapshot(prepared)[0]
+    indexer.flushPersistentWrites()
+    #expect(recovered.stats.extractedCount == 1)
+    try expectEquivalentContent(direct, recovered)
+
+    let hot = try ProjectIndexer(parallelism: 1, cache: try IndexCache(fileURL: cacheURL))
+        .indexSnapshot(snapshot, into: ProjectIndexStore())
+    #expect(hot.stats.extractedCount == 0)
+    #expect(hot.stats.reusedCount == direct.contentIndexes.count)
+    try expectEquivalentContent(direct, hot)
+}
+
+private struct CacheDatabaseRows: Equatable {
+    let schemaVersions: [Int64]
+    let contentCount: Int
+}
+
+/// Reads the cache database directly, past `IndexCache`.
+private func cacheDatabaseRows(_ url: URL) throws -> CacheDatabaseRows {
+    var database: OpaquePointer?
+    guard sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+        throw CocoaError(.fileReadUnknown)
+    }
+    defer { sqlite3_close_v2(database) }
+    func column(_ sql: String) throws -> [Int64] {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw CocoaError(.fileReadUnknown)
+        }
+        defer { sqlite3_finalize(statement) }
+        var values: [Int64] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            values.append(sqlite3_column_int64(statement, 0))
+        }
+        return values
+    }
+    return CacheDatabaseRows(
+        schemaVersions: try column("SELECT schemaVersion FROM meta"),
+        contentCount: Int(try column("SELECT count(*) FROM contents").first ?? -1)
+    )
+}
+
+/// A row as codec format 5 wrote it: `CIDX` 5, then LZFSE-compressed JSON.
+private func formatFiveRow(_ index: ContentIndex, names: [String], strings: [String]) throws -> Data {
+    struct Payload: Encodable {
+        let formatVersion: UInt32
+        let index: ContentIndex
+        let names: [String]
+        let strings: [String]
+        let containsErrorNodes: Bool
+    }
+    let json = try JSONEncoder().encode(Payload(
+        formatVersion: 5, index: index, names: names, strings: strings, containsErrorNodes: false
+    ))
+    return Data([0x43, 0x49, 0x44, 0x58, 0x05]) + (try (json as NSData).compressed(using: .lzfse) as Data)
 }
 
 @Test
