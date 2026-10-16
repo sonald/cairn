@@ -28,7 +28,7 @@
 "model.app.newerSession" = "Saved reading session needs a newer Cairn (schema %lld); it is kept untouched";
 "model.app.noContentID" = "missing content identity";
 "model.app.noEvidence" = "no frozen evidence";
-"model.app.noSupportedSources" = "No supported source files found (Rust, Python, TypeScript)";
+"model.app.noSupportedSources" = "Browse only: no Rust, Python or TypeScript source to analyze";
 "model.app.nodeUnavailable" = "selected node is unavailable";
 "model.app.projectUnavailable" = "Saved reading session belongs to a project that is not available right now";
 "model.app.refreshDetail" = "Index refresh failed — previous index restored (%@)";

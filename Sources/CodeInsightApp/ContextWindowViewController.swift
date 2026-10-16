@@ -493,6 +493,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         withObservationTracking {
             _ = model.mode
             _ = model.stage
+            _ = model.unavailableReason
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, !self.isClosing else { return }
@@ -553,9 +554,9 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             scrollView.isHidden = false
             applyBadgeStyle()
         } else {
-            placeholderLabel.stringValue = model.tracking == .enclosing
+            placeholderLabel.stringValue = model.unavailableReason ?? (model.tracking == .enclosing
                 ? localized("lens.enclosing.placeholder")
-                : localized("main.click.a.symbol.to.see.its.definition.here.click.jumps.to.it")
+                : localized("main.click.a.symbol.to.see.its.definition.here.click.jumps.to.it"))
             pathLabel.stringValue = ""
             symbolLabel.stringValue = ""
             symbolLabel.isHidden = true

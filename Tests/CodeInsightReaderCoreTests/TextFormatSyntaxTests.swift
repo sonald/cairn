@@ -1,3 +1,4 @@
+import CodeInsightCore
 import CodeInsightReaderCore
 import Testing
 
@@ -329,6 +330,8 @@ func textFormatDetectsSourceLanguagesCairnDoesNotAnalyze() {
     #expect(TextFormat.detect(fileName: "boot.S") == .code(.assembly))
     #expect(TextFormat.detect(fileName: "app.jsx") == .javascript)
     #expect(TextFormat.detect(fileName: "index.cjs") == .javascript)
+    #expect(TextFormat.detect(fileName: "lib.rs") == .syntaxTree(LanguageMode(language: .rust)))
+    #expect(TextFormat.detect(fileName: "app.tsx") == .syntaxTree(LanguageMode(language: .typescript, variant: "tsx")))
     #expect(TextFormat.detect(fileName: "query.sql.j2") == .jinja(host: .code(.sql)))
     #expect(TextFormat.fromLanguageHint("cpp") == .code(.cpp))
     #expect(TextFormat.fromLanguageHint("js") == nil)

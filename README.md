@@ -41,7 +41,7 @@ Packaging defaults to ad-hoc signing. Developer ID signing, notarization, and st
 
 ## Start reading
 
-1. Open a project; Cairn detects its Rust, Python, and TypeScript sources. `⌘P` finds files; prefix with `>` for commands, `@` for file symbols, `#` for project symbols, or `:` for a line. `⌃⌘S` lists every declaration in the project by kind or module without typing a name.
+1. Open a project; Cairn detects its Rust, Python, and TypeScript sources (a project with none, such as a pure C repository, opens browse-only: file tree and colored previews, no analysis). `⌘P` finds files; prefix with `>` for commands, `@` for file symbols, `#` for project symbols, or `:` for a line. `⌃⌘S` lists every declaration in the project by kind or module without typing a name.
 2. Click a symbol to update Context. For a binding, Context can show its type; `⌘`-click still opens the binding declaration, while `⇧⌘`-click or `⌃⌘J` opens its type. When the index has no declaration, stops at the import of the clicked name, or does not know the identifier at all, `⌘`-click opens the language server's definition, including dependency files, once Exact analysis is ready. Clicking the receiver in `ps.get()` selects `ps`; clicking `get` selects the method.
 3. Follow Relations and inspect the evidence behind a result. Freeze a result or trail as a Reading Set to preserve source and explanations.
 4. Reopen the project to restore its reading session. A new project gets its own window; reopening an already-open project activates that window.

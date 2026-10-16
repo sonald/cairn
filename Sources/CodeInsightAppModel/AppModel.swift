@@ -10,7 +10,23 @@ public enum ProjectState: Sendable {
     case empty
     case indexing(root: URL, startedAt: ContinuousClock.Instant)
     case ready(EngineSession, QueryContext)
+    /// The worktree has no analyzed language: the file tree and previews
+    /// work, analysis panels say why they are empty.
+    case browsing(root: URL)
     case failed
+}
+
+public extension ProjectState {
+    /// A finished open, analyzed or browse-only.
+    var isOpen: Bool {
+        switch self {
+        case .ready, .browsing: true
+        case .empty, .indexing, .failed: false
+        }
+    }
+
+    /// Why analysis panels are empty in `.browsing`.
+    static var browseOnlyReason: String { localized("model.app.noSupportedSources") }
 }
 
 public enum SnapshotPhase: Int, Sendable {
@@ -1469,9 +1485,11 @@ public final class AppModel {
     }
 
     public func refreshIndex(leaving current: JumpRecord?) {
-        guard let root = projectRoot,
-              case .ready = projectState
-        else { return }
+        guard let root = projectRoot else { return }
+        switch projectState {
+        case .ready, .browsing: break
+        case .empty, .indexing, .failed: return
+        }
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
@@ -1583,6 +1601,8 @@ public final class AppModel {
                 )
             ), root: root)
             prepareExact(generation: generation)
+        } else if restore.languages.isEmpty {
+            publishProjectState(.browsing(root: root), root: root)
         }
     }
 
@@ -2665,6 +2685,7 @@ public final class AppModel {
         case (.empty, .indexing),
              (.ready, .indexing),
              (.failed, .indexing),
+             (.browsing, .indexing),
              (.indexing, .ready),
              (.indexing, .failed),
              (.ready, .failed),
@@ -2688,9 +2709,7 @@ public final class AppModel {
     }
 
     private func switchSnapshot(revision: String?) {
-        guard let root = projectRoot,
-              !projectLanguages.isEmpty
-        else { return }
+        guard let root = projectRoot else { return }
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
@@ -2741,16 +2760,22 @@ public final class AppModel {
                     self.projectLanguages = snapshot.languages
                 }
                 let languages = self.projectLanguages
-                guard !languages.isEmpty else {
-                    onFailure(generation, root, NoSupportedSourcesError())
-                    return
-                }
                 self.publishFirstPaint(
                     snapshot,
                     root: root,
                     revision: revision,
                     generation: generation
                 )
+                guard !languages.isEmpty else {
+                    self.workspaceSessions.removeAll(keepingCapacity: true)
+                    self.snapshotPhase = .fullReady
+                    self.publishProjectState(.browsing(root: root), root: root)
+                    self.lastInstalledRevision = self.currentRevision
+                    self.lastInstalledProjectRoot = self.projectRoot
+                    self.lastInstalledGeneration = self.generation
+                    onSuccess?()
+                    return
+                }
                 await Task.yield()
                 guard self.canPublishWorkspaceResult(
                     generation: generation,
@@ -2998,6 +3023,9 @@ public final class AppModel {
 
     private func publishProjectState(_ state: ProjectState, root: URL?) {
         projectState = state
+        if case .browsing = state {
+            exactCoordinator.markUnavailable(ProjectState.browseOnlyReason)
+        }
         if case .ready = state {
             let sessions = querySessionTuples()
             if sessions.isEmpty { projectSearch.updateProjectState(state) }
@@ -3560,7 +3588,3 @@ public final class AppModel {
     }
 }
 
-/// An open whose worktree has no Rust, Python or TypeScript source.
-private struct NoSupportedSourcesError: LocalizedError {
-    var errorDescription: String? { localized("model.app.noSupportedSources") }
-}

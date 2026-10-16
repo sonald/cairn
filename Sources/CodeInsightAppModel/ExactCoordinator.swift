@@ -518,6 +518,12 @@ public final class ExactCoordinator {
         trustMode = nil
     }
 
+    /// A workspace with nothing to analyze: no provider starts after
+    /// `invalidate`, so the status names the reason instead of preparing.
+    func markUnavailable(_ reason: String) {
+        readiness = .unavailable(reason)
+    }
+
     public func shutdown() {
         epoch &+= 1
         let previousClose = closeTask

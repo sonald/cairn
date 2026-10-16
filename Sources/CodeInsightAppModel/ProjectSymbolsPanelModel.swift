@@ -318,6 +318,8 @@ public final class ProjectSymbolsPanelModel {
     }
 
     public private(set) var status: Status = .empty
+    /// Why the list is empty when the project has nothing to analyze.
+    public private(set) var unavailableReason: String?
     /// The list comes from a previous snapshot; rows cannot be opened.
     public private(set) var isStale = false
     public private(set) var organization: ProjectSymbolOrganization
@@ -410,8 +412,14 @@ public final class ProjectSymbolsPanelModel {
         let sessions = appModel.querySessions
         let indexing: Bool = switch appModel.projectState {
         case .indexing, .ready: true
-        case .empty, .failed: false
+        case .empty, .failed, .browsing: false
         }
+        let reason: String? = if case .browsing = appModel.projectState {
+            ProjectState.browseOnlyReason
+        } else {
+            nil
+        }
+        if unavailableReason != reason { unavailableReason = reason }
         update(sessions: sessions, indexing: indexing)
     }
 

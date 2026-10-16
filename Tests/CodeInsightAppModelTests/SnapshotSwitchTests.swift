@@ -197,6 +197,57 @@ func mixedWorkspaceOpenDetectsItsLanguagesAndInstallsSharedSessions() async thro
 
 @MainActor
 @Test
+func workspaceWithoutAnalyzedLanguagesOpensBrowseOnlyAndSwitchesCommits() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let service = ControlledSnapshotIndexService(
+        worktreeSnapshot: TestSnapshot(label: "c", files: [
+            "main.c": "int main(void) { return 0; }\n",
+            "README.md": "# c\n",
+        ]),
+        snapshots: ["C": TestSnapshot(label: "C", files: [
+            "main.c": "int main(void) { return 1; }\n",
+            "tool.rs": "fn tool() {}\n",
+        ])]
+    )
+    let model = AppModel(indexService: service)
+    await model.openProject(root: fixture.root).value
+
+    guard case .browsing = model.projectState else {
+        Issue.record("expected browse-only state, got \(model.projectState)")
+        return
+    }
+    #expect(Set(model.fileTree?.children.map(\.name) ?? []) == ["main.c", "README.md"])
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.coverage.statusText(for: model.snapshotPhase) == nil)
+    #expect(model.querySessions.isEmpty)
+    #expect(model.exactCoordinator.readiness == .unavailable(ProjectState.browseOnlyReason))
+
+    // A commit keeps the worktree's (empty) set: its Rust file is a preview.
+    model.switchToCommit("C")
+    #expect(await testWaitUntil("tool.rs listed") {
+        model.fileTree?.children.contains { $0.name == "tool.rs" } == true
+            && model.projectState.isOpen
+    })
+    guard case .browsing = model.projectState else {
+        Issue.record("expected browse-only state after switch, got \(model.projectState)")
+        return
+    }
+    #expect(Set(model.fileTree?.children.map(\.name) ?? []) == ["main.c", "tool.rs"])
+    #expect(model.currentRevision == "C")
+    #expect(await service.preparedLanguages().isEmpty)
+
+    // Leaving browse mode publishes indexing like any other reopen.
+    let reopen = model.openProject(root: fixture.root)
+    guard case .indexing = model.projectState else {
+        Issue.record("expected indexing on reopen, got \(model.projectState)")
+        return
+    }
+    await reopen.value
+}
+
+@MainActor
+@Test
 func mixedOpenDoesNotPublishUntilAllFullSessionsComplete() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
@@ -2137,7 +2188,7 @@ func refreshRedetectsLanguagesAndAFailedRefreshKeepsThePreviousSet() async throw
 
 @MainActor
 @Test
-func openingAFolderWithoutSupportedSourcesFailsWithItsReason() async throws {
+func openingAFolderWithoutSupportedSourcesOpensBrowseOnly() async throws {
     let root = try snapshotTemporaryProject([
         "README.md": "# notes\n",
         "app.js": "const app = 1\n",
@@ -2148,13 +2199,13 @@ func openingAFolderWithoutSupportedSourcesFailsWithItsReason() async throws {
 
     await model.openProject(root: root).value
 
-    guard case .failed = model.projectState else {
-        Issue.record("expected the open to fail")
+    guard case .browsing = model.projectState else {
+        Issue.record("expected a browse-only open, got \(model.projectState)")
         return
     }
     #expect(model.projectLanguages.isEmpty)
-    #expect(model.projectFailureReason
-        == "No supported source files found (Rust, Python, TypeScript)")
+    #expect(model.projectFailureReason == nil)
+    #expect(model.fileTree?.fileCount == 3)
 }
 
 @MainActor

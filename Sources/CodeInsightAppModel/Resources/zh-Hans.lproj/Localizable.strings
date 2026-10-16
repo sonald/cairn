@@ -28,7 +28,7 @@
 "model.app.newerSession" = "保存的阅读会话需要更新版本的 Cairn（格式 %lld）；原文件已保留";
 "model.app.noContentID" = "缺少内容标识";
 "model.app.noEvidence" = "没有冻结的证据";
-"model.app.noSupportedSources" = "没有找到受支持的源码（Rust、Python、TypeScript）";
+"model.app.noSupportedSources" = "仅浏览：没有可分析的 Rust、Python、TypeScript 源码";
 "model.app.nodeUnavailable" = "所选节点不可用";
 "model.app.projectUnavailable" = "保存的阅读会话所属项目当前不可用";
 "model.app.refreshDetail" = "索引刷新失败，已恢复先前索引（%@）";

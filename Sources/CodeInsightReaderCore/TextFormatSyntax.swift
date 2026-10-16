@@ -28,9 +28,13 @@ public enum TextFormat: Equatable, Hashable, Sendable {
     case markup
     /// Source languages Cairn does not analyze, colored lexically.
     case code(CodeLanguage)
-    /// `.js`/`.jsx`/`.mjs`/`.cjs`, colored by the vendored TSX grammar
-    /// (it parses JavaScript and JSX without errors).
-    case javascript
+    /// A bundled tree-sitter grammar the project is not analyzing:
+    /// `.js`/`.jsx`/`.mjs`/`.cjs` through the TSX grammar (it parses
+    /// JavaScript and JSX without errors), and `.rs`/`.py`/`.ts`/`.tsx`
+    /// where the worktree had none, e.g. at a commit that adds them.
+    case syntaxTree(LanguageMode)
+
+    public static let javascript = TextFormat.syntaxTree(LanguageMode(language: .javascript))
     /// Jinja-family templates, lexed over the host format named by the inner
     /// extension (`values.yaml.j2`); `nil` hosts use markup-style tags.
     indirect case jinja(host: TextFormat?)
@@ -47,7 +51,13 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         case .diff: "Diff"
         case .markup: "XML"
         case .code(let language): language.displayName
-        case .javascript: "JavaScript"
+        case .syntaxTree(let mode):
+            switch mode.language {
+            case .rust: "Rust"
+            case .python: "Python"
+            case .typescript: "TypeScript"
+            case .javascript: "JavaScript"
+            }
         case .jinja: "Jinja"
         }
     }
@@ -75,6 +85,7 @@ public enum TextFormat: Equatable, Hashable, Sendable {
             }
             if let format = extensionFormats[String(last)] { return format }
         }
+        if let mode = LanguageMode.classify(path: lower) { return .syntaxTree(mode) }
         if let firstLine, firstLine.hasPrefix("#!") {
             let interpreter = firstLine.split(whereSeparator: { $0 == "/" || $0 == " " })
             if interpreter.contains(where: { shellInterpreters.contains(String($0)) }) {
@@ -124,13 +135,16 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         case .diff: lexer.diff()
         case .markup: lexer.markup()
         case .code(let language): lexer.code(language.syntax)
-        case .javascript:
+        case .syntaxTree(let mode):
             // Parsing runs on the main thread with the preview; past the
             // snippet limit (~0.4 s in a debug build) the file stays plain.
             guard units.count <= CodeSnippetHighlighter.snippetUTF16Limit else { return [] }
             let text = String(utf16CodeUnits: units, count: units.count)
             return CodeSnippetHighlighter.syntaxSpans(
-                for: text, mode: LanguageMode(language: .typescript, variant: "tsx")
+                for: text,
+                mode: mode.language == .javascript
+                    ? LanguageMode(language: .typescript, variant: "tsx")
+                    : mode
             )
         case .jinja(let host):
             return Self.jinja(units: units, host: host)

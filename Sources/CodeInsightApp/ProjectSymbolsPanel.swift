@@ -652,6 +652,7 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
     private func observe() {
         withObservationTracking {
             _ = model.revision; _ = model.isStale; _ = model.status; _ = model.selectedRow
+            _ = model.unavailableReason
             _ = model.organization; _ = model.publicOnly; _ = model.scope; _ = model.enabledGroups
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -672,7 +673,7 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         case .indexing:
             placeholder.stringValue = localized("panel.symbols.indexing")
         case .empty:
-            placeholder.stringValue = localized("panel.symbols.empty")
+            placeholder.stringValue = model.unavailableReason ?? localized("panel.symbols.empty")
         case .ready:
             placeholder.stringValue = localized("panel.symbols.noMatch")
         }

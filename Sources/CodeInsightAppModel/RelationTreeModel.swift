@@ -323,6 +323,10 @@ public final class RelationTreeModel {
             session = nil
             context = nil
             root = Node(kind: .loading, title: localized("model.relation.indexing"))
+        case .browsing:
+            session = nil
+            context = nil
+            root = Node(kind: .error, title: ProjectState.browseOnlyReason)
         case .empty, .failed:
             session = nil
             context = nil

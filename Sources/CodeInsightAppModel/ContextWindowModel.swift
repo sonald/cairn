@@ -305,6 +305,10 @@ public final class ContextWindowModel {
         ExactRequestBatch
     ) async -> ExactCoordinator.HoverResult?)?
     private var projectState: ProjectState = .empty
+    /// Shown instead of the click hint when nothing can be looked up.
+    public var unavailableReason: String? {
+        if case .browsing = projectState { ProjectState.browseOnlyReason } else { nil }
+    }
     private var root: URL?
     private var contentSource: DocumentLoader.ContentSource?
     private var pendingToken: Token?
@@ -728,7 +732,7 @@ public final class ContextWindowModel {
             } else if case .indexBuilding = stage {
                 stage = .idle
             }
-        case .empty, .failed:
+        case .empty, .failed, .browsing:
             requestID &+= 1
             cancelExactUpgrade()
             pendingToken = nil

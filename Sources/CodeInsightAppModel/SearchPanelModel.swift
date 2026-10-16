@@ -287,6 +287,9 @@ public final class SearchPanelModel {
             case .failed:
                 placeholder = localized("model.search.failed")
                 return
+            case .browsing:
+                placeholder = ProjectState.browseOnlyReason
+                return
             case let .ready(session, context):
                 sessions = [(session, context)]
             }

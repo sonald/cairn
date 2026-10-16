@@ -830,7 +830,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         claimProject(root)
         if !forcingReopen,
            model.projectRoot?.standardizedFileURL == root,
-           case .ready = model.projectState,
+           model.projectState.isOpen,
            model.sessionLoadNotice == nil
         {
             window?.makeKeyAndOrderFront(nil)
@@ -2145,7 +2145,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         switch model.projectState {
         case .empty, .failed:
             return .noProject
-        case .indexing, .ready:
+        case .indexing, .ready, .browsing:
             if model.tabStrip.activeTab?.fileURL == nil {
                 return .source
             }
@@ -3311,7 +3311,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func renderEmptyState() {
-        if case .ready = model.projectState, let root = pendingRecentProjectRoot {
+        if model.projectState.isOpen, let root = pendingRecentProjectRoot {
             if recordsRecentProjects {
                 recentProjectsStore.record(root)
             }
@@ -3349,7 +3349,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
         case .indexing:
             readerController.removeEmptyState(placeholder: localized("main.indexing.project"))
-        case .ready:
+        case .ready, .browsing:
             readerController.removeEmptyState(placeholder: localized("main.select.a.file.to.read.p.to.open"))
         }
     }
@@ -3490,7 +3490,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func renderStatusBar() {
         let hasProject = switch model.projectState {
-        case .indexing, .ready: true
+        case .indexing, .ready, .browsing: true
         case .empty, .failed: false
         }
         statusBar.isHidden = !hasProject
@@ -3522,7 +3522,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var canRefreshIndex: Bool {
-        guard case .ready = model.projectState, model.projectRoot != nil else {
+        guard model.projectState.isOpen, model.projectRoot != nil else {
             return false
         }
         return !model.isRefreshingIndex
@@ -3611,7 +3611,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             trustedRepositoryPaths = paths
             switch model.projectState {
             case .empty, .failed: renderEmptyState()
-            case .indexing, .ready: break
+            case .indexing, .ready, .browsing: break
             }
         }
     }
@@ -4760,7 +4760,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         switch model.projectState {
         case .empty, .failed:
             return nil
-        case .indexing, .ready:
+        case .indexing, .ready, .browsing:
             break
         }
         guard let selectedFile = model.selectedFile else { return nil }
