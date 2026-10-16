@@ -52,6 +52,8 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 
 `ci.sh` 从当前构建发现用例，再核对每批完整成功摘要的数量。零测试、命令失败、缺少成功摘要、进程提前退出导致少测都会失败。无需每次新增或删除用例维护固定总数。依赖独立 AppKit 进程的鼠标、字体及窗口测试，以及读取进程级工作计数器的 ownership 测量，均隔离执行。本地并行运行时，刷新进程级字体环境（`ReaderFontResolver.shared.refresh()`）的测试，与经注入验证会被刷新打断的锚点校正测试，都标记 `.readerFontEnvironment` 互斥执行：刷新后已挂载的 Reader 会按设计丢弃排队校正，直到宿主重新应用设置，而测试不会重新应用。并发搜索的同步 gate 场景放在串行 suite 中，但仍和其余引擎检查处于同一批；等待上限不能超过用于证明行为的阻塞或计时器间隔，以免等待放宽后掩盖回归。
 
+测试进程（`swiftpm-testing-helper`、`xctest`）不写用户的索引缓存：未设置 `CODEINSIGHT_INDEX_CACHE_ROOT` 时，`IndexCache` 改用每个进程一个、退出时删除的临时目录；需要跨进程热缓存的 harness 和脚本显式设置该变量。直接 `open` 打包应用做原生验收时仍写 `~/Library/Application Support/CodeInsight/index-cache/`，需要隔离时同样设置该变量。
+
 日常 GitHub CI 根据改动路径选择域；文档不会触发 Swift 全套。产品语料质量和性能工作流改为手动触发，避免每个 PR 下载完整语料、安装全部语言工具链并重复运行性能测试。手动门禁用于明确的跨域验收或发布决策。
 
 日常 CI 与产品门禁均安装 Rust 1.97.1 的 `rust-analyzer` 组件并选择该工具链。镜像中存在 `rust-analyzer` 的 rustup 代理不代表组件可运行；日常 CI 安装后先执行 `rust-analyzer --version`，避免等到 LSP 集成测试才发现环境缺失。

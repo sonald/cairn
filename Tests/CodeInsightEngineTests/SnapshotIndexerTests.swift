@@ -1559,6 +1559,14 @@ func extractorVersionsCoexistInSchemaTwoCache() throws {
 }
 
 @Test
+func testRunnersNeverResolveTheUsersIndexCache() {
+    // Test targets without their own cache root once filled Application Support.
+    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    let cacheURL = IndexCache.fileURL(for: FileManager.default.temporaryDirectory)
+    #expect(!cacheURL.path.hasPrefix(support.path))
+}
+
+@Test
 func persistentCacheEvictsLeastRecentlyUsedPayloads() throws {
     let cacheURL = temporaryCacheURL()
     defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }

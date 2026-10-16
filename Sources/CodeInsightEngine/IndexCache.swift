@@ -361,13 +361,30 @@ final class IndexCache: @unchecked Sendable {
         Int64(Date().timeIntervalSince1970)
     }
 
-    private static func fileURL(for projectURL: URL) -> URL {
+    /// A test runner without CODEINSIGHT_INDEX_CACHE_ROOT gets one scratch root
+    /// per process, removed at exit, so no test target can fill the user's cache.
+    // ponytail: matches the runners `swift test` launches (Swift Testing helper,
+    // XCTest); add another name if a new runner appears.
+    private static let testProcessRoot: URL? = {
+        let runners = ["swiftpm-testing-helper", "xctest"]
+        guard runners.contains(ProcessInfo.processInfo.processName) else { return nil }
+        atexit { try? FileManager.default.removeItem(at: IndexCache.scratchRoot(pid: getpid())) }
+        return scratchRoot(pid: getpid())
+    }()
+
+    private static func scratchRoot(pid: Int32) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodeInsightTestIndexCache-\(pid)", isDirectory: true)
+    }
+
+    static func fileURL(for projectURL: URL) -> URL {
         let path = projectURL.resolvingSymlinksInPath().standardizedFileURL.path
         let digest = SHA256.hash(data: Data(path.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         let root = ProcessInfo.processInfo.environment["CODEINSIGHT_INDEX_CACHE_ROOT"]
             .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? testProcessRoot
             ?? FileManager.default.urls(
                 for: .applicationSupportDirectory,
                 in: .userDomainMask
