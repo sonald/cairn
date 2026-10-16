@@ -164,7 +164,7 @@ func appTrustGrantRefreshesExistingSettingsAndOtherWindows() async throws {
 func productionFirstAndLaterWindowsShareBookmarksTrustAndCache() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("ProductionServices-\(UUID().uuidString)")
-    let suite = "ProductionServices-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ProductionServices-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)
@@ -215,7 +215,7 @@ func productionFirstAndLaterWindowsShareBookmarksTrustAndCache() async throws {
 func closedWindowIgnoresLateTrustSheetConfirmation() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("LateTrustSheet-\(UUID().uuidString)")
-    let suite = "LateTrustSheet-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "LateTrustSheet-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)

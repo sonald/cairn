@@ -50,7 +50,7 @@ func welcomeMarksTrustedRecentsAndShowsWhenEachWasLastRead() async throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }
     try FileManager.default.createSymbolicLink(at: trusted, withDestinationURL: trustedTarget)
-    let suite = "WelcomeStatusTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "WelcomeStatusTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = RecentProjectsStore(defaults: defaults)

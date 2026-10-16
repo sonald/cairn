@@ -4,7 +4,7 @@ import Testing
 
 @Test
 func readerLigatureSettingsDefaultAndRoundTrip() throws {
-    let suite = "ReaderLigatureSettingsTests.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ReaderLigatureSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let original = ReaderSettings(defaults: defaults)
@@ -25,7 +25,7 @@ func readerLigatureSettingsDefaultAndRoundTrip() throws {
 
 @Test
 func readerLigatureSettingsRejectMalformedStoredValues() throws {
-    let suite = "ReaderLigatureSettingsTests.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ReaderLigatureSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     defaults.set("unknown", forKey: "reader.codeLigatures")

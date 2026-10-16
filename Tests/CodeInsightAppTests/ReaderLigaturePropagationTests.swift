@@ -169,7 +169,7 @@ func appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettin
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("LigatureBroadcast-\(UUID().uuidString)")
     let project = root.appendingPathComponent("project")
     try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-    let suite = "LigatureBroadcast-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "LigatureBroadcast-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)

@@ -14,7 +14,7 @@ func readonlyFrozenReadingSetRestoresAndDrawsCapturedSourceAfterWindowClose() as
     let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("readonly-frozen-restore-\(UUID().uuidString)")
     let project = temporary.appendingPathComponent("project")
     let session = temporary.appendingPathComponent("state/session.json")
-    let suite = "dev.cairn.readonly-frozen-restore.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "dev.cairn.readonly-frozen-restore.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     let recents = RecentProjectsStore(defaults: defaults)
     try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)

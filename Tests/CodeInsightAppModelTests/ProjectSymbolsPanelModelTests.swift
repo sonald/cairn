@@ -91,7 +91,7 @@ private func randomListings(seed: UInt64) -> [ProjectSymbolListing] {
 
 @MainActor
 private func loaded(_ listings: [ProjectSymbolListing]) async -> ProjectSymbolsPanelModel {
-    let model = ProjectSymbolsPanelModel(defaults: UserDefaults(suiteName: "ProjectSymbolsTests-\(UUID())")!)
+    let model = ProjectSymbolsPanelModel(defaults: UserDefaults(suiteName: NSTemporaryDirectory() + "ProjectSymbolsTests-\(UUID())")!)
     model.load(listings: listings)
     await model.pendingLoad?.value
     return model
@@ -286,7 +286,7 @@ func projectSymbolsFollowFirstPaintThenFullSilentlyAndGoStaleAcrossCommits() asy
         blockedFull: ["C"]
     )
     let app = AppModel(indexService: service)
-    let panel = ProjectSymbolsPanelModel(defaults: UserDefaults(suiteName: "ProjectSymbolsTests-\(UUID())")!)
+    let panel = ProjectSymbolsPanelModel(defaults: UserDefaults(suiteName: NSTemporaryDirectory() + "ProjectSymbolsTests-\(UUID())")!)
     app.openProject(root: root)
     #expect(await testWaitUntil("full") { app.snapshotPhase == .fullReady })
     panel.update(from: app)

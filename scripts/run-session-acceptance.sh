@@ -25,7 +25,7 @@ run_phase() {
     /usr/bin/open -n -W "$app" \
         --stdout "$state/$phase.stdout" --stderr "$state/$phase.stderr" \
         --env "CAIRN_SESSION_SELFTEST_URL=$state/session.json" \
-        --env "CAIRN_SESSION_SELFTEST_DEFAULTS=dev.cairn.session.$(basename "$state")" \
+        --env "CAIRN_SESSION_SELFTEST_DEFAULTS=$state/defaults" \
         --env "CAIRN_SESSION_SELFTEST_EXPECTATIONS=$state/expectations.json" \
         --env "CODEINSIGHT_INDEX_CACHE_ROOT=$state/index-cache" \
         --args "$@"

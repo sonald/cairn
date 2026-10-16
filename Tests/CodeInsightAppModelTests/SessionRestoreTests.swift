@@ -931,7 +931,7 @@ func perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() async throws
             isDirectory: true
         )
     let sessionURL = stateRoot.appendingPathComponent("session.json")
-    let pointerSuite = "CodeInsightPerProject-\(UUID().uuidString)"
+    let pointerSuite = NSTemporaryDirectory() + "CodeInsightPerProject-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: pointerSuite)!
     defer {
         try? FileManager.default.removeItem(at: stateRoot)
@@ -1006,7 +1006,7 @@ func legacyV1SessionMigratesToPerProjectStoreOnce() async throws {
         withIntermediateDirectories: true
     )
     defer { try? FileManager.default.removeItem(at: stateRoot) }
-    let pointerSuite = "CodeInsightLegacyMigration-\(UUID().uuidString)"
+    let pointerSuite = NSTemporaryDirectory() + "CodeInsightLegacyMigration-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: pointerSuite)!
     defer { defaults.removePersistentDomain(forName: pointerSuite) }
     let store = RecentProjectsStore(defaults: defaults)
@@ -1112,7 +1112,7 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
             isDirectory: true
         )
     let sessionURL = stateRoot.appendingPathComponent("session.json")
-    let pointerSuite = "CodeInsightClearSession-\(UUID().uuidString)"
+    let pointerSuite = NSTemporaryDirectory() + "CodeInsightClearSession-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: pointerSuite)!
     defer {
         try? FileManager.default.removeItem(at: stateRoot)

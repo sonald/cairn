@@ -4,7 +4,7 @@ import Testing
 
 @Test
 func recentProjectsStoreRecordsDeduplicatesMovesToFrontLimitsAndPersists() {
-    let suiteName = "RecentProjectsStoreTests-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "RecentProjectsStoreTests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let store = RecentProjectsStore(defaults: defaults)
@@ -25,7 +25,7 @@ func recentProjectsStoreRecordsDeduplicatesMovesToFrontLimitsAndPersists() {
 
 @Test
 func recentProjectsStoreLastSessionProjectSurvivesRecentsClear() {
-    let suiteName = "RecentProjectsStoreTests-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "RecentProjectsStoreTests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     let store = RecentProjectsStore(defaults: defaults)
@@ -48,7 +48,7 @@ func recentProjectsStoreLastSessionProjectSurvivesRecentsClear() {
 
 @Test
 func recentProjectsStoreDropsTheRetiredLanguageMapAndKeepsPaths() {
-    let suiteName = "RecentProjectsStoreTests-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "RecentProjectsStoreTests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer { defaults.removePersistentDomain(forName: suiteName) }
     defaults.set(["/projects/a", "/projects/b"], forKey: "Cairn.RecentProjects")

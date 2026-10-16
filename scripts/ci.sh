@@ -143,6 +143,13 @@ if grep -rnE "$swiftui_unstable_identity_regex" Sources; then
     exit 1
 fi
 
+# A bare suite name writes ~/Library/Preferences/<name>.plist, and cfprefsd keeps
+# the file even after removePersistentDomain; an absolute path keeps it in temp.
+if grep -rnE 'suiteName: "|let (suite|suiteName|pointerSuite) = "' Tests Sources/CodeInsightApp/SelfTest; then
+    echo "Test and self-test UserDefaults suites must be named NSTemporaryDirectory() + \"...\"." >&2
+    exit 1
+fi
+
 fi
 
 if [[ ${#filters[@]} -eq 0 ]]; then exit 0; fi

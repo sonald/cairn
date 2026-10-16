@@ -39,7 +39,7 @@ struct ReadonlyFontRegistrationTests {
         let source = "pub fn value() -> usize { 42 }\n"
         let file = project.appendingPathComponent("main.rs")
         try source.write(to: file, atomically: true, encoding: .utf8)
-        let suite = "ReadonlyFontRegistration-\(UUID().uuidString)"
+        let suite = NSTemporaryDirectory() + "ReadonlyFontRegistration-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let recent = RecentProjectsStore(defaults: defaults)

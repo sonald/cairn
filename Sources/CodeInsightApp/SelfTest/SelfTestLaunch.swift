@@ -320,7 +320,7 @@ func launchSelfTestIfRequested(
         {
             let pythonSelfTestID = UUID().uuidString
             let pythonRecentStore = RecentProjectsStore(defaults: UserDefaults(
-                suiteName: "CodeInsightLanguageSelfTest-\(pythonSelfTestID)"
+                suiteName: NSTemporaryDirectory() + "CodeInsightLanguageSelfTest-\(pythonSelfTestID)"
             )!)
             delegate = AppDelegate(
                 startedAt: startedAt,
@@ -341,7 +341,7 @@ func launchSelfTestIfRequested(
                     isDirectory: true
                 )
             let multiWindowDefaults = UserDefaults(
-                suiteName: "CodeInsightMultiWindow-\(UUID().uuidString)"
+                suiteName: NSTemporaryDirectory() + "CodeInsightMultiWindow-\(UUID().uuidString)"
             )!
             let multiWindowStore = RecentProjectsStore(
                 defaults: multiWindowDefaults

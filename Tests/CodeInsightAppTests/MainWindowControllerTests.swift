@@ -18,7 +18,7 @@ private final class MainWindowIdentityFixture {
     private let suiteName: String
 
     init() {
-        let suiteName = "MainWindowIdentityTests-\(UUID().uuidString)"
+        let suiteName = NSTemporaryDirectory() + "MainWindowIdentityTests-\(UUID().uuidString)"
         self.suiteName = suiteName
         defaults = UserDefaults(suiteName: suiteName)!
         store = RecentProjectsStore(defaults: defaults)
@@ -436,7 +436,7 @@ func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws
             "MainWindowRecentRestore-\(UUID().uuidString)",
             isDirectory: true
         )
-    let suiteName = "MainWindowRecentRestore-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "MainWindowRecentRestore-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defer {
         try? FileManager.default.removeItem(at: root)
@@ -507,7 +507,7 @@ func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
         settings: ReaderSettings(),
         offscreen: true,
         recentProjectsStore: RecentProjectsStore(defaults: UserDefaults(
-            suiteName: "MainWindowSameProjectFocus-\(UUID().uuidString)"
+            suiteName: NSTemporaryDirectory() + "MainWindowSameProjectFocus-\(UUID().uuidString)"
         )!),
         recordsRecentProjects: false
     )
@@ -899,7 +899,7 @@ func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws
     let empty = prefix.utf16.count + "    target(); // anchor\n".utf16.count + 2
     let root = try mainWindowTemporaryProject(["main.rs": source])
     defer { try? FileManager.default.removeItem(at: root) }
-    let suite = "ContextViewportTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ContextViewportTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let model = AppModel(indexService: ProjectIndexService())
@@ -1015,7 +1015,7 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     ]
     for path in longPaths { files[path] = "pub fn component() {}\n" }
     let root = try mainWindowTemporaryProject(files)
-    let suite = "CairnPanelLayoutTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "CairnPanelLayoutTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)
@@ -1474,7 +1474,7 @@ func lensTypeFollowSurfacesRenderInTheNativeWindow() async throws {
 func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throws {
     _ = NSApplication.shared
     let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
-    let suite = "CairnPanelMoveTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "CairnPanelMoveTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)
@@ -1567,7 +1567,7 @@ func movedPanelsSurviveWindowRebuildAndPresetsOnlyChangeVisibility() async throw
 func firstDocsPanelShowUnhidesItAndRecordsItsHeight() async throws {
     _ = NSApplication.shared
     let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
-    let suite = "CairnDocsPanelTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "CairnDocsPanelTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)
@@ -1610,7 +1610,7 @@ func firstDocsPanelShowUnhidesItAndRecordsItsHeight() async throws {
 func panelChangesAfterAClickDoNotRecordGeometry() async throws {
     _ = NSApplication.shared
     let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
-    let suite = "CairnPanelClickTests-\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "CairnPanelClickTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer {
         defaults.removePersistentDomain(forName: suite)

@@ -153,7 +153,7 @@ func clickGestureRequiresModifierAndChecksConflicts() {
 
 @Test
 func replaceMovesBindingAtomically() throws {
-    let suiteName = "KeyBindingOwnershipTests-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "KeyBindingOwnershipTests-\(UUID().uuidString)"
     nonisolated(unsafe) let suite = try #require(UserDefaults(suiteName: suiteName))
     defer { suite.removePersistentDomain(forName: suiteName) }
     let store = KeyBindingStore(defaults: suite)
@@ -182,7 +182,7 @@ func replaceMovesBindingAtomically() throws {
 
 @Test
 func keyBindingStoreDropsUnknownCommandsAndKeepsTheRest() throws {
-    let suiteName = "KeyBindingStoreTests-\(UUID().uuidString)"
+    let suiteName = NSTemporaryDirectory() + "KeyBindingStoreTests-\(UUID().uuidString)"
     nonisolated(unsafe) let suite = try #require(UserDefaults(suiteName: suiteName))
     defer { suite.removePersistentDomain(forName: suiteName) }
     let store = KeyBindingStore(defaults: suite)

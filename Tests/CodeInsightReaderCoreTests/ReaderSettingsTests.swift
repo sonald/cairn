@@ -92,7 +92,7 @@ func readerVisualSettingsKeepReadableDefaultsAndClampEveryBoundary() {
 
 @Test
 func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
-    let suite = "ReaderSettingsTests.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ReaderSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let missingKeys = ReaderSettings(defaults: defaults)
@@ -207,7 +207,7 @@ private func linearComponent(_ value: Double) -> Double {
 
 @Test
 func readerSettingsAdoptRedesignDefaultsOnceWhereOldDefaultsWereStored() throws {
-    let suite = "ReaderSettingsTests.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ReaderSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     // What every save before the redesign wrote: the old defaults, no revision.
@@ -239,7 +239,7 @@ func readerSettingsAdoptRedesignDefaultsOnceWhereOldDefaultsWereStored() throws 
 
 @Test
 func readerSettingsValidateStoredThemeIdsAndTheAutoPair() throws {
-    let suite = "ReaderSettingsTests.\(UUID().uuidString)"
+    let suite = NSTemporaryDirectory() + "ReaderSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let fresh = ReaderSettings(defaults: defaults)

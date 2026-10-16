@@ -97,7 +97,7 @@ func firstOpenLoadsDirectlyInTheBlankLaunchWindow() async throws {
     ])
     defer { try? FileManager.default.removeItem(at: project) }
     let defaults = UserDefaults(
-        suiteName: "MWLifecycle-\(UUID().uuidString)"
+        suiteName: NSTemporaryDirectory() + "MWLifecycle-\(UUID().uuidString)"
     )!
     let delegate = lifecycleAppDelegate(
         sessionURL: storageRoot.appendingPathComponent("session.json"),
@@ -131,7 +131,7 @@ func closedWindowReleasesClaimOnlyAfterTeardownFinishes() async throws {
     ])
     defer { try? FileManager.default.removeItem(at: project) }
     let defaults = UserDefaults(
-        suiteName: "MWLifecycle-\(UUID().uuidString)"
+        suiteName: NSTemporaryDirectory() + "MWLifecycle-\(UUID().uuidString)"
     )!
     let delegate = lifecycleAppDelegate(
         sessionURL: storageRoot.appendingPathComponent("session.json"),
@@ -174,7 +174,7 @@ func closingWindowWithPendingClearSessionSheetPreservesBothSessions(
             try? FileManager.default.removeItem(at: root)
         }
     }
-    let defaults = UserDefaults(suiteName: "MWLifecycle-\(UUID().uuidString)")!
+    let defaults = UserDefaults(suiteName: NSTemporaryDirectory() + "MWLifecycle-\(UUID().uuidString)")!
     let delegate = lifecycleAppDelegate(
         sessionURL: storageRoot.appendingPathComponent("session.json"),
         defaults: defaults
@@ -268,7 +268,7 @@ func quitSavesRemainingWindowsWhenOneWindowFails() async throws {
         try? FileManager.default.removeItem(at: projectB)
     }
     let defaults = UserDefaults(
-        suiteName: "MWLifecycle-\(UUID().uuidString)"
+        suiteName: NSTemporaryDirectory() + "MWLifecycle-\(UUID().uuidString)"
     )!
     let delegate = lifecycleAppDelegate(
         sessionURL: storageRoot.appendingPathComponent("session.json"),
