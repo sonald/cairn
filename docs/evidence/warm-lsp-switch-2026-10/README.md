@@ -390,3 +390,20 @@ S4 原生段，需用户在场（版本选择器、`⌘` 单击与弹出框无�
 | llm-tools 1ed4fd3 分析配置菜单 | 5 行：Rust 11 / 22、Python 8、TypeScript 49 / 19，与多单元验收一致（`llm-tools-1ed4fd3-analysis-units-after-session-reuse.jpg`） |
 
 局限：当时 load average 5–7（远程桌面在编码屏幕、另一实现任务在编译与计时），与上午无负载下 86002d7 的 3.1 / 3.5 s 不可比，本节不作为时间收益证据；收益以进程内 harness（`SwitchTimingHarness.swift`，codex `HEAD~5`"准备中"中位数 3127 → 2279 ms）为准。项目搜索命中数未在原生应用中复核，由集成测试 `revisitedCommitShowsTheSameUnitsAtEveryPhaseWhenNothingNeedsExtracting` 与 46 个 CLI 输出逐字节对照覆盖。
+
+## 二进制索引缓存后的原生复核（2026-10-16）
+
+构建：890e1b5（376faba 内容索引缓存改为二进制格式，schema 3），`dev.cairn.s4accept` 隔离副本，M3 Pro，macOS 27。计时方法同上（窗口 id 截帧约 0.4 s、区域哈希），各一次；load average 约 5–7，与前几节同样不作为时间收益证据，收益以本节开头引用的 harness 为准（[product.md](../../product.md) "commit 精确分析"一行）。
+
+| 项 | 结果 |
+| --- | --- |
+| 旧缓存升级 | 新构建打开 llm-tools 与 codex 后，两个缓存库 `meta` 为 3，行数 127 / 3,375，抽查行头为 `CIDB` + 格式字节 6；退出重开后两库行数不变 |
+| codex 工作区→`HEAD~5`（78ba047） | 切换正常；从工具栏变化帧计，文件树与大纲 +1.0 s，"准备中"结束 +1.4 s，就绪 +18.4 s（检出槽 rust-analyzer 冷加载） |
+| codex 78ba047→工作区 | 切换正常；"准备中"结束 +1.8 s，就绪 +17.3 s（工作区服务器已释放，冷启动） |
+| 78ba047 上 `⌘` 单击 `use super::input_queue::InputQueue` | 打开 `input_queue.rs:35:19`，Context 标"精确 · 直接"（`codex-78ba047-cmdclick-inputqueue-binary-cache.jpg`） |
+| 78ba047 上 `⌘P` `#InputQueue` | 项目符号命中 struct、enum、impl 与测试函数，预览为 35 行定义（`codex-78ba047-symbol-search-binary-cache.jpg`） |
+| llm-tools 1ed4fd3 分析配置菜单 | 5 行：Rust 11 / 22、Python 8、TypeScript 49 / 19，与前两次一致（`llm-tools-1ed4fd3-analysis-units-binary-cache.jpg`） |
+
+状态栏与工具栏帧见 `codex-switch-status-binary-cache.jpg`（上半为切到 78ba047，下半为切回工作区）。
+
+局限：每个方向一次；切换时刻按工具栏变化帧定位，误差约 ±0.4 s；就绪时间主要是 rust-analyzer 冷加载，与本次改动无关。未在原生应用中比较改前改后的同负载数字，也未测 schema 3 缓存被旧版本打开后的重建（由集成测试与 CLI 覆盖）。
