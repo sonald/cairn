@@ -707,7 +707,7 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
 
 @MainActor
 @Test
-func mixedProjectUnsupportedLanguageFileUsesPlainPreviewWithoutActiveLanguageFallback()
+func mixedProjectUnsupportedLanguageFileUsesTextPreviewWithoutActiveLanguageFallback()
     async throws
 {
     let fixture = try await makeRelationNavigationFixture()
@@ -735,7 +735,7 @@ func mixedProjectUnsupportedLanguageFileUsesPlainPreviewWithoutActiveLanguageFal
         == unsupported.standardizedFileURL)
     #expect(fixture.controller.selfTestLeftReaderBytes == nil)
     #expect(fixture.controller.selfTestReaderPlaceholderText == nil)
-    #expect(fixture.controller.selfTestReaderPreviewKind == "Plain text")
+    #expect(fixture.controller.selfTestReaderPreviewKind == "JavaScript")
     #expect(fixture.controller.selfTestReaderPreviewText == plainText)
 }
 
