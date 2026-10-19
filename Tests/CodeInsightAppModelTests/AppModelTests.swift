@@ -1779,6 +1779,29 @@ func contextWindowReusesLoadedTargetDocumentAcrossClicks() async throws {
 
 @MainActor
 @Test
+func hoverFallbackDoesNotUseDeclarationDocumentationForBinding() async throws {
+    let source = "/// Returns the input.\nfn f(x: i32) -> i32 {\n    x\n}\n"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let path = try #require(pathID("main.rs", in: session))
+    let contentID = try #require(session.manifest.files.first { $0.pathID == path }?.contentID)
+    let model = ContextWindowModel { session, file, offset, context in
+        try session.resolve(file: file, offset: offset, context: context)
+    }
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    let doc = await model.hoverFallback(
+        file: "main.rs",
+        offset: byteOffset(of: "\n    x\n", in: source) + 5,
+        contentID: contentID,
+        document: nil
+    )
+    #expect(doc == nil)
+}
+
+@MainActor
+@Test
 func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
     let source = "fn target() {}\nfn main() { target(); }\n// plain comment\n"
     let root = try temporaryProject(["main.rs": source])

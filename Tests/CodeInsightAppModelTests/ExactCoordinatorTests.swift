@@ -1395,6 +1395,40 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     #expect(state.definitionCount == 5)
 }
 
+@MainActor
+@Test
+func exactOverlayRequestsDefinitionAgainWhenWorktreeSourceChanges() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let snapshots = ExactSnapshotFactoryState(files: fixture.files)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in ExactTestProvider(state: state) },
+        snapshotFactory: snapshots.make,
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await testWaitUntil("exact ready for first source") {
+        coordinator.readiness == .ready
+    })
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 1
+    ) != nil)
+    #expect(state.definitionCount == 1)
+
+    snapshots.replaceFile("main.rs", content: "fn changed() {}\n")
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
+    #expect(await testWaitUntil("exact ready for changed source") {
+        coordinator.readiness == .ready
+    })
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 2
+    ) != nil)
+    #expect(state.definitionCount == 2)
+}
+
 @Test
 func exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() {
     var overlay = ExactOverlay()
@@ -2996,7 +3030,7 @@ private final class ExactVersionBox: @unchecked Sendable {
 
 private final class ExactSnapshotFactoryState: @unchecked Sendable {
     private let lock = NSLock()
-    private let files: [String: String]
+    private var files: [String: String]
     private var identifiers: [SnapshotID] = []
 
     init(files: [String: String]) { self.files = files }
@@ -3007,9 +3041,15 @@ private final class ExactSnapshotFactoryState: @unchecked Sendable {
         return identifiers
     }
 
-    func make(root: URL, revision: String?) throws -> any Snapshot {
-        let snapshot = ExactTestSnapshot(files: files)
+    func replaceFile(_ path: String, content: String) {
         lock.lock()
+        files[path] = content
+        lock.unlock()
+    }
+
+    func make(root: URL, revision: String?) throws -> any Snapshot {
+        lock.lock()
+        let snapshot = ExactTestSnapshot(files: files)
         identifiers.append(snapshot.snapshotID)
         lock.unlock()
         return snapshot

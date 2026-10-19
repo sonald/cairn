@@ -1156,10 +1156,10 @@ public final class ContextWindowModel {
                 if case .memberBinding = $0 { return true }
                 return false
             }
-            if let bindingIndex = lexicalBindingIndex(in: resolution.evidence),
-               index.bindings.indices.contains(Int(bindingIndex))
+            if resolution.target.localKind == .binding,
+               index.bindings.indices.contains(Int(resolution.target.localIndex))
             {
-                let binding = index.bindings[Int(bindingIndex)]
+                let binding = index.bindings[Int(resolution.target.localIndex)]
                 targetRange = binding.declarationRange
                 targetOffset = binding.declarationRange.lowerBound
                 isImportBinding = !isMember && binding.kind == .importBinding
@@ -1169,6 +1169,8 @@ public final class ContextWindowModel {
             } else {
                 bindingKind = nil
                 switch resolution.target.localKind {
+                case .binding:
+                    continue
                 case .declarationFacet:
                     guard index.symbols.indices.contains(Int(resolution.target.localIndex))
                     else { continue }
@@ -2055,17 +2057,6 @@ public final class ContextWindowModel {
             documents.removeValue(forKey: documentRecency.removeFirst())
         }
         return document
-    }
-
-    private func lexicalBindingIndex(
-        in evidence: [ResolutionEvidence]
-    ) -> UInt32? {
-        for item in evidence {
-            // Both bind into the target file's bindings.
-            if case let .lexicalBinding(bindingIndex) = item { return bindingIndex }
-            if case let .memberBinding(bindingIndex) = item { return bindingIndex }
-        }
-        return nil
     }
 
     private func bindingLabel(_ kind: BindingKind) -> String {

@@ -294,26 +294,19 @@ private func targetPosition(
     label: String
 ) throws -> FixturePosition {
     let index = try content(at: candidate.target.pathID, in: session)
-    var range: ByteRange?
-    for evidence in candidate.evidence {
-        if case let .lexicalBinding(bindingIndex) = evidence,
-           index.bindings.indices.contains(Int(bindingIndex))
-        {
-            range = index.bindings[Int(bindingIndex)].declarationRange
-        }
-    }
-    if range == nil {
-        let localIndex = Int(candidate.target.localIndex)
-        switch candidate.target.localKind {
-        case .declarationFacet where index.symbols.indices.contains(localIndex):
-            range = index.symbols[localIndex].nameRange
-        case .callSite where index.calls.indices.contains(localIndex):
-            range = index.calls[localIndex].range
-        case .importBinding where index.imports.indices.contains(localIndex):
-            range = index.imports[localIndex].range
-        default:
-            break
-        }
+    let localIndex = Int(candidate.target.localIndex)
+    let range: ByteRange?
+    switch candidate.target.localKind {
+    case .binding where index.bindings.indices.contains(localIndex):
+        range = index.bindings[localIndex].declarationRange
+    case .declarationFacet where index.symbols.indices.contains(localIndex):
+        range = index.symbols[localIndex].nameRange
+    case .callSite where index.calls.indices.contains(localIndex):
+        range = index.calls[localIndex].range
+    case .importBinding where index.imports.indices.contains(localIndex):
+        range = index.imports[localIndex].range
+    default:
+        range = nil
     }
     guard let range else {
         throw FixtureError("\(label): target range is unavailable")

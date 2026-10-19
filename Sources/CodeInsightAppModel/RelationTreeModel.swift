@@ -1837,11 +1837,8 @@ public final class RelationTreeModel {
     ) async throws -> LoadResult {
         switch direction {
         case .callers:
-            guard let name = symbolTitle(symbol, in: session) else {
-                return LoadResult(edges: [], isTruncated: false)
-            }
             let fuzzyTarget = location(for: symbol, in: session)
-            let callers = try session.callers(of: name, context: context)
+            let callers = try session.callers(of: symbol, context: context)
             return LoadResult(
                 edges: callers.compactMap { caller -> LoadedEdge? in
                     guard let location = location(for: caller.callSite, in: session)
@@ -1899,7 +1896,6 @@ public final class RelationTreeModel {
                 for candidate in outgoing.candidates {
                     guard let location = location(
                         for: candidate.target,
-                        evidence: candidate.evidence,
                         in: session
                     ) else { continue }
                     appendedCandidate = true
@@ -1907,7 +1903,7 @@ public final class RelationTreeModel {
                         title: outgoing.calleeName,
                         certainty: candidate.certainty,
                         dispatch: candidate.dispatch,
-                        symbol: hasLexicalBinding(candidate.evidence)
+                        symbol: candidate.target.localKind == .binding
                             ? nil : candidate.target,
                         path: location.path,
                         byteOffset: location.byteOffset,
@@ -2014,7 +2010,6 @@ public final class RelationTreeModel {
                 ).compactMap { candidate in
                     guard let location = location(
                         for: candidate.target,
-                        evidence: candidate.evidence,
                         in: session
                     ) else { return nil }
                     return LoadedEdge(
@@ -2156,35 +2151,33 @@ public final class RelationTreeModel {
 
     private nonisolated static func location(
         for symbol: SymbolOccurrenceID,
-        evidence: [ResolutionEvidence] = [],
         in session: EngineSession
     ) -> (path: String, byteOffset: UInt32, line: UInt32)? {
         guard symbol.snapshotID == session.snapshotID,
               let index = contentIndex(at: symbol.pathID, in: session)
         else { return nil }
         let offset: UInt32
-        if let bindingIndex = lexicalBindingIndex(evidence),
-           index.bindings.indices.contains(Int(bindingIndex))
-        {
-            offset = index.bindings[Int(bindingIndex)].declarationRange.lowerBound
-        } else {
-            switch symbol.localKind {
-            case .declarationFacet:
-                guard index.symbols.indices.contains(Int(symbol.localIndex)) else {
-                    return nil
-                }
-                offset = index.symbols[Int(symbol.localIndex)].nameRange.lowerBound
-            case .callSite:
-                guard index.calls.indices.contains(Int(symbol.localIndex)) else {
-                    return nil
-                }
-                offset = index.calls[Int(symbol.localIndex)].range.lowerBound
-            case .importBinding:
-                guard index.imports.indices.contains(Int(symbol.localIndex)) else {
-                    return nil
-                }
-                offset = index.imports[Int(symbol.localIndex)].range.lowerBound
+        switch symbol.localKind {
+        case .binding:
+            guard index.bindings.indices.contains(Int(symbol.localIndex)) else {
+                return nil
             }
+            offset = index.bindings[Int(symbol.localIndex)].declarationRange.lowerBound
+        case .declarationFacet:
+            guard index.symbols.indices.contains(Int(symbol.localIndex)) else {
+                return nil
+            }
+            offset = index.symbols[Int(symbol.localIndex)].nameRange.lowerBound
+        case .callSite:
+            guard index.calls.indices.contains(Int(symbol.localIndex)) else {
+                return nil
+            }
+            offset = index.calls[Int(symbol.localIndex)].range.lowerBound
+        case .importBinding:
+            guard index.imports.indices.contains(Int(symbol.localIndex)) else {
+                return nil
+            }
+            offset = index.imports[Int(symbol.localIndex)].range.lowerBound
         }
         guard let line = index.lineTable.lineColumn(at: offset)?.line else {
             return nil
@@ -2197,23 +2190,6 @@ public final class RelationTreeModel {
         in session: EngineSession
     ) -> ContentIndex? {
         session.content(at: pathID)?.1
-    }
-
-    private nonisolated static func lexicalBindingIndex(
-        _ evidence: [ResolutionEvidence]
-    ) -> UInt32? {
-        for item in evidence {
-            // Both bind into the target file's bindings.
-            if case let .lexicalBinding(bindingIndex) = item { return bindingIndex }
-            if case let .memberBinding(bindingIndex) = item { return bindingIndex }
-        }
-        return nil
-    }
-
-    private nonisolated static func hasLexicalBinding(
-        _ evidence: [ResolutionEvidence]
-    ) -> Bool {
-        lexicalBindingIndex(evidence) != nil
     }
 
     private nonisolated static func isTruncated(_ completeness: Completeness) -> Bool {

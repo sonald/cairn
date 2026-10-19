@@ -192,7 +192,25 @@ public final class EngineSession: Sendable {
         context: QueryContext
     ) throws -> [CallerResult] {
         try validate(context)
-        let nameID = names.intern(name)
+        return callers(nameID: names.intern(name), definition: nil, context: context)
+    }
+
+    public func callers(
+        of definition: SymbolOccurrenceID,
+        context: QueryContext
+    ) throws -> [CallerResult] {
+        try validate(context)
+        guard definition.snapshotID == snapshotID,
+              let facet = facet(for: definition)
+        else { return [] }
+        return callers(nameID: facet.nameID, definition: definition, context: context)
+    }
+
+    private func callers(
+        nameID: NameID,
+        definition: SymbolOccurrenceID?,
+        context: QueryContext
+    ) -> [CallerResult] {
         var callNameIDs: Set<NameID> = [nameID]
         callNameIDs.formUnion(aliasIndex[nameID] ?? [])
 
@@ -222,12 +240,21 @@ public final class EngineSession: Sendable {
                         offset: call.nameRange.lowerBound,
                         context: context
                     )
-                    let matched = candidates.first { candidate in
+                    let resolved = candidates.filter { candidate in
                         guard candidate.certainty >= .probable,
                               isDefinitionEvidence(candidate.evidence),
-                              let facet = facet(for: candidate.target)
+                              facet(for: candidate.target) != nil
                         else { return false }
-                        return facet.nameID == nameID
+                        return true
+                    }
+                    let matched: ResolutionCandidate?
+                    if let definition {
+                        matched = resolved.first { $0.target == definition }
+                        if matched == nil && resolved.contains(where: { $0.target != definition }) {
+                            continue
+                        }
+                    } else {
+                        matched = resolved.first { facet(for: $0.target)?.nameID == nameID }
                     }
                     let certainty = callerCertainty(
                         from: matched,
@@ -506,7 +533,7 @@ public final class EngineSession: Sendable {
         // being read).
         let typeRef: TypeRef?
         let typeFile: PathID
-        if let hit = firstHopBinding(firstHop, queried: file) {
+        if let hit = firstHopBinding(firstHop) {
             typeRef = hit.binding.typeRef
             typeFile = hit.file
         } else if firstHop.target.localKind == .declarationFacet,
@@ -558,31 +585,23 @@ public final class EngineSession: Sendable {
         }
     }
 
-    /// The binding a first hop names and the file holding it: a lexical
-    /// binding lives in the queried file, a class attribute (member
-    /// binding) in the target's file.
+    /// The binding a first hop names and the file holding it.
     private func firstHopBinding(
-        _ firstHop: ResolutionCandidate,
-        queried file: PathID
+        _ firstHop: ResolutionCandidate
     ) -> (binding: BindingRecord, file: PathID, isMember: Bool)? {
-        for evidence in firstHop.evidence {
-            switch evidence {
-            case let .lexicalBinding(bindingIndex):
-                guard let key = contentKeysByPath[file],
-                      let index = contentIndexes[key],
-                      index.bindings.indices.contains(Int(bindingIndex))
-                else { return nil }
-                return (index.bindings[Int(bindingIndex)], file, false)
-            case let .memberBinding(bindingIndex):
-                guard let index = content(at: firstHop.target.pathID)?.1,
-                      index.bindings.indices.contains(Int(bindingIndex))
-                else { return nil }
-                return (index.bindings[Int(bindingIndex)], firstHop.target.pathID, true)
-            default:
-                continue
-            }
+        guard firstHop.target.localKind == .binding,
+              let index = content(at: firstHop.target.pathID)?.1,
+              index.bindings.indices.contains(Int(firstHop.target.localIndex))
+        else { return nil }
+        let isMember = firstHop.evidence.contains {
+            if case .memberBinding = $0 { return true }
+            return false
         }
-        return nil
+        return (
+            index.bindings[Int(firstHop.target.localIndex)],
+            firstHop.target.pathID,
+            isMember
+        )
     }
 
     /// The first-hop candidate for a type hop: a lexical binding, a class
@@ -591,14 +610,7 @@ public final class EngineSession: Sendable {
         file: PathID,
         candidates: [ResolutionCandidate]
     ) throws -> ResolutionCandidate? {
-        candidates.first { candidate in
-            candidate.evidence.contains {
-                switch $0 {
-                case .lexicalBinding, .memberBinding: true
-                default: false
-                }
-            }
-        } ?? candidates.first { candidate in
+        candidates.first { $0.target.localKind == .binding } ?? candidates.first { candidate in
             guard candidate.target.localKind == .declarationFacet,
                   let index = content(at: candidate.target.pathID)?.1,
                   index.symbols.indices.contains(Int(candidate.target.localIndex))
@@ -622,7 +634,7 @@ public final class EngineSession: Sendable {
             file: file, candidates: candidates
         ) else { return nil }
 
-        if let hit = firstHopBinding(firstHop, queried: file) {
+        if let hit = firstHopBinding(firstHop) {
             let binding = hit.binding
             guard let bytes = sourceBytes(at: hit.file) else { return nil }
             let text = Self.bindingSpellingText(

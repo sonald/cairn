@@ -40,6 +40,7 @@ package func dependencyFileLanguageMode(
 public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String
+        public let sourceIdentity: String
         public let language: LanguageID
         public let analysisProfileID: AnalysisProfileID
         public let configFingerprint: String
@@ -50,6 +51,7 @@ public struct ExactOverlay: Sendable {
 
         public init(
             versionIdentity: String,
+            sourceIdentity: String = "",
             language: LanguageID,
             analysisProfileID: AnalysisProfileID,
             configFingerprint: String,
@@ -59,6 +61,7 @@ public struct ExactOverlay: Sendable {
             toolVersion: String
         ) {
             self.versionIdentity = versionIdentity
+            self.sourceIdentity = sourceIdentity
             self.language = language
             self.analysisProfileID = analysisProfileID
             self.configFingerprint = configFingerprint
@@ -151,6 +154,19 @@ public struct ExactOverlay: Sendable {
             file: file,
             byteOffset: byteOffset
         )] = entries
+    }
+
+    mutating func discardReplacedContents(for current: ReuseKey) {
+        func isReplaced(_ key: ReuseKey) -> Bool {
+            key.versionIdentity == current.versionIdentity
+                && key.sourceIdentity != current.sourceIdentity
+        }
+        for key in definitions.keys.filter(isReplaced) {
+            definitions.removeValue(forKey: key)
+        }
+        for key in typeDefinitions.keys.filter(isReplaced) {
+            typeDefinitions.removeValue(forKey: key)
+        }
     }
 }
 
@@ -810,12 +826,29 @@ public final class ExactCoordinator {
                         snapshot,
                         prefix: profilePrefix
                     ) ?? snapshot
+                    var worktreeSourceIdentity = ""
+                    if commit == nil {
+                        var sourceBytes: [UInt8] = []
+                        for file in snapshot.listFiles().sorted(by: { $0.path < $1.path }) {
+                            sourceBytes += file.path.utf8
+                            sourceBytes.append(0)
+                            sourceBytes.append(file.contentID.algorithm)
+                            sourceBytes += file.contentID.bytes
+                        }
+                        worktreeSourceIdentity = ContentID.sha256(of: sourceBytes)
+                            .bytes.map { String(format: "%02x", $0) }.joined()
+                    }
+                    let prepareIdentity = UUID().uuidString
                     func reuseKey(
                         versionIdentity: String,
-                        toolVersion: String
+                        toolVersion: String,
+                        borrowedFromWorkspace: Bool = false
                     ) -> ExactOverlay.ReuseKey {
                         ExactOverlay.ReuseKey(
                             versionIdentity: versionIdentity,
+                            sourceIdentity: commit == nil
+                                ? worktreeSourceIdentity
+                                : (borrowedFromWorkspace ? prepareIdentity : ""),
                             language: language,
                             analysisProfileID: analysisProfile.id,
                             configFingerprint: profile.configFingerprint,
@@ -924,7 +957,8 @@ public final class ExactCoordinator {
                                     session: warm.session,
                                     key: reuseKey(
                                         versionIdentity: versionIdentity,
-                                        toolVersion: warm.provider.toolVersion
+                                        toolVersion: warm.provider.toolVersion,
+                                        borrowedFromWorkspace: warm.dependencies.borrowedFromWorkspace
                                     ),
                                     dependencies: warm.dependencies
                                 )
@@ -960,7 +994,8 @@ public final class ExactCoordinator {
                         session: session,
                         key: reuseKey(
                             versionIdentity: versionIdentity,
-                            toolVersion: provider.toolVersion
+                            toolVersion: provider.toolVersion,
+                            borrowedFromWorkspace: dependencies().borrowedFromWorkspace
                         ),
                         dependencies: dependencies()
                     )
@@ -1007,6 +1042,7 @@ public final class ExactCoordinator {
     }
 
     private func activate(_ next: Active) {
+        overlay.discardReplacedContents(for: next.key)
         active = next
         slots[next.slot] = next
         standbySince[next.slot] = nil

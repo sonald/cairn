@@ -185,6 +185,12 @@ public final class SymbolHoverModel {
         phase = .idle
     }
 
+    func invalidate() {
+        dismiss()
+        cache.removeAll(keepingCapacity: true)
+        cacheOrder.removeAll(keepingCapacity: true)
+    }
+
     // MARK: - Timing
 
     @ObservationIgnored private var dwellTarget: Token?

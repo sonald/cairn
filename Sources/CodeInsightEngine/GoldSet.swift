@@ -333,29 +333,19 @@ private func targetPosition(
     guard let index = session.content(at: candidate.target.pathID)?.1 else {
         throw GoldSetError("target content is unavailable")
     }
-    var range: ByteRange?
-    for evidence in candidate.evidence {
-        switch evidence {
-        case let .lexicalBinding(bindingIndex), let .memberBinding(bindingIndex):
-            if index.bindings.indices.contains(Int(bindingIndex)) {
-                range = index.bindings[Int(bindingIndex)].declarationRange
-            }
-        default:
-            break
-        }
-    }
-    if range == nil {
-        let localIndex = Int(candidate.target.localIndex)
-        switch candidate.target.localKind {
-        case .declarationFacet where index.symbols.indices.contains(localIndex):
-            range = index.symbols[localIndex].nameRange
-        case .callSite where index.calls.indices.contains(localIndex):
-            range = index.calls[localIndex].range
-        case .importBinding where index.imports.indices.contains(localIndex):
-            range = index.imports[localIndex].range
-        default:
-            break
-        }
+    let localIndex = Int(candidate.target.localIndex)
+    let range: ByteRange?
+    switch candidate.target.localKind {
+    case .binding where index.bindings.indices.contains(localIndex):
+        range = index.bindings[localIndex].declarationRange
+    case .declarationFacet where index.symbols.indices.contains(localIndex):
+        range = index.symbols[localIndex].nameRange
+    case .callSite where index.calls.indices.contains(localIndex):
+        range = index.calls[localIndex].range
+    case .importBinding where index.imports.indices.contains(localIndex):
+        range = index.imports[localIndex].range
+    default:
+        range = nil
     }
     guard let range else { throw GoldSetError("target range is unavailable") }
     return try position(

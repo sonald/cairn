@@ -1787,18 +1787,10 @@ private func target(
     in session: EngineSession
 ) throws -> (index: ContentIndex, range: CodeInsightCore.ByteRange) {
     let index = try content(at: candidate.target.pathID, in: session)
-    for evidence in candidate.evidence {
-        switch evidence {
-        case let .lexicalBinding(bindingIndex), let .memberBinding(bindingIndex):
-            if index.bindings.indices.contains(Int(bindingIndex)) {
-                return (index, index.bindings[Int(bindingIndex)].declarationRange)
-            }
-        default:
-            break
-        }
-    }
     let localIndex = Int(candidate.target.localIndex)
     switch candidate.target.localKind {
+    case .binding where index.bindings.indices.contains(localIndex):
+        return (index, index.bindings[localIndex].declarationRange)
     case .declarationFacet where index.symbols.indices.contains(localIndex):
         return (index, index.symbols[localIndex].nameRange)
     case .callSite where index.calls.indices.contains(localIndex):

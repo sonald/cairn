@@ -1420,6 +1420,9 @@ public final class AppModel {
                 direction: activeRelation.1
             )
         }
+        lastInstalledRevision = currentRevision
+        lastInstalledProjectRoot = projectRoot
+        lastInstalledGeneration = profileGeneration
         prepareExact(generation: profileGeneration)
     }
 
@@ -1600,6 +1603,13 @@ public final class AppModel {
                     generation: generation
                 )
             ), root: root)
+            // Only a fully indexed state counts as installed, as at the
+            // other install sites; a restored first paint stays unsaved.
+            if restore.phase == .fullReady {
+                lastInstalledRevision = currentRevision
+                lastInstalledProjectRoot = root
+                lastInstalledGeneration = generation
+            }
             prepareExact(generation: generation)
         } else if restore.languages.isEmpty {
             publishProjectState(.browsing(root: root), root: root)
@@ -2937,6 +2947,7 @@ public final class AppModel {
                   generation: generation,
                   root: projectRoot)
         else { return }
+        symbolHover.invalidate()
         do {
             try exactCoordinator.prepare(
                 projectURL: projectRoot,
@@ -3027,6 +3038,7 @@ public final class AppModel {
             exactCoordinator.markUnavailable(ProjectState.browseOnlyReason)
         }
         if case .ready = state {
+            symbolHover.invalidate()
             let sessions = querySessionTuples()
             if sessions.isEmpty { projectSearch.updateProjectState(state) }
             else { projectSearch.updateWorkspaceSessions(sessions) }

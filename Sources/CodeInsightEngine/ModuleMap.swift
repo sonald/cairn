@@ -104,7 +104,8 @@ public struct ModuleMap: Sendable {
         for file in files {
             let path = Self.relativePath(paths.resolve(file.pathID), root: projectRoot)
             let fileName = path.split(separator: "/").last.map(String.init) ?? path
-            if fileName == "main.rs" || fileName == "lib.rs" || Self.isBinaryRoot(path) {
+            let isRoot = fileName == "main.rs" || fileName == "lib.rs" || Self.isBinaryRoot(path)
+            if isRoot {
                 roots.insert(file.pathID)
             }
             guard
@@ -125,7 +126,9 @@ public struct ModuleMap: Sendable {
                 guard declaration.hasSuffix(";") else { continue }
 
                 let name = names.resolve(facet.nameID)
-                let prefix = directory.isEmpty ? "" : "\(directory)/"
+                let prefix = isRoot || fileName == "mod.rs"
+                    ? (directory.isEmpty ? "" : "\(directory)/")
+                    : "\(path.dropLast(3))/"
                 let candidates = ["\(prefix)\(name).rs", "\(prefix)\(name)/mod.rs"]
                 guard let child = candidates.lazy.compactMap({ pathIDsByString[$0] }).first
                 else { continue }

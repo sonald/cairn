@@ -49,6 +49,7 @@ public enum ResolutionEvidence: Sendable {
 
 public enum LocalOccurrenceKind: Hashable, Sendable {
     case declarationFacet
+    case binding
     case callSite
     case importBinding
 }

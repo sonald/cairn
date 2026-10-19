@@ -100,6 +100,7 @@ struct Resolver {
         {
             return [candidate(
                 pathID: file,
+                localKind: .binding,
                 localIndex: localIndex,
                 certainty: .strong,
                 dispatch: .direct,
@@ -126,6 +127,7 @@ struct Resolver {
             }
             return [candidate(
                 pathID: file,
+                localKind: .binding,
                 localIndex: lexical.index,
                 certainty: capped(.strong, for: kind),
                 dispatch: dispatch,
@@ -568,6 +570,7 @@ struct Resolver {
                 guard let bindingIndex = UInt32(exactly: bindingIndex) else { continue }
                 result.append(candidate(
                     pathID: classCandidate.target.pathID,
+                    localKind: .binding,
                     localIndex: bindingIndex,
                     certainty: certainty,
                     dispatch: .direct,
