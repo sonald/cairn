@@ -4,7 +4,7 @@
 
 ## 构建与运行
 
-应用最低运行版本为 macOS 14；构建基线为 Xcode 27.0（27A266a）、随附 Swift 6.4（swiftlang-6.4.0.34.1）和 macOS SDK 27.0。构建机器需能运行该 Xcode。SwiftPM 默认使用 Homebrew libgit2：
+应用最低运行版本为 macOS 14；构建基线为 Xcode 27.1（27A9275）、随附 Swift 6.4（swiftlang-6.4.0.34.1）和 macOS SDK 27.0。构建机器需能运行该 Xcode。SwiftPM 默认使用 Homebrew libgit2：
 
 ```bash
 brew install libgit2
@@ -18,9 +18,9 @@ open .build/distribution/Cairn.app
 
 本地 Xcode 若安装在其他位置，调整 `DEVELOPER_DIR`，不必修改全局 `xcode-select`。`ci.sh` 的 Swift 测试、打包及产品门禁会先检查工具链；直接调用 `swift build/test` 时先手动执行上述检查。`Package.swift` 的 `swift-tools-version: 6.0` 是包工具最低要求，不会选择或安装 Swift 编译器。
 
-三个 Swift 工作流统一使用 `xcode-27` runner，并通过 `DEVELOPER_DIR` 显式选择 `/Applications/Xcode_27.0.app/Contents/Developer`；共享脚本校验 Xcode build、Swift 和 SDK，拒绝 PATH 中的其他 Swift。版本升级需同时修改工作流、检查脚本及本页，然后完成本地和远端验证。不要使用 `latest` 或依赖镜像默认值。
+三个 Swift 工作流统一使用 `xcode-27` runner，并通过 `DEVELOPER_DIR` 显式选择 `/Applications/Xcode_27.1.app/Contents/Developer`；共享脚本校验 Xcode build、Swift 和 SDK，拒绝 PATH 中的其他 Swift。版本升级需同时修改工作流、检查脚本及本页，然后完成本地和远端验证。不要使用 `latest` 或依赖镜像默认值。
 
-2026-10-04 核对的 [GitHub 镜像清单](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md) 包含 27A266a；`xcode-27` 仍标为 preview。镜像更新或移除该版本时，检查会明确失败，需重新选择共同支持的版本。固定构建工具不等于验证 macOS 14 兼容性；旧系统运行仍需独立验收。
+2026-10-18 核对的 [GitHub 镜像清单](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)（镜像 20261012.0260.1）包含 27A9275，安装在 `Xcode_27.1_Release_Candidate.app`，`Xcode_27.1.app` 是它的别名；镜像默认仍是 27.0，`xcode-27` 仍标为 preview。镜像更新或移除该版本时，检查会明确失败，需重新选择共同支持的版本。固定构建工具不等于验证 macOS 14 兼容性；旧系统运行仍需独立验收。
 
 应用自测二进制为 `.build/debug/codeinsight-app` 或 `.build/release/codeinsight-app`；验收产品交互时使用刚打包的 `Cairn.app`，确认没有误操作另一个旧版本实例。
 
@@ -55,7 +55,7 @@ swift build --product codeinsight
 | 点击错符号、类型直达不对 | 查原始字节位置、`Resolver.locatedName` 与 `EngineSession.typeHop`；明确点的是 receiver、field 还是 method name，核对绑定记录属于哪个文件。 |
 | UI 显示旧结果 | 核对 snapshot/profile/generation、当前 token、异步请求取消以及目标内容身份；不要只刷新标签掩盖旧结果发布。 |
 | Exact 不就绪/超时 | 核对实际 provider 可执行文件、版本、能力协商、项目配置、离线依赖、LSP 请求/响应和子进程退出。Safe 应明确受限，不静默切 Trusted。 |
-| 只在打包应用中 Exact 卡住 | 在相同 Safe 沙箱下观察进程，不用裸 CLI 成功排除沙箱差异。2026-10-03 曾采到 cargo 阻塞于符号链接的全局 Git 配置访问；本次未复现，也没有据此修改用户 Git 配置。 |
+| 只在打包应用中 Exact 卡住 | 在相同 Safe 沙箱下观察进程，不用裸 CLI 成功排除沙箱差异。2026-10-19 在 macOS 27.0 上，用 Xcode 27.1 构建的 ad-hoc 包确认过一种原因：全局 `~/.gitconfig` 经符号链接位于“文稿”目录，macOS 对每个新签名的包都要求“文稿”授权，弹窗未处理时 `cargo locate-project` 卡在读取 Git 配置的 `open()`，精确分析一直“准备中”。同一 bundle id 换用另一个构建会再次询问；该弹窗不出现在应用窗口截图里。用 `sample <cargo pid>` 确认停在 `git_config_open_default`，再处理授权；不要为此修改用户 Git 配置。 |
 | 字体/换行后错位 | 区分原始源位置、投影 UTF-16、实际视口几何；记录字体实际 PostScript 名、fallback、文件成本及选区。超高成本输入不保证精确垂直恢复。 |
 | 原生性能忽然失败 | 固定二进制、fixture 与测量边界，检查电源和后台负载，先用少量同条件对照。不能凭进程名结束用户应用，不能反复重跑只取最快值。 |
 | 会话恢复失败 | 核对项目规范路径、会话 schema、读写错误和项目卷可用性；保留原文件，不把失败当空会话写回。 |

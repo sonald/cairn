@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Shared local/CI baseline. Update together with the workflow Xcode selection.
-expected_xcode=$'Xcode 27.0\nBuild version 27A266a'
+expected_xcode=$'Xcode 27.1\nBuild version 27A9275'
 expected_swift='swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)'
 expected_sdk='27.0'
 
@@ -19,7 +19,7 @@ if [[ "$xcode_version" != "$expected_xcode" ||
       "${swift_version%%$'\n'*}" != "$expected_swift" ||
       "$swift_version" != "$xcode_swift_version" ||
       "$sdk_version" != "$expected_sdk" ]]; then
-    echo 'FAIL: Cairn requires Xcode 27.0 (27A266a), bundled Swift 6.4, macOS SDK 27.0.' >&2
+    echo 'FAIL: Cairn requires Xcode 27.1 (27A9275), bundled Swift 6.4, macOS SDK 27.0.' >&2
     echo 'Select that Xcode with DEVELOPER_DIR; remove PATH/TOOLCHAINS overrides for other Swift installations.' >&2
     echo 'See docs/development.md. Do not substitute a runner default or latest Xcode.' >&2
     exit 1

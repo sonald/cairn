@@ -22,7 +22,7 @@ Safe mode is the default: no network access, and Rust build scripts and proc mac
 
 ## Build and run
 
-The app supports macOS 14+. Builds use Xcode 27.0 (27A266a), its bundled Swift 6.4, and Homebrew libgit2. Local checks and CI verify this same toolchain; see [development setup](docs/development.md).
+The app supports macOS 14+. Builds use Xcode 27.1 (27A9275), its bundled Swift 6.4, and Homebrew libgit2. Local checks and CI verify this same toolchain; see [development setup](docs/development.md).
 
 ```bash
 brew install libgit2
