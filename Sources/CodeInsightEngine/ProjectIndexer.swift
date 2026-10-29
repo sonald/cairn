@@ -715,6 +715,7 @@ public struct ProjectIndexer: Sendable {
         referencedNames.formUnion(index.symbols.map(\.nameID))
         referencedNames.formUnion(index.implRelations.compactMap(\.traitNameID))
         referencedNames.formUnion(index.implRelations.map(\.typeNameID))
+        referencedNames.formUnion(index.supertypes.map(\.nameID))
         referencedNames.formUnion(index.calls.map(\.nameID))
         referencedNames.formUnion(index.imports.compactMap(\.importedName))
         referencedNames.formUnion(index.imports.compactMap(\.localName))
@@ -771,6 +772,13 @@ public struct ProjectIndexer: Sendable {
                     traitNameID: optionalName($0.traitNameID),
                     traitNameRange: $0.traitNameRange,
                     typeNameID: name($0.typeNameID)
+                )
+            },
+            supertypes: index.supertypes.map {
+                SupertypeRelation(
+                    facetIndex: $0.facetIndex,
+                    nameID: name($0.nameID),
+                    nameRange: $0.nameRange
                 )
             },
             calls: index.calls.map {

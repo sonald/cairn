@@ -788,6 +788,7 @@ public final class RelationTreeModel {
                             exactResult,
                             into: loaded,
                             direction: direction,
+                            root: { if case let .engine(symbol) = identity { symbol } else { nil } }(),
                             session: session,
                             contextID: relationContextID
                         )
@@ -1137,6 +1138,7 @@ public final class RelationTreeModel {
         _ result: ExactCoordinator.RelationQueryResult,
         into loaded: LoadResult,
         direction: Direction,
+        root: SymbolOccurrenceID?,
         session: EngineSession,
         contextID: RelationQueryContextID
     ) -> LoadResult {
@@ -1163,6 +1165,8 @@ public final class RelationTreeModel {
                     at: relation.location,
                     in: session
                 )
+                // tsserver lists a class among its own implementations.
+                if direction == .implementations, let root, symbol == root { return nil }
                 let verification = VerificationObservation(
                     target: ExactTarget(location: relation.location),
                     attribution: attribution,
@@ -1965,6 +1969,36 @@ public final class RelationTreeModel {
             guard let (index, facet) = facet(for: symbol, in: session) else {
                 return LoadResult(edges: [], isTruncated: false)
             }
+            func candidateEdges(_ candidates: [ResolutionCandidate]) -> [LoadedEdge] {
+                candidates.compactMap { candidate in
+                    guard let location = location(
+                        for: candidate.target,
+                        in: session
+                    ) else { return nil }
+                    return LoadedEdge(
+                        title: symbolTitle(candidate.target, in: session) ?? location.path,
+                        certainty: candidate.certainty,
+                        dispatch: candidate.dispatch,
+                        symbol: candidate.target,
+                        path: location.path,
+                        byteOffset: location.byteOffset,
+                        line: location.line,
+                        evidence: candidate.evidence,
+                        candidate: CandidateObservation(
+                            target: .occurrence(candidate.target),
+                            certainty: candidate.certainty,
+                            dispatch: candidate.dispatch,
+                            provenance: candidate.provenance,
+                            completeness: candidate.completeness,
+                            evidence: candidate.evidence
+                        )
+                    )
+                }
+            }
+            let subtypes = candidateEdges(try session.subtypes(of: symbol, context: context))
+            if facet.kind != .rustTrait, facet.kind != .rustMethod {
+                return LoadResult(edges: subtypes, isTruncated: false)
+            }
             if facet.kind == .rustTrait {
                 let results = try session.implementations(
                     ofTrait: session.names.resolve(facet.nameID),
@@ -1994,7 +2028,7 @@ public final class RelationTreeModel {
                                 evidence: implementation.traitDefinitions.flatMap(\.evidence)
                             )
                         )
-                    },
+                    } + subtypes,
                     isTruncated: false
                 )
             }
@@ -2004,33 +2038,10 @@ public final class RelationTreeModel {
                   index.symbols[Int(parent)].kind == .rustTrait
             else { return LoadResult(edges: [], isTruncated: false) }
             return LoadResult(
-                edges: try session.overrides(
+                edges: candidateEdges(try session.overrides(
                     ofTraitMethod: symbol,
                     context: context
-                ).compactMap { candidate in
-                    guard let location = location(
-                        for: candidate.target,
-                        in: session
-                    ) else { return nil }
-                    return LoadedEdge(
-                        title: symbolTitle(candidate.target, in: session) ?? location.path,
-                        certainty: candidate.certainty,
-                        dispatch: candidate.dispatch,
-                        symbol: candidate.target,
-                        path: location.path,
-                        byteOffset: location.byteOffset,
-                        line: location.line,
-                        evidence: candidate.evidence,
-                        candidate: CandidateObservation(
-                            target: .occurrence(candidate.target),
-                            certainty: candidate.certainty,
-                            dispatch: candidate.dispatch,
-                            provenance: candidate.provenance,
-                            completeness: candidate.completeness,
-                            evidence: candidate.evidence
-                        )
-                    )
-                },
+                )),
                 isTruncated: false
             )
         case .references:
@@ -2198,7 +2209,7 @@ public final class RelationTreeModel {
     }
 
     private static func containsTruncatedNode(_ node: Node) -> Bool {
-        node.kind == .truncated
+        (node.kind == .truncated && !node.isVerificationStatus)
             || node.children?.contains(where: containsTruncatedNode) == true
     }
 

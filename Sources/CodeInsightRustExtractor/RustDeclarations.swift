@@ -28,6 +28,7 @@ struct RustDeclarations {
     let names: Interner<NameID>
     private(set) var facets: [DeclarationFacet] = []
     private(set) var implRelations: [ImplRelation] = []
+    private(set) var supertypes: [SupertypeRelation] = []
     private var containers: [Container] = []
 
     init(bytes: [UInt8], names: Interner<NameID>) {
@@ -126,6 +127,23 @@ struct RustDeclarations {
             typeRef: fieldTypeRef,
             visibility: visibility(of: node, parent: parent, kind: kind, byteOffset: byteOffset)
         ))
+
+        // `trait Sub: Base + mod::Other<T>`; `?Sized`, lifetimes and
+        // `where Self: Base` bounds are not recorded.
+        if kind == .rustTrait,
+           let bounds = node.directNamedChild(where: { $0.kind == "trait_bounds" })
+        {
+            for bound in bounds.namedChildren where bound.kind != "removed_trait_bound" {
+                guard let base = typeName(in: bound),
+                      let baseName = base.text(in: bytes, byteOffset: byteOffset)
+                else { continue }
+                supertypes.append(SupertypeRelation(
+                    facetIndex: facetIndex,
+                    nameID: names.intern(baseName),
+                    nameRange: base.coreByteRange(byteOffset: byteOffset)
+                ))
+            }
+        }
 
         var implTypeNameID: NameID?
         var implTypeRange: CodeInsightCore.ByteRange?

@@ -63,7 +63,7 @@
 "app.menu.show.hide.outline" = "显示或隐藏大纲";
 "app.menu.show.hide.context" = "显示或隐藏上下文";
 "app.menu.restore.default.layout" = "恢复默认布局";
-"app.menu.show.implementations" = "显示实现";
+"app.menu.show.implementations" = "显示实现与子类型";
 "app.menu.show.reading.trail" = "显示阅读轨迹";
 "app.menu.show.resolution.inspector" = "显示解析检查器";
 "app.menu.structure" = "结构";
@@ -241,7 +241,7 @@
 "main.show.callers" = "显示调用者";
 "main.show.calls" = "显示调用";
 "main.show.definition.context" = "显示定义上下文";
-"main.show.implementations" = "显示实现";
+"main.show.implementations" = "显示实现与子类型";
 "main.show.or.hide.the.definition.context" = "显示或隐藏定义上下文";
 "main.show.references" = "显示引用";
 "main.signature" = "签名";
@@ -385,7 +385,7 @@
 "relation.corrected.show" = "显示已修正候选项";
 "relation.empty.callers" = "未找到调用方。分析索引没有此符号的条目，或此符号不支持这种关系。";
 "relation.empty.calls" = "未找到调用。分析索引没有此符号的条目，或此符号不支持这种关系。";
-"relation.empty.implementations" = "未找到实现。分析索引没有此符号的条目，或此符号不支持这种关系。";
+"relation.empty.implementations" = "未找到实现或子类型。分析索引没有此符号的条目，或此符号不支持这种关系。";
 "relation.empty.references" = "未找到引用。分析索引没有此符号的条目，或此符号不支持这种关系。";
 "relation.former.open" = "打开原候选项";
 "relation.freeze" = "冻结结果";
@@ -850,7 +850,7 @@
 "panel.symbols.menu.callers" = "查看调用者";
 "panel.symbols.menu.callees" = "查看被调用者";
 "panel.symbols.menu.references" = "查看引用";
-"panel.symbols.menu.implementations" = "查看实现";
+"panel.symbols.menu.implementations" = "查看实现与子类型";
 "panel.symbols.menu.reveal" = "在文件树中显示";
 "panel.symbols.menu.copyName" = "复制限定名";
 "panel.symbols.mergedByName" = "按名称合并";

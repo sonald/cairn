@@ -243,6 +243,21 @@ public struct ImplRelation: Codable, Sendable {
     }
 }
 
+/// A base a declaration names: a Python class base, a TypeScript
+/// `extends`/`implements` type, or a Rust supertrait. Only the last
+/// identifier is kept (`mod.Base[T]` records `Base`).
+public struct SupertypeRelation: Codable, Sendable {
+    public let facetIndex: UInt32
+    public let nameID: NameID
+    public let nameRange: ByteRange
+
+    public init(facetIndex: UInt32, nameID: NameID, nameRange: ByteRange) {
+        self.facetIndex = facetIndex
+        self.nameID = nameID
+        self.nameRange = nameRange
+    }
+}
+
 public enum ContentRegionKind: UInt8, Codable, Sendable {
     case comment
     case string
@@ -288,6 +303,7 @@ public struct ContentIndex: Codable, Sendable {
     public let executableRegions: [ExecutableRegionRecord]
     public let symbols: [DeclarationFacet]
     public let implRelations: [ImplRelation]
+    public let supertypes: [SupertypeRelation]
     public let calls: [UnresolvedCall]
     public let imports: [ImportBinding]
     public let exports: [ExportRecord]
@@ -301,6 +317,7 @@ public struct ContentIndex: Codable, Sendable {
         executableRegions: [ExecutableRegionRecord],
         symbols: [DeclarationFacet],
         implRelations: [ImplRelation] = [],
+        supertypes: [SupertypeRelation] = [],
         calls: [UnresolvedCall],
         imports: [ImportBinding],
         exports: [ExportRecord],
@@ -313,6 +330,7 @@ public struct ContentIndex: Codable, Sendable {
         self.executableRegions = executableRegions
         self.symbols = symbols
         self.implRelations = implRelations
+        self.supertypes = supertypes
         self.calls = calls
         self.imports = imports
         self.exports = exports

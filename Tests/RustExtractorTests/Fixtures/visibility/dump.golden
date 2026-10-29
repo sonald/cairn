@@ -55,6 +55,8 @@ facets:
 implRelations:
   - impl=#4 trait=- traitAt=- type=Log
   - impl=#11 trait=Engine traitAt=18:6..18:12 bytes=272..<278 type=Log
+supertypes:
+  (none)
 calls:
   (none)
 imports:

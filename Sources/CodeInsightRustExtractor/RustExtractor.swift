@@ -71,6 +71,7 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             executableRegions: scopes.executableRegions,
             symbols: declarations.facets,
             implRelations: declarations.implRelations,
+            supertypes: declarations.supertypes,
             calls: calls.calls,
             imports: imports.imports,
             exports: imports.exports,

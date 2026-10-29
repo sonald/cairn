@@ -18,11 +18,17 @@ private final class SymbolSearchCache: @unchecked Sendable {
 private struct ImplIndex: Sendable {
     let byTraitName: [NameID: [(ContentIndexKey, UInt32)]]
     let byTypeName: [NameID: [(ContentIndexKey, UInt32)]]
+    /// Supertype relations by the base name they spell.
+    let byBaseName: [NameID: [(ContentIndexKey, SupertypeRelation)]]
 
     init(indexes: [ContentIndexKey: ContentIndex]) {
         var byTraitName: [NameID: [(ContentIndexKey, UInt32)]] = [:]
         var byTypeName: [NameID: [(ContentIndexKey, UInt32)]] = [:]
+        var byBaseName: [NameID: [(ContentIndexKey, SupertypeRelation)]] = [:]
         for (key, index) in indexes {
+            for relation in index.supertypes {
+                byBaseName[relation.nameID, default: []].append((key, relation))
+            }
             for relation in index.implRelations {
                 if let traitNameID = relation.traitNameID {
                     byTraitName[traitNameID, default: []].append((
@@ -38,6 +44,7 @@ private struct ImplIndex: Sendable {
         }
         self.byTraitName = byTraitName
         self.byTypeName = byTypeName
+        self.byBaseName = byBaseName
     }
 }
 
@@ -376,6 +383,87 @@ public final class EngineSession: Sendable {
             let rhs = paths.resolve($1.implementation.pathID)
             if lhs != rhs { return lhs < rhs }
             return $0.implementation.localIndex < $1.implementation.localIndex
+        }
+    }
+
+    /// Declarations that name `declaration` as a direct base: Python and
+    /// TypeScript classes and interfaces, Rust supertraits. A base in the
+    /// declaration's own file is strong, one whose file defines its own
+    /// declaration of that name is dropped; elsewhere the resolver decides,
+    /// and a base it resolves to another declaration is dropped. A base spelled
+    /// through an import alias is not found (ponytail: name lookup only,
+    /// follow alias imports if this misses real code).
+    public func subtypes(
+        of declaration: SymbolOccurrenceID,
+        context: QueryContext
+    ) throws -> [ResolutionCandidate] {
+        try validate(context)
+        let kinds: Set<DeclarationKind> = [.pythonClass, .typescriptClass, .typescriptInterface, .rustTrait]
+        guard declaration.snapshotID == snapshotID,
+              let base = facet(for: declaration),
+              kinds.contains(base.kind)
+        else { return [] }
+        let resolver = Resolver(session: self)
+        var seen: Set<SymbolOccurrenceID> = []
+        var results: [ResolutionCandidate] = []
+        for (key, relation) in implIndex.byBaseName[base.nameID] ?? [] {
+            let definesBase = contentIndexes[key]?.symbols.contains {
+                $0.parentFacetIndex == nil && $0.nameID == base.nameID && kinds.contains($0.kind)
+            } ?? false
+            for file in occurrences(of: key) {
+                let target = SymbolOccurrenceID(
+                    snapshotID: snapshotID,
+                    pathID: file.pathID,
+                    localKind: .declarationFacet,
+                    localIndex: relation.facetIndex
+                )
+                guard target != declaration else { continue }
+                let certainty: Certainty
+                let evidence: [ResolutionEvidence]
+                if file.pathID == declaration.pathID {
+                    certainty = .strong
+                    evidence = [.sameFile(pathID: file.pathID)]
+                } else if definesBase {
+                    continue
+                } else {
+                    var resolved = resolver.resolve(
+                        file: file.pathID,
+                        offset: relation.nameRange.lowerBound,
+                        context: context
+                    )
+                    if resolved.contains(where: {
+                        $0.target.localKind == .binding
+                            && contentIndexes[key]?.bindings[Int($0.target.localIndex)].kind == .importBinding
+                    }) {
+                        resolved = resolver.importTargets(named: relation.nameID, in: file.pathID, context: context)
+                    }
+                    resolved = resolved.filter { $0.certainty != .unresolved }
+                    if let match = resolved.first(where: { $0.target == declaration }) {
+                        certainty = match.certainty
+                        evidence = match.evidence
+                    } else if resolved.isEmpty {
+                        certainty = .possible
+                        evidence = [.nameOnly(nameID: base.nameID)]
+                    } else {
+                        continue
+                    }
+                }
+                guard seen.insert(target).inserted else { continue }
+                results.append(ResolutionCandidate(
+                    target: target,
+                    certainty: certainty,
+                    dispatch: .traitDispatch,
+                    provenance: .fuzzyResolver,
+                    completeness: .complete,
+                    evidence: evidence
+                ))
+            }
+        }
+        return results.sorted {
+            let lhs = paths.resolve($0.target.pathID)
+            let rhs = paths.resolve($1.target.pathID)
+            if lhs != rhs { return lhs < rhs }
+            return $0.target.localIndex < $1.target.localIndex
         }
     }
 

@@ -180,6 +180,7 @@ private func buildIndex(
     var regions: [ExecutableRegionRecord] = []
     var regionStack: [ExecutableRegionID] = []
     var symbols: [DeclarationFacet] = []
+    var supertypes: [SupertypeRelation] = []
     var calls: [UnresolvedCall] = []
     var imports: [ImportBinding] = []
     var functionScopes: [ScopeID] = []
@@ -411,6 +412,19 @@ private func buildIndex(
             bodyFingerprint: fingerprint(bodyRange, bytes: bytes),
             visibility: visibility(of: nameString, parent: facetStack.last)
         ))
+        // `class A(Base, mod.Mixin, Generic[T], metaclass=M)`: keyword
+        // arguments, splats and calls name no base.
+        for base in childField(node, "superclasses")?.namedChildren ?? [] {
+            var base = base
+            if base.kind == "subscript", let value = childField(base, "value") { base = value }
+            if base.kind == "attribute", let attribute = childField(base, "attribute") { base = attribute }
+            guard base.kind == "identifier", let baseName = text(base, in: bytes) else { continue }
+            supertypes.append(SupertypeRelation(
+                facetIndex: facetIndex,
+                nameID: names.intern(baseName),
+                nameRange: coreRange(base)
+            ))
+        }
         facetStack.append(facetIndex)
         let scopeID = pushScope(body, kind: .class, parent: currentScope())
         pushRegion(body, kind: .classBody, scopeID: scopeID, facetIndex: facetIndex)
@@ -729,6 +743,7 @@ private func buildIndex(
         bindings: bindings,
         executableRegions: regions,
         symbols: symbols,
+        supertypes: supertypes,
         calls: calls,
         imports: imports,
         exports: [],

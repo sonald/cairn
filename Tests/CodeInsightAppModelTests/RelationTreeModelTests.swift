@@ -1274,6 +1274,7 @@ func relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() async throws {
     let references = try relationPossibleRows(in: model.root)
     #expect(try relationVerifiedStatus(in: model.root)
         == "Verified unavailable: server does not support references")
+    #expect(!model.hasTruncatedResults)
     #expect(references.count == 1)
     #expect(references.first?.target?.path == "main.rs")
     #expect(exactSession.referenceIncludeDeclarations.isEmpty)

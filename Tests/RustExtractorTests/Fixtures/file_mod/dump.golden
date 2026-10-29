@@ -14,6 +14,8 @@ facets:
   - #2 kind=rustFn space=value name=main parent=- nameAt=5:4..5:8 bytes=56..<60 range=5:1..8:2 bytes=53..<85 visibility=private
 implRelations:
   (none)
+supertypes:
+  (none)
 calls:
   - #0 kind=directCall name=connect region=#0 range=6:1..6:10 bytes=65..<74
   - #1 kind=directCall name=load region=#0 range=7:1..7:7 bytes=76..<82

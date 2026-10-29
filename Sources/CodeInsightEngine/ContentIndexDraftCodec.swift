@@ -19,7 +19,7 @@ import Foundation
 /// and trailing bytes are rejected. Any failure throws `invalidPayload`,
 /// and the caller drops the row and extracts again.
 package enum ContentIndexDraftCodec {
-    private static let formatVersion: UInt8 = 6
+    private static let formatVersion: UInt8 = 7
     private static let header: [UInt8] = [0x43, 0x49, 0x44, 0x42, formatVersion]
     private static let digestCount = SHA256.byteCount
 
@@ -70,6 +70,10 @@ package enum ContentIndexDraftCodec {
         for r in index.implRelations {
             w.uint(r.implFacetIndex); w.opt(r.traitNameID?.rawValue)
             w.optRange(r.traitNameRange); w.uint(r.typeNameID.rawValue)
+        }
+        w.count(index.supertypes.count)
+        for r in index.supertypes {
+            w.uint(r.facetIndex); w.uint(r.nameID.rawValue); w.range(r.nameRange)
         }
         w.count(index.calls.count)
         for c in index.calls {
@@ -183,6 +187,13 @@ package enum ContentIndexDraftCodec {
                     typeNameID: NameID(rawValue: try $0.uint())
                 )
             }
+            let supertypes = try r.array {
+                SupertypeRelation(
+                    facetIndex: try $0.uint(),
+                    nameID: NameID(rawValue: try $0.uint()),
+                    nameRange: try $0.range()
+                )
+            }
             let calls = try r.array { r in
                 UnresolvedCall(
                     regionID: ExecutableRegionID(rawValue: try r.uint()),
@@ -227,6 +238,7 @@ package enum ContentIndexDraftCodec {
                 executableRegions: executableRegions,
                 symbols: symbols,
                 implRelations: implRelations,
+                supertypes: supertypes,
                 calls: calls,
                 imports: imports,
                 exports: exports,
@@ -311,6 +323,10 @@ package enum ContentIndexDraftCodec {
                 && $0.traitNameID.map { valid($0, count: nameCount) } != false
                 && $0.traitNameRange.map { valid($0, byteCount: byteCount) } != false
                 && valid($0.typeNameID, count: nameCount)
+        }), index.supertypes.allSatisfy({
+            valid($0.facetIndex, count: index.symbols.count)
+                && valid($0.nameID, count: nameCount)
+                && valid($0.nameRange, byteCount: byteCount)
         }), index.calls.allSatisfy({
             regions.contains($0.regionID)
                 && valid($0.nameID, count: nameCount)

@@ -63,7 +63,7 @@
 "app.menu.show.hide.outline" = "Show/Hide Outline";
 "app.menu.show.hide.context" = "Show/Hide Context";
 "app.menu.restore.default.layout" = "Restore Default Layout";
-"app.menu.show.implementations" = "Show Implementations";
+"app.menu.show.implementations" = "Show Implementations & Subtypes";
 "app.menu.show.reading.trail" = "Show Reading Trail";
 "app.menu.show.resolution.inspector" = "Show Resolution Inspector";
 "app.menu.structure" = "Structure";
@@ -241,7 +241,7 @@
 "main.show.callers" = "Show Callers";
 "main.show.calls" = "Show Calls";
 "main.show.definition.context" = "Show definition context";
-"main.show.implementations" = "Show Implementations";
+"main.show.implementations" = "Show Implementations & Subtypes";
 "main.show.or.hide.the.definition.context" = "Show or hide the definition context";
 "main.show.references" = "Show References";
 "main.signature" = "Signature";
@@ -385,7 +385,7 @@
 "relation.corrected.show" = "Show corrected candidates";
 "relation.empty.callers" = "No callers found. The analysis index has no entries for this symbol, or this relation isn't supported for it.";
 "relation.empty.calls" = "No calls found. The analysis index has no entries for this symbol, or this relation isn't supported for it.";
-"relation.empty.implementations" = "No implementations found. The analysis index has no entries for this symbol, or this relation isn't supported for it.";
+"relation.empty.implementations" = "No implementations or subtypes found. The analysis index has no entries for this symbol, or this relation isn't supported for it.";
 "relation.empty.references" = "No references found. The analysis index has no entries for this symbol, or this relation isn't supported for it.";
 "relation.former.open" = "Open former candidate";
 "relation.freeze" = "Freeze Results";
@@ -850,7 +850,7 @@
 "panel.symbols.menu.callers" = "Show Callers";
 "panel.symbols.menu.callees" = "Show Callees";
 "panel.symbols.menu.references" = "Show References";
-"panel.symbols.menu.implementations" = "Show Implementations";
+"panel.symbols.menu.implementations" = "Show Implementations & Subtypes";
 "panel.symbols.menu.reveal" = "Reveal in File Tree";
 "panel.symbols.menu.copyName" = "Copy Qualified Name";
 "panel.symbols.mergedByName" = "merged by name";

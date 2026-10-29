@@ -9,7 +9,7 @@ final class IndexCache: @unchecked Sendable {
     }
 
     static let defaultQuotaBytes = 512 * 1024 * 1024
-    private static let schemaVersion: UInt32 = 3
+    private static let schemaVersion: UInt32 = 4
 
     let metadata: Metadata
     private let fileURL: URL

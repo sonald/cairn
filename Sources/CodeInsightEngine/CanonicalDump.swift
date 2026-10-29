@@ -91,6 +91,12 @@ public enum CanonicalDump {
         }
         appendNoneIfNeeded(to: &lines, count: index.implRelations.count)
 
+        lines.append("supertypes:")
+        for relation in index.supertypes {
+            lines.append("  - of=#\(relation.facetIndex) base=\(names.resolve(relation.nameID)) at=\(format(relation.nameRange, table: index.lineTable))")
+        }
+        appendNoneIfNeeded(to: &lines, count: index.supertypes.count)
+
         lines.append("calls:")
         for (callIndex, call) in index.calls.enumerated().sorted(by: {
             ordered($0.element.range, $0.offset, $1.element.range, $1.offset)

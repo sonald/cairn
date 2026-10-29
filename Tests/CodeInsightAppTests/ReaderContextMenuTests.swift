@@ -24,7 +24,7 @@ func readerContextMenuRoutesEveryRelationFromTheClickedByteOffset() throws {
     for (title, direction) in [
         ("Show Callers", RelationTreeModel.Direction.callers),
         ("Show Calls", .calls),
-        ("Show Implementations", .implementations),
+        ("Show Implementations & Subtypes", .implementations),
         ("Show References", .references),
     ] {
         received = nil

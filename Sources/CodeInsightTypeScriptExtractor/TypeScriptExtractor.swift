@@ -200,6 +200,7 @@ private func buildIndex(
     var regions: [ExecutableRegionRecord] = []
     var regionStack: [ExecutableRegionID] = []
     var symbols: [DeclarationFacet] = []
+    var supertypes: [SupertypeRelation] = []
     var calls: [UnresolvedCall] = []
     var imports: [ImportBinding] = []
     var exports: [ExportRecord] = []
@@ -510,6 +511,37 @@ let tsPrimitiveNames: Set<String> = [
             ),
             bodyFingerprint: body.flatMap { fingerprint(coreRange($0), bytes: bytes) }
         ))
+        if kind == .typescriptInterface { recordSupertypes(of: node, facetIndex: index) }
+    }
+
+    /// `extends`/`implements` names of a class or interface; `ns.Base<T>`
+    /// records `Base`, computed bases such as `mixin(Base)` record nothing.
+    func recordSupertypes(of node: Node, facetIndex: UInt32) {
+        func baseName(_ node: Node) -> Node? {
+            switch node.kind {
+            case "identifier", "type_identifier": node
+            case "member_expression": childField(node, "property")
+            case "nested_type_identifier", "generic_type": childField(node, "name").flatMap(baseName)
+            default: nil
+            }
+        }
+        for child in node.namedChildren {
+            switch child.kind {
+            case "class_heritage":
+                recordSupertypes(of: child, facetIndex: facetIndex)
+            case "extends_clause", "implements_clause", "extends_type_clause":
+                for base in child.namedChildren.compactMap(baseName) {
+                    guard let name = text(base, in: bytes) else { continue }
+                    supertypes.append(SupertypeRelation(
+                        facetIndex: facetIndex,
+                        nameID: names.intern(name),
+                        nameRange: coreRange(base)
+                    ))
+                }
+            default:
+                break
+            }
+        }
     }
 
     func exitFunctionBody() {
@@ -543,6 +575,7 @@ let tsPrimitiveNames: Set<String> = [
                 signatureFingerprint: fingerprint(declarationRange(node, body: body), bytes: bytes),
                 bodyFingerprint: fingerprint(coreRange(body), bytes: bytes)
             ))
+            recordSupertypes(of: node, facetIndex: index)
             facetStack.append(index)
         }
         let scopeID = pushScope(body, kind: .class, parent: currentScope())
@@ -1001,6 +1034,7 @@ let tsPrimitiveNames: Set<String> = [
         bindings: bindings,
         executableRegions: regions,
         symbols: symbols,
+        supertypes: supertypes,
         calls: calls,
         imports: imports,
         exports: exports,

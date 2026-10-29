@@ -383,6 +383,20 @@ struct Resolver {
         return (range, nameID, nil, nil, !hasLocalBinding)
     }
 
+    /// What the imports binding `nameID` in `file` bring in, for a name the
+    /// lexical walk stops at (a TypeScript import is also a binding).
+    func importTargets(
+        named nameID: NameID,
+        in file: PathID,
+        context: QueryContext
+    ) -> [ResolutionCandidate] {
+        guard let (_, index) = session.content(at: file) else { return [] }
+        return index.imports.enumerated().flatMap { offset, binding -> [ResolutionCandidate] in
+            guard binding.localName == nameID, let importIndex = UInt32(exactly: offset) else { return [] }
+            return importCandidates(index: importIndex, binding: binding, from: file, kind: nil, context: context)
+        }
+    }
+
     private func importCandidates(
         index importIndex: UInt32,
         binding: ImportBinding,

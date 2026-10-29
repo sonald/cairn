@@ -1257,9 +1257,9 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
     ).index(root: fixture.root)
 
     #expect(first.stats.extractedCount == 2)
-    // Draft format 6 is the binary row.
+    // Draft format 7 is the binary row.
     #expect(cache.payload(for: cacheKey(for: storedKey))?
-        .starts(with: Data([0x43, 0x49, 0x44, 0x42, 0x06])) == true)
+        .starts(with: Data([0x43, 0x49, 0x44, 0x42, 0x07])) == true)
     #expect(reloaded.stats.extractedCount == 0)
     #expect(reloaded.stats.reusedCount == 2)
     try expectEquivalentContent(direct, reloaded)
@@ -1379,7 +1379,7 @@ func schemaMismatchRebuildsTheWholeDatabase() throws {
 
     let bumped = try IndexCache(fileURL: cacheURL)
     #expect(bumped.payload(for: "old") == nil)
-    #expect(bumped.metadata == IndexCache.Metadata(schemaVersion: 3))
+    #expect(bumped.metadata == IndexCache.Metadata(schemaVersion: 4))
 }
 
 @Test
@@ -1403,14 +1403,14 @@ func schemaTwoDatabaseIsClearedOnOpenAndRebuiltFromExtraction() throws {
     #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [2], contentCount: contentCount))
 
     let cache = try IndexCache(fileURL: cacheURL)
-    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [3], contentCount: 0))
+    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [4], contentCount: 0))
     let indexer = ProjectIndexer(parallelism: 1, cache: cache)
     let rebuilt = try indexer.indexSnapshot(snapshot, into: ProjectIndexStore())
     indexer.flushPersistentWrites()
     #expect(rebuilt.stats.reusedCount == 0)
     #expect(rebuilt.stats.extractedCount == contentCount)
     try expectEquivalentContent(direct, rebuilt)
-    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [3], contentCount: contentCount))
+    #expect(try cacheDatabaseRows(cacheURL) == CacheDatabaseRows(schemaVersions: [4], contentCount: contentCount))
 }
 
 @Test

@@ -590,6 +590,9 @@ private func generatedDraft(_ random: inout SplitMix64, empty: Bool = false) -> 
             traitNameRange: optRange(), typeNameID: name()
         )
     }
+    let supertypes = symbolCount == 0 ? [] : (0..<count(3)).map { _ in
+        SupertypeRelation(facetIndex: UInt32(int(0...(symbolCount - 1))), nameID: name(), nameRange: range())
+    }
     let calls: [UnresolvedCall] = regionIDs.isEmpty || nameCount == 0 ? [] : (0..<count(6)).map { _ in
         let outer = range()
         let lower = UInt32.random(in: outer.lowerBound...outer.upperBound, using: &random)
@@ -629,7 +632,7 @@ private func generatedDraft(_ random: inout SplitMix64, empty: Bool = false) -> 
         bytes: bytes,
         index: ContentIndex(
             key: key, scopes: scopes, bindings: bindings, executableRegions: executableRegions,
-            symbols: symbols, implRelations: implRelations, calls: calls, imports: imports,
+            symbols: symbols, implRelations: implRelations, supertypes: supertypes, calls: calls, imports: imports,
             exports: exports, lineTable: LineTable(bytes: bytes), regions: regions
         ),
         names: names,
