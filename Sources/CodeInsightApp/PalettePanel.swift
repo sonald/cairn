@@ -62,6 +62,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             case .trait: "tr"
             case .impl: "im"
             case .module: "md"
+            case .macro: "ma"
             case .value: "va"
             }
             family = shape.family

@@ -24,10 +24,12 @@ nostrong crates/core/main.rs:112:10
 def5 crates/core/main.rs:114:26 -> crates/core/flags/hiargs.rs:752:19
 # The &HiArgs parameter annotation proves the receiver type.
 strong crates/core/main.rs:114:26
-# eprintln_locked is defined by macro_rules and macro expansion is outside M0.
-unresolved crates/core/main.rs:62:13
-# err_message is defined by macro_rules and macro expansion is outside M0.
-unresolved crates/core/main.rs:131:17
+# eprintln_locked is a macro_rules! found by name; expansion is outside M0.
+def crates/core/main.rs:62:13 -> crates/core/messages.rs:33:14
+nostrong crates/core/main.rs:62:13
+# err_message is a macro_rules! found by name; expansion is outside M0.
+def crates/core/main.rs:131:17 -> crates/core/messages.rs:82:14
+nostrong crates/core/main.rs:131:17
 # The searched use is dominated by let mut searched at line 117.
 bind crates/core/main.rs:143:37 -> crates/core/main.rs:117:13
 # The returned matched value is dominated by let mut matched at line 116.

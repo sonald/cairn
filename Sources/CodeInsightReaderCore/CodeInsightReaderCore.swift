@@ -109,6 +109,8 @@ public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
     case `class`
     case field
     case enumMember
+    case macro
+    case variable
 
     public var shape: DeclarationShape {
         switch self {
@@ -120,7 +122,8 @@ public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
         case .trait: .trait
         case .impl: .impl
         case .mod: .module
-        case .const, .static, .field, .enumMember: .value
+        case .macro: .macro
+        case .const, .static, .field, .enumMember, .variable: .value
         }
     }
 
@@ -141,6 +144,9 @@ public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
         case .rustTypeAlias, .typescriptTypeAlias: .typeAlias
         case .rustField: .field
         case .pythonClass, .typescriptClass: .class
+        case .rustEnumVariant: .enumMember
+        case .rustMacro: .macro
+        case .pythonVariable: .variable
         }
     }
 }
@@ -693,8 +699,10 @@ public struct RustHighlighter: Sendable {
             .functionName
         case .struct, .enum, .trait, .typeAlias, .class:
             .declarationTitle
-        case .mod, .const, .static:
+        case .mod, .const, .static, .variable:
             .declarationEmphasis
+        case .macro:
+            .macro
         case .impl:
             nil
         case .field:

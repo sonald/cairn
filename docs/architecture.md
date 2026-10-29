@@ -39,6 +39,8 @@
 
 提取事实区分 declaration facet、scope、binding、调用位置及执行区域。函数之外的类体/模块体也可能有调用；相同名字不证明是同一目标。当前解析策略与范围以 [Resolver](../Sources/CodeInsightEngine/Resolver.swift) 和语言抽取器为准，不复制早期编译器级 resolver 路线图。
 
+Rust 枚举变体、`macro_rules!` 和 Python 模块级变量也是 declaration facet，但全局按名称兜底只在各自的语法位置收它们：宏只回答宏调用（不展开）；变体只回答限定名恰为所属枚举（或 `Self`）的 `Enum::Variant`，此时只给变体，所以标准库 `Some` 不会落到项目里同名的变体；Python 模块变量只经同文件作用域或 import 到达，不从别的文件按名字兜底。
+
 解析候选的确定性、分派方式、来源、完整性独立。正向 provider 结果、不可用环境、未开始/进行中/空结果也是不同事实；取消和 stale 是控制流，不作为语义观察。
 
 必须保留这些边界：

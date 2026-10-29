@@ -1057,6 +1057,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         case .typeAlias: localized("main.scope.kind.typeAlias")
         case .field: localized("main.scope.kind.field")
         case .enumMember: localized("main.scope.kind.enumMember")
+        case .macro: localized("main.scope.kind.macro")
+        case .variable: localized("main.scope.kind.variable")
         }
     }
 

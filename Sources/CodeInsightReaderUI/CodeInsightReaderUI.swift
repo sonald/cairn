@@ -4091,7 +4091,7 @@ public final class ReaderTextView {
             path.line(to: NSPoint(x: rect.minX, y: rect.midY))
             path.close()
             path.fill()
-        case .mod, .const, .static, .field, .enumMember:
+        case .mod, .const, .static, .field, .enumMember, .macro, .variable:
             NSRect(x: rect.minX, y: rect.midY - 0.5, width: rect.width, height: 1)
                 .fill()
         case .struct, .enum, .trait, .typeAlias, .class:
@@ -4108,8 +4108,10 @@ public final class ReaderTextView {
             color = theme.color(for: .declarationTitle)
         case .impl:
             color = theme.color(for: .typeName)
-        case .mod, .const, .static:
+        case .mod, .const, .static, .variable:
             color = theme.color(for: .declarationEmphasis)
+        case .macro:
+            color = theme.color(for: .macro)
         case .field:
             color = theme.color(for: .property)
         case .enumMember:

@@ -1180,7 +1180,7 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
 
         @OptionGroup var options: ProjectOptions
 
-        @Option(name: .long, help: "Comma-separated shapes: function, struct, enum, class, typeAlias, trait, impl, module, value.")
+        @Option(name: .long, help: "Comma-separated shapes: function, struct, enum, class, typeAlias, trait, impl, module, macro, value.")
         var kind: String?
 
         @Flag(name: .long, help: "Only declarations written as public (pub, export, no leading _).")

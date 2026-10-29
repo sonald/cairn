@@ -1566,6 +1566,36 @@ func pythonResolverScoresClassConstructorsStrongAndMethodsPossible() throws {
 }
 
 @Test
+func pythonModuleVariableResolvesThroughImportButNotByNameFromAnotherFile() throws {
+    try withProjectRoot([
+        "a.py": "LIMIT = 1\nLIMIT = 2\n",
+        "b.py": "from a import LIMIT\nprint(LIMIT)\n",
+        "c.py": "print(LIMIT)\n",
+    ]) { root in
+        let session = try ProjectIndexer().index(root: root, language: .python)
+        let context = queryContext(for: session)
+        let a = try #require(pathID("a.py", in: session))
+        let imported = try session.resolve(
+            file: try #require(pathID("b.py", in: session)),
+            offset: byteRange(of: "LIMIT)", in: "from a import LIMIT\nprint(LIMIT)\n").lowerBound,
+            context: context
+        )
+        #expect(imported.count == 1)
+        #expect(imported.first?.certainty == .strong)
+        #expect(imported.first?.target.pathID == a)
+        // Only the first assignment is a declaration.
+        #expect(session.content(at: a)?.1.symbols.map(\.kind) == [.pythonVariable])
+
+        let bare = try session.resolve(
+            file: try #require(pathID("c.py", in: session)),
+            offset: 6,
+            context: context
+        )
+        #expect(!bare.contains { $0.target.pathID == a })
+    }
+}
+
+@Test
 func pythonResolverKeepsMethodBoundaryForNestedClassFunctions() throws {
     let source = """
         class C:

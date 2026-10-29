@@ -1184,7 +1184,7 @@ func rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() throws {
             #expect(matching.map(\.kind) == [.declarationTitle])
         case .mod, .const, .static:
             #expect(matching.map(\.kind) == [.declarationEmphasis])
-        case .impl, .field, .enumMember:
+        case .impl, .field, .enumMember, .macro, .variable:
             #expect(matching.isEmpty)
         }
     }

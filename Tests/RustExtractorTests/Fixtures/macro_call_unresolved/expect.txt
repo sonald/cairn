@@ -1,4 +1,6 @@
-# Macro definitions/expansion are intentionally outside M0.
+# Macro expansion is outside M0; a macro_rules! in the project is found by name.
 unresolved main.rs:3:1
-unresolved main.rs:4:1
+def main.rs:4:1 -> main.rs:1:14
+nostrong main.rs:4:1
 unresolved main.rs:5:1
+unresolved main.rs:8:10

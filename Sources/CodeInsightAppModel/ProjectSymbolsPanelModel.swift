@@ -6,7 +6,7 @@ import Observation
 /// The project-symbols panel's kind groups. `field` is only a filter: fields
 /// appear under their type, never as a group of their own.
 public enum ProjectSymbolGroup: String, CaseIterable, Sendable {
-    case function, method, type, enumeration, trait, typeAlias, impl, module, value, field
+    case function, method, macro, type, enumeration, enumMember, trait, typeAlias, impl, module, value, field
 
     public static let groups: [ProjectSymbolGroup] = allCases.filter { $0 != .field }
 }
@@ -116,7 +116,13 @@ struct ProjectSymbolsData: Sendable {
         case .typeAlias: return .typeAlias
         case .impl: return .impl
         case .module: return .module
-        case .value: return kind == .rustField ? .field : .value
+        case .macro: return .macro
+        case .value:
+            switch kind {
+            case .rustField: return .field
+            case .rustEnumVariant: return .enumMember
+            default: return .value
+            }
         }
     }
 }

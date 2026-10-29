@@ -61,7 +61,7 @@ enum ReadonlyStructuralOracle {
         let containers = containing.filter {
             switch $0.kind {
             case .struct, .enum, .trait, .impl, .mod, .class: true
-            case .fn, .method, .const, .static, .typeAlias, .field, .enumMember: false
+            case .fn, .method, .const, .static, .typeAlias, .field, .enumMember, .macro, .variable: false
             }
         }
         guard let facet = (declarations.isEmpty ? containers : declarations)

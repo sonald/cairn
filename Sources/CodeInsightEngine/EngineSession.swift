@@ -981,11 +981,14 @@ public final class EngineSession: Sendable {
         case .rustMethod: 20
         case .rustEnum, .rustTrait: 18
         case .rustTypeAlias, .rustMod: 14
+        case .rustMacro: 16
+        case .rustEnumVariant: 12
         case .rustConst, .rustStatic: 10
         case .rustImpl: 8
         case .rustField: 0
         case .pythonFunction: 24
         case .pythonClass: 22
+        case .pythonVariable: 10
         case .typescriptFunction: 24
         case .typescriptClass: 22
         case .typescriptInterface, .typescriptEnum: 18

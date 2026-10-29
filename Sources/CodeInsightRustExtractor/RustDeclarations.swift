@@ -76,6 +76,12 @@ struct RustDeclarations {
         case "type_item":
             declaration = directChild(of: node, kinds: ["type_identifier"])
                 .map { (.rustTypeAlias, .type, $0) }
+        case "enum_variant" where containers.last?.kind == .rustEnum:
+            declaration = directChild(of: node, kinds: ["identifier"])
+                .map { (.rustEnumVariant, .value, $0) }
+        case "macro_definition":
+            declaration = directChild(of: node, kinds: ["identifier"])
+                .map { (.rustMacro, .macro, $0) }
         case "field_declaration" where containers.last?.kind == .rustStruct:
             declaration = directChild(of: node, kinds: ["field_identifier"])
                 .map { (.rustField, .value, $0) }
@@ -118,7 +124,7 @@ struct RustDeclarations {
             signatureFingerprint: fingerprints.signature,
             bodyFingerprint: fingerprints.body,
             typeRef: fieldTypeRef,
-            visibility: visibility(of: node, kind: kind, byteOffset: byteOffset)
+            visibility: visibility(of: node, parent: parent, kind: kind, byteOffset: byteOffset)
         ))
 
         var implTypeNameID: NameID?
@@ -176,14 +182,19 @@ struct RustDeclarations {
         }
     }
 
-    /// The written modifier. Impl blocks, trait members and the members of
-    /// a trait impl have none of their own.
+    /// The written modifier. Impl blocks, enum variants, trait members and
+    /// the members of a trait impl have none of their own; a `macro_rules!`
+    /// is public only under `#[macro_export]`.
     private func visibility(
         of node: Node,
+        parent: Node?,
         kind: DeclarationKind,
         byteOffset: UInt32
     ) -> DeclarationVisibility? {
-        if kind == .rustImpl { return nil }
+        if kind == .rustImpl || kind == .rustEnumVariant { return nil }
+        if kind == .rustMacro {
+            return isMacroExported(node, parent: parent, byteOffset: byteOffset) ? .public : .private
+        }
         if kind != .rustField, let container = containers.last,
            container.kind == .rustTrait || container.implementsTrait
         {
@@ -196,6 +207,19 @@ struct RustDeclarations {
         if compact == "pub" { return .public }
         if compact == "pub(self)" { return .private }
         return .restricted
+    }
+
+    /// Attributes are the item's preceding siblings, not its children.
+    private func isMacroExported(_ node: Node, parent: Node?, byteOffset: UInt32) -> Bool {
+        guard let siblings = parent?.namedChildren,
+              let index = siblings.firstIndex(where: { $0.byteRange == node.byteRange })
+        else { return false }
+        for sibling in siblings[..<index].reversed() {
+            if sibling.kind == "line_comment" || sibling.kind == "block_comment" { continue }
+            guard sibling.kind == "attribute_item" else { return false }
+            if sibling.text(in: bytes, byteOffset: byteOffset)?.contains("macro_export") == true { return true }
+        }
+        return false
     }
 
     private func isMember(parent: Node?) -> Bool {
@@ -213,7 +237,7 @@ struct RustDeclarations {
 
     private func isContainer(node: Node, kind: DeclarationKind) -> Bool {
         switch kind {
-        case .rustStruct, .rustTrait, .rustImpl:
+        case .rustStruct, .rustEnum, .rustTrait, .rustImpl:
             return true
         case .rustMod:
             return node.namedChildren.contains { $0.kind == "declaration_list" }

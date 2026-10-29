@@ -5,3 +5,4 @@ mine!();
 vec![1];
 }
 fn vec() {}
+fn g() { mine(); }

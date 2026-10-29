@@ -1,0 +1,5 @@
+# A variant answers only a path naming its own enum (or Self).
+bind main.rs:8:19 -> main.rs:1:23
+bind main.rs:9:22 -> main.rs:2:14
+bind main.rs:5:32 -> main.rs:2:27
+unresolved main.rs:10:5

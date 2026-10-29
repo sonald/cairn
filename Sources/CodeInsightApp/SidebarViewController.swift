@@ -771,6 +771,8 @@ final class SidebarViewController: NSViewController,
         case .typeAlias: localized("main.type.alias")
         case .field: localized("main.field")
         case .enumMember: localized("main.enum.case")
+        case .macro: localized("main.macro")
+        case .variable: localized("main.variable")
         }
         cell.toolTip = [kind, node.title, node.detail].filter { !$0.isEmpty }.joined(separator: " ")
         image.setAccessibilityElement(false)
@@ -803,13 +805,16 @@ final class SidebarViewController: NSViewController,
         case .typeAlias: "t.square"
         case .field: "shippingbox"
         case .enumMember: "list.bullet.indent"
+        case .macro: "number.square"
+        case .variable: "v.square"
         }
     }
 
     static func symbolColor(for kind: OutlineKind, theme: ReaderTheme) -> NSColor {
         switch kind {
         case .struct, .class, .trait, .typeAlias: theme.color(for: .typeName)
-        case .enum, .enumMember, .const, .static: theme.color(for: .number)
+        case .enum, .enumMember, .const, .static, .variable: theme.color(for: .number)
+        case .macro: theme.color(for: .macro)
         case .fn, .method: theme.color(for: .functionName)
         case .field: theme.chromeSecondaryColor
         case .impl, .mod: theme.chromeSecondaryColor

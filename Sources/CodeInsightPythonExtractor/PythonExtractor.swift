@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 5
+    public static let extractorVersion: UInt32 = 6
 
     public init() {}
 
@@ -185,6 +185,7 @@ private func buildIndex(
     var functionScopes: [ScopeID] = []
     var classScopes: [ScopeID] = []
     var facetStack: [UInt32] = []
+    var moduleVariableNames: Set<String> = []
 
     func pushScope(
         _ node: Node,
@@ -516,6 +517,23 @@ private func buildIndex(
                     kind: .assignment,
                     typeRef: pythonAssignmentTypeRef(node, bytes: bytes)
                 )
+                if currentScopeID == moduleScope,
+                   let nameString = text(name, in: bytes),
+                   moduleVariableNames.insert(nameString).inserted
+                {
+                    symbols.append(DeclarationFacet(
+                        symbolGroupID: SymbolGroupID(rawValue: UInt32(symbols.count)),
+                        space: .value,
+                        kind: .pythonVariable,
+                        nameID: names.intern(nameString),
+                        range: coreRange(node),
+                        nameRange: coreRange(name),
+                        parentFacetIndex: nil,
+                        signatureFingerprint: nil,
+                        bodyFingerprint: nil,
+                        visibility: visibility(of: nameString, parent: nil)
+                    ))
+                }
             }
             return
         }

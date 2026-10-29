@@ -147,6 +147,10 @@ public enum DeclarationKind: UInt8, Codable, Sendable {
     case typescriptInterface = 15
     case typescriptTypeAlias = 16
     case typescriptEnum = 17
+    case rustEnumVariant = 18
+    case rustMacro = 19
+    /// A module-level `name = …` (first assignment per name and file).
+    case pythonVariable = 20
 }
 
 /// The visibility modifier written at a declaration (`pub`, `export`, a

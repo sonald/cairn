@@ -130,6 +130,8 @@
 "main.edition.unknown" = "版本未知";
 "main.enum" = "枚举";
 "main.enum.case" = "枚举成员";
+"main.macro" = "宏";
+"main.variable" = "变量";
 "main.exact.deps.unavailable.offline" = "精确分析：依赖项不可用（离线）%@";
 "main.exact.off.safe" = "精确分析：关闭（安全模式）";
 "main.exact.preparing" = "精确分析：准备中%@";
@@ -549,6 +551,8 @@
 "main.scope.kind.typeAlias" = "类型别名";
 "main.scope.kind.field" = "字段";
 "main.scope.kind.enumMember" = "枚举成员";
+"main.scope.kind.macro" = "宏";
+"main.scope.kind.variable" = "变量";
 
 "settings.codeFont" = "代码字体";
 "settings.codeFont.system" = "系统等宽字体";
@@ -820,13 +824,15 @@
 "panel.symbols.kinds.short" = "种类";
 "panel.symbols.kind.function" = "函数";
 "panel.symbols.kind.method" = "方法";
+"panel.symbols.kind.macro" = "宏";
 "panel.symbols.kind.type" = "结构体/类";
 "panel.symbols.kind.enumeration" = "枚举";
+"panel.symbols.kind.enumMember" = "枚举变体";
 "panel.symbols.kind.trait" = "Trait/接口";
 "panel.symbols.kind.typeAlias" = "类型别名";
 "panel.symbols.kind.impl" = "impl 块";
 "panel.symbols.kind.module" = "模块";
-"panel.symbols.kind.value" = "常量/静态";
+"panel.symbols.kind.value" = "常量/变量";
 "panel.symbols.kind.field" = "字段";
 "panel.symbols.publicOnly" = "仅公开";
 "panel.symbols.publicOnly.short" = "公开";
@@ -839,7 +845,7 @@
 "panel.symbols.locate.none" = "没有可定位的当前符号";
 "panel.symbols.locate.filtered" = "当前符号被过滤隐藏";
 "panel.symbols.help.title" = "列表包含什么";
-"panel.symbols.help" = "列表来自索引记录的声明，覆盖所有分析单元。不列出：Rust 枚举变体和宏、Python 模块级变量、TypeScript 接口里声明的方法；大纲里可能仍能看到它们。\n\n可见性是声明处写的修饰（pub、export、以 _ 开头）。私有模块里的 pub 项仍算公开，不读取 Python 的 __all__。\n\n其他文件里的 impl 块只按名称挂到类型下，且仅当这个名字在本单元只声明一次。";
+"panel.symbols.help" = "列表来自索引记录的声明，覆盖所有分析单元。不列出：TypeScript 枚举成员、TypeScript 接口里声明的方法；大纲里可能仍能看到它们。Python 模块级变量每个文件只列一次，取第一次赋值。Rust 的 macro_rules! 只有带 #[macro_export] 才算公开。\n\n可见性是声明处写的修饰（pub、export、以 _ 开头）。私有模块里的 pub 项仍算公开，不读取 Python 的 __all__。\n\n其他文件里的 impl 块只按名称挂到类型下，且仅当这个名字在本单元只声明一次。";
 "panel.symbols.menu.open" = "打开";
 "panel.symbols.menu.callers" = "查看调用者";
 "panel.symbols.menu.callees" = "查看被调用者";

@@ -150,6 +150,7 @@ struct Resolver {
         let sameFile = index.symbols.enumerated().compactMap {
             facetIndex, facet -> ResolutionCandidate? in
             guard facet.parentFacetIndex == nil,
+                  facet.space != .macro,
                   facet.nameID == located.nameID,
                   let facetIndex = UInt32(exactly: facetIndex)
             else { return nil }
@@ -211,7 +212,11 @@ struct Resolver {
             )]
         }
 
-        let definitions = session.definitionOccurrences(named: located.nameID).filter {
+        let admitted = fallbackDefinitions(
+            session.definitionOccurrences(named: located.nameID),
+            qualifier: pathQualifier(before: located.range, in: session.sourceBytes(at: file))
+        )
+        let definitions = admitted.filter {
             guard located.identifierFallback else { return true }
             switch $0.1.space {
             case .type, .value: return true
@@ -227,27 +232,60 @@ struct Resolver {
         let certainty: Certainty = definitions.count == 1
             && !hasVisibleGlob && !hasVisibleNamedImport
             ? .probable : .possible
-        if located.identifierFallback {
-            return [SymbolSpace.type, .value].flatMap { space in
-                globalCandidates(
-                    nameID: located.nameID,
-                    from: file,
-                    certainty: certainty,
-                    dispatch: dispatch(for: kind),
-                    evidence: [.nameOnly(nameID: located.nameID)],
-                    context: context,
-                    space: space
-                )
-            }
+        let spaces: [SymbolSpace?] = located.identifierFallback ? [.type, .value] : [nil]
+        return spaces.flatMap { space in
+            globalCandidates(
+                nameID: located.nameID,
+                from: file,
+                certainty: certainty,
+                dispatch: dispatch(for: kind),
+                evidence: [.nameOnly(nameID: located.nameID)],
+                context: context,
+                space: space,
+                occurrences: admitted
+            )
         }
-        return globalCandidates(
-            nameID: located.nameID,
-            from: file,
-            certainty: certainty,
-            dispatch: dispatch(for: kind),
-            evidence: [.nameOnly(nameID: located.nameID)],
-            context: context
-        )
+    }
+
+    /// The name-only fallback for a bare or path-qualified name. Macros
+    /// answer only macro invocations, and a Python module variable is reached
+    /// through its own file or an import, never by name from elsewhere. An
+    /// enum variant answers only `Enum::Variant` / `Self::Variant` naming its
+    /// own enum, and then the variants alone answer (std's `Some` is not a
+    /// project variant named `Some`; `Shape::Circle` is not `struct Circle`).
+    private func fallbackDefinitions(
+        _ occurrences: [(SymbolOccurrenceID, DeclarationFacet, PathID)],
+        qualifier: String?
+    ) -> [(SymbolOccurrenceID, DeclarationFacet, PathID)] {
+        let general = occurrences.filter {
+            $0.1.space != .macro && $0.1.kind != .pythonVariable && $0.1.kind != .rustEnumVariant
+        }
+        guard let qualifier else { return general }
+        let variants = occurrences.filter { occurrence, facet, pathID in
+            guard facet.kind == .rustEnumVariant else { return false }
+            if qualifier == "Self" { return true }
+            guard let parent = facet.parentFacetIndex,
+                  let (_, index) = session.content(at: pathID),
+                  index.symbols.indices.contains(Int(parent))
+            else { return false }
+            return session.names.resolve(index.symbols[Int(parent)].nameID) == qualifier
+        }
+        return variants.isEmpty ? general : variants
+    }
+
+    /// `Shape` in `Shape::Circle` / `crate::Shape::Circle`: the identifier
+    /// right before the `::` that precedes `range`.
+    private func pathQualifier(before range: ByteRange, in bytes: [UInt8]?) -> String? {
+        guard let bytes else { return nil }
+        var end = Int(range.lowerBound)
+        while end > 0, bytes[end - 1] == UInt8(ascii: " ") { end -= 1 }
+        guard end >= 2, bytes[end - 1] == UInt8(ascii: ":"), bytes[end - 2] == UInt8(ascii: ":") else { return nil }
+        end -= 2
+        while end > 0, bytes[end - 1] == UInt8(ascii: " ") { end -= 1 }
+        var start = end
+        while start > 0, isIdentifierByte(bytes[start - 1]) { start -= 1 }
+        guard start < end else { return nil }
+        return String(decoding: bytes[start..<end], as: UTF8.self)
     }
 
     private func locatedName(
@@ -789,9 +827,10 @@ struct Resolver {
         evidence: [ResolutionEvidence],
         context: QueryContext,
         kinds: Set<DeclarationKind>? = nil,
-        space: SymbolSpace? = nil
+        space: SymbolSpace? = nil,
+        occurrences: [(SymbolOccurrenceID, DeclarationFacet, PathID)]? = nil
     ) -> [ResolutionCandidate] {
-        let results = session.definitionOccurrences(named: nameID).compactMap {
+        let results = (occurrences ?? session.definitionOccurrences(named: nameID)).compactMap {
             occurrence, facet, _ -> ResolutionCandidate? in
             if let kinds, !kinds.contains(facet.kind) { return nil }
             if let space, facet.space != space { return nil }

@@ -130,6 +130,8 @@
 "main.edition.unknown" = "edition unknown";
 "main.enum" = "Enum";
 "main.enum.case" = "Enum case";
+"main.macro" = "Macro";
+"main.variable" = "Variable";
 "main.exact.deps.unavailable.offline" = "Exact: deps unavailable (offline)%@";
 "main.exact.off.safe" = "Exact: off (Safe)";
 "main.exact.preparing" = "Exact: preparing%@";
@@ -549,6 +551,8 @@
 "main.scope.kind.typeAlias" = "type";
 "main.scope.kind.field" = "field";
 "main.scope.kind.enumMember" = "enumMember";
+"main.scope.kind.macro" = "macro";
+"main.scope.kind.variable" = "variable";
 
 "settings.codeFont" = "Code Font";
 "settings.codeFont.system" = "System Monospaced";
@@ -820,13 +824,15 @@
 "panel.symbols.kinds.short" = "Kinds";
 "panel.symbols.kind.function" = "Functions";
 "panel.symbols.kind.method" = "Methods";
+"panel.symbols.kind.macro" = "Macros";
 "panel.symbols.kind.type" = "Structs and Classes";
 "panel.symbols.kind.enumeration" = "Enums";
+"panel.symbols.kind.enumMember" = "Enum Variants";
 "panel.symbols.kind.trait" = "Traits and Interfaces";
 "panel.symbols.kind.typeAlias" = "Type Aliases";
 "panel.symbols.kind.impl" = "Impl Blocks";
 "panel.symbols.kind.module" = "Modules";
-"panel.symbols.kind.value" = "Constants and Statics";
+"panel.symbols.kind.value" = "Constants and Variables";
 "panel.symbols.kind.field" = "Fields";
 "panel.symbols.publicOnly" = "Public Only";
 "panel.symbols.publicOnly.short" = "Public";
@@ -839,7 +845,7 @@
 "panel.symbols.locate.none" = "No current symbol to locate";
 "panel.symbols.locate.filtered" = "The current symbol is hidden by the filters";
 "panel.symbols.help.title" = "What the list shows";
-"panel.symbols.help" = "Lists the declarations the index records, from every analysis unit. Not listed: Rust enum variants and macros, Python module-level variables, and methods declared inside a TypeScript interface; the outline may still show them.\n\nVisibility is the modifier written at the declaration (pub, export, a leading _). A pub item in a private module still counts as public, and Python's __all__ is not read.\n\nImpl blocks in other files are attached to a type only by matching names, and only when that name is declared once in its unit.";
+"panel.symbols.help" = "Lists the declarations the index records, from every analysis unit. Not listed: TypeScript enum members and methods declared inside a TypeScript interface; the outline may still show them. A Python module-level variable is listed once per file, at its first assignment. A Rust macro_rules! counts as public only under #[macro_export].\n\nVisibility is the modifier written at the declaration (pub, export, a leading _). A pub item in a private module still counts as public, and Python's __all__ is not read.\n\nImpl blocks in other files are attached to a type only by matching names, and only when that name is declared once in its unit.";
 "panel.symbols.menu.open" = "Open";
 "panel.symbols.menu.callers" = "Show Callers";
 "panel.symbols.menu.callees" = "Show Callees";

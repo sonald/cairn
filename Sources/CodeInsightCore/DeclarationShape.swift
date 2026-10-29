@@ -10,6 +10,7 @@ public enum DeclarationShape: Sendable, CaseIterable {
     case trait
     case impl
     case module
+    case macro
     case value
 
     public var family: DeclarationFamily {
@@ -18,6 +19,7 @@ public enum DeclarationShape: Sendable, CaseIterable {
         case .struct, .enum, .class, .typeAlias: .type
         case .trait: .trait
         case .impl, .module: .container
+        case .macro: .function
         case .value: .value
         }
     }
@@ -42,16 +44,18 @@ public extension DeclarationKind {
         case .rustTrait, .typescriptInterface: .trait
         case .rustImpl: .impl
         case .rustMod: .module
-        case .rustConst, .rustStatic, .rustField: .value
+        case .rustMacro: .macro
+        case .rustConst, .rustStatic, .rustField, .rustEnumVariant, .pythonVariable: .value
         }
     }
 
     var language: LanguageID {
         switch self {
         case .rustFn, .rustStruct, .rustEnum, .rustTrait, .rustImpl, .rustMod,
-             .rustConst, .rustStatic, .rustTypeAlias, .rustMethod, .rustField:
+             .rustConst, .rustStatic, .rustTypeAlias, .rustMethod, .rustField,
+             .rustEnumVariant, .rustMacro:
             .rust
-        case .pythonFunction, .pythonClass: .python
+        case .pythonFunction, .pythonClass, .pythonVariable: .python
         case .typescriptFunction, .typescriptClass, .typescriptInterface,
              .typescriptTypeAlias, .typescriptEnum: .typescript
         }
