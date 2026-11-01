@@ -1362,6 +1362,63 @@ public final class AppModel {
         prepareExact(generation: generation)
     }
 
+    public enum DependencyFetch: Equatable {
+        case running
+        case failed(String)
+        /// Succeeded for this directory; a limitation that survives it is
+        /// not one a project fetch fixes (e.g. the sysroot's own crates).
+        case finished(URL)
+    }
+
+    public private(set) var dependencyFetch: DependencyFetch?
+    @ObservationIgnored private var dependencyFetchTask: Task<Void, Never>?
+
+    /// Runs the one download Cairn does itself (`cargo fetch --locked`),
+    /// then restarts analysis to pick the crates up.
+    public func fetchDependencies() {
+        guard dependencyFetch != .running,
+              let setup = exactCoordinator.dependencySetup,
+              setup.runsInApp
+        else { return }
+        dependencyFetch = .running
+        let fetchGeneration = generation
+        dependencyFetchTask = Task { [weak self] in
+            do {
+                try await setup.fetch()
+                guard let self, !Task.isCancelled else { return }
+                dependencyFetch = .finished(setup.directory)
+                if generation == fetchGeneration {
+                    exactCoordinator.startColdOnNextPrepare()
+                    restartExactAnalysis()
+                }
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                dependencyFetch = if case let ExactError.unavailable(detail) = error {
+                    .failed(detail)
+                } else {
+                    .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    public func cancelDependencyFetch() {
+        dependencyFetchTask?.cancel()
+        dependencyFetchTask = nil
+        dependencyFetch = nil
+    }
+
+    /// Restarts analysis once an install the user ran shows up on disk.
+    public func recheckInstalledDependencies() {
+        guard exactCoordinator.analysisEnvironment?.limitations
+                .contains(.dependenciesUnavailableOffline) == true,
+              exactCoordinator.readiness == .ready,
+              exactCoordinator.dependencySetup?.isInstalled == true
+        else { return }
+        exactCoordinator.startColdOnNextPrepare()
+        restartExactAnalysis()
+    }
+
     public func grantCurrentRepositoryTrust() async throws {
         guard let root = projectRoot else { return }
         let trustGeneration = generation

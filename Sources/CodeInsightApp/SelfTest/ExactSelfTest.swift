@@ -1304,7 +1304,7 @@ extension AppDelegate {
             partialZeroTitle
                 == "Analysis limited: build scripts disabled; proc macros disabled"
         let exactZeroOfflineCopyHonest =
-            offlineZeroTitle == "Analysis limited: dependencies unavailable offline"
+            offlineZeroTitle == "Analysis limited: dependencies missing on this Mac"
         let exactZeroCoverageCopyDistinct =
             Set([fullZeroTitle, partialZeroTitle, offlineZeroTitle]).count == 3
         emitExactStep(
@@ -2447,7 +2447,7 @@ extension AppDelegate {
         }
         let passed = waitUntil(timeout: 5, condition: {
             let status = controller.selfTestExactStatusText
-            return status.contains("deps unavailable (offline)")
+            return status.contains("deps missing")
                 && status.contains("Safe")
         })
         emitExactStep(

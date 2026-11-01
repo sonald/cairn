@@ -143,7 +143,7 @@
 "model.inspector.worktreeCaptured" = "worktree captured";
 "model.limitation.borrowed" = "dependencies come from the current workspace and may not match this commit";
 "model.limitation.buildScripts" = "build scripts disabled";
-"model.limitation.offline" = "dependencies unavailable offline";
+"model.limitation.offline" = "dependencies missing on this Mac";
 "model.limitation.procMacros" = "proc macros disabled";
 "model.narrative.bestEffort" = "best-effort";
 "model.narrative.complete" = "complete";

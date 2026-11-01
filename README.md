@@ -18,7 +18,7 @@
 
 Exact analysis of a past commit runs in a checkout directory Cairn owns (one per window, deleted when the window closes) and borrows the workspace's `node_modules` and virtual environment; language servers follow commit switches without restarting when nothing but the commit and configuration content changed.
 
-Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally.
+Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally. When dependencies are missing, clicking the Exact status shows the install command for the unit; for a Rust project with a `Cargo.lock`, Download Dependencies runs `cargo fetch --locked` — the only network access Cairn makes, and only on that click. TypeScript and Python installs run package scripts, so Cairn copies the command and opens Terminal instead of running them.
 
 ## Build and run
 

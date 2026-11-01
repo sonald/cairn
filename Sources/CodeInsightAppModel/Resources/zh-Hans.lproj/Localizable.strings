@@ -143,7 +143,7 @@
 "model.inspector.worktreeCaptured" = "已捕获工作区";
 "model.limitation.borrowed" = "依赖来自当前工作区，可能与该 commit 不一致";
 "model.limitation.buildScripts" = "构建脚本已禁用";
-"model.limitation.offline" = "依赖在离线状态下不可用";
+"model.limitation.offline" = "本机缺少依赖";
 "model.limitation.procMacros" = "过程宏已禁用";
 "model.narrative.bestEffort" = "尽力而为";
 "model.narrative.complete" = "完整";

@@ -324,6 +324,28 @@ public final class ExactCoordinator {
     public private(set) var trustMode: TrustMode?
     public private(set) var trustedRepositories: [TrustedRepository] = []
     public var attribution: ExactAttribution? { active?.session.attribution }
+    @ObservationIgnored private var coldStartNextPrepare = false
+
+    /// The next prepare starts a new server instead of following the
+    /// parked one: a dependency download changes what the server must
+    /// load, and a followed session keeps its old crate graph and labels.
+    public func startColdOnNextPrepare() {
+        coldStartNextPrepare = true
+    }
+
+    /// How to install the active unit's missing dependencies. Rust fetches
+    /// against the analyzed directory (a commit's checkout carries its own
+    /// `Cargo.lock`); TypeScript and Python install into the workspace unit,
+    /// which a commit borrows from.
+    public var dependencySetup: DependencySetup? {
+        guard let active else { return nil }
+        let language = active.key.language
+        let root = language == .rust ? active.serverDirectory : active.workspaceRoot
+        return DependencySetup.suggestion(
+            language: language,
+            unitRoot: profileRootURL(workspaceRoot: root, prefix: active.profilePrefix)
+        )
+    }
 
     /// Where the provider finds dependencies: the interpreter Pyright is
     /// told to use, and whether a commit borrows the workspace's.
@@ -740,6 +762,8 @@ public final class ExactCoordinator {
         let priorClose = closeTask
         let slot: Slot = revision == nil ? .worktree : .checkout
         let unitName = analysisProfile.projectUnitName
+        let coldStart = coldStartNextPrepare
+        coldStartNextPrepare = false
         prepareTask = Task { [weak self] in
             await priorClose?.value
             guard let self else { return }
@@ -873,7 +897,8 @@ public final class ExactCoordinator {
                             versionIdentity: versionIdentity,
                             toolVersion: candidate.provider.toolVersion
                         )
-                        if candidate.workspaceRoot == root,
+                        if !coldStart,
+                           candidate.workspaceRoot == root,
                            candidate.profilePrefix == profilePrefix,
                            candidate.unitName == unitName,
                            (candidate.checkoutRoot != nil) == (commit != nil),

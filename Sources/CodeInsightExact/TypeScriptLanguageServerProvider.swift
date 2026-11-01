@@ -331,18 +331,13 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
 
     /// A commit's borrowed `node_modules` is labelled as borrowed; otherwise
     /// packages count as missing unless `node_modules` sits in the unit
-    /// root. ponytail: a monorepo whose `node_modules` is only in an
-    /// ancestor of the unit is still labelled offline.
+    /// root or one of its ancestors, as Node resolves them.
     static func baseEnvironment(
         trustMode: TrustMode,
         projectURL: URL,
         borrowedFromWorkspace: Bool
     ) -> ExactAnalysisEnvironment {
-        var isDirectory: ObjCBool = false
-        let installed = FileManager.default.fileExists(
-            atPath: projectURL.appendingPathComponent("node_modules").path,
-            isDirectory: &isDirectory
-        ) && isDirectory.boolValue
+        let installed = nodeModulesIsVisible(from: projectURL)
         return ExactAnalysisEnvironment(
             trustMode: trustMode,
             limitations: borrowedFromWorkspace

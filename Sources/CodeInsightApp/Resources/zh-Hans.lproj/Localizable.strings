@@ -132,7 +132,8 @@
 "main.enum.case" = "枚举成员";
 "main.macro" = "宏";
 "main.variable" = "变量";
-"main.exact.deps.unavailable.offline" = "精确分析：依赖项不可用（离线）%@";
+"main.exact.deps.unavailable.offline" = "精确分析：就绪 · 缺少本机依赖%@";
+"main.exact.deps.fetching" = "精确分析：正在下载依赖…";
 "main.exact.off.safe" = "精确分析：关闭（安全模式）";
 "main.exact.preparing" = "精确分析：准备中%@";
 "main.exact.provider.status" = "精确分析服务状态";
@@ -866,3 +867,15 @@
 "panel.symbols.listSeparator" = "、";
 "panel.symbols.footer" = "%1$lld 个符号 · %2$lld 个文件 · %3$@";
 "panel.symbols.footer.filtered" = "显示 %1$lld / %2$lld 个符号 · %3$lld 个文件 · %4$@";
+"main.deps.title" = "本机缺少依赖";
+"main.deps.summary" = "项目代码照常精确分析；跳到第三方库的定义、悬停文档和引用会缺失。分析本身始终不联网。";
+"main.deps.copy" = "复制命令";
+"main.deps.cancel" = "取消";
+"main.deps.fetch" = "下载依赖";
+"main.deps.fetching" = "正在下载…";
+"main.deps.retry" = "重试";
+"main.deps.open.terminal" = "复制命令并打开终端";
+"main.deps.note.fetch" = "点“下载依赖”时 Cairn 只联网这一次：按 Cargo.lock 把 crate 下载到 ~/.cargo，不运行项目代码，也不改动仓库。完成后自动重启分析。";
+"main.deps.note.unlocked" = "仓库没有 Cargo.lock，这条命令会新建它，所以 Cairn 不替你执行。请在终端中自行运行。";
+"main.deps.note.terminal" = "安装会运行依赖包自带的脚本并写入仓库，请在终端中自行执行。回到 Cairn 时会自动重新检测。";
+"main.deps.note.remaining" = "项目依赖已下载，但分析仍报告缺口，多半来自 Rust 标准库自身的依赖；项目代码不受影响。";

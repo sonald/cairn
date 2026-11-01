@@ -1,6 +1,7 @@
 import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
+import CodeInsightExact
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
@@ -103,6 +104,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let exactLabel = NSTextField(labelWithString: localized("main.exact.off.safe"))
     private let exactInfoButton = NSButton()
     private let exactStatusPopover = NSPopover()
+    private let dependencySetupView = DependencySetupView()
+    /// Units whose missing dependencies this window already pointed out.
+    private var dependencyNudges: Set<String> = []
+    private var activationObserver: NSObjectProtocol?
+    private var keyWindowObserver: NSObjectProtocol?
     private let contextButton = NSButton(title: localized("main.context"), target: nil, action: nil)
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
@@ -805,6 +811,28 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelLayout(forceGeometry: true)
         observe()
         observeSymbolHover()
+        exactLabel.addGestureRecognizer(
+            NSClickGestureRecognizer(target: self, action: #selector(showExactStatusDetails(_:)))
+        )
+        dependencySetupView.onFetch = { [weak self] in self?.model.fetchDependencies() }
+        dependencySetupView.onCancel = { [weak self] in self?.model.cancelDependencyFetch() }
+        // An install the user ran in Terminal shows up when they come back.
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.model.recheckInstalledDependencies() }
+        }
+        // A window that was behind when dependencies went missing points
+        // them out once it comes forward.
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.nudgeMissingDependencies() }
+        }
     }
 
     deinit {
@@ -2046,9 +2074,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextButton.contentTintColor = visible ? theme.accentColor : theme.chromeSecondaryColor
     }
 
-    @objc private func showExactStatusDetails(_ sender: NSButton) {
+    @objc private func showExactStatusDetails(_ sender: Any?) {
         model.exactCoordinator.refreshReadiness()
         renderExactStatus()
+        let anchor: NSView = sender as? NSButton ?? exactLabel
         let popover = exactStatusPopover
         let controller = NSViewController()
         let detail = NSTextView(frame: NSRect(x: 0, y: 0, width: 328, height: 300))
@@ -2071,7 +2100,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         restart.isEnabled = model.snapshotPhase == .fullReady
             && (model.exactCoordinator.readiness != .preparing
                 || model.exactCoordinator.acceptsRequests)
-        let stack = NSStackView(views: [scroll, restart])
+        let missingDependencies = missingDependencySetup
+        var views: [NSView] = [scroll, restart]
+        if let missingDependencies {
+            dependencySetupView.update(setup: missingDependencies, fetch: model.dependencyFetch)
+            let divider = NSBox()
+            divider.boxType = .separator
+            views.insert(contentsOf: [dependencySetupView, divider], at: 0)
+        }
+        let stack = NSStackView(views: views)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -2083,12 +2120,39 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             stack.topAnchor.constraint(equalTo: controller.view.topAnchor, constant: 16),
             stack.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor, constant: -16),
             scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            scroll.heightAnchor.constraint(equalToConstant: 300),
+            scroll.heightAnchor.constraint(equalToConstant: missingDependencies == nil ? 300 : 120),
             controller.view.widthAnchor.constraint(equalToConstant: 360),
         ])
+        for view in views.prefix(2) where missingDependencies != nil {
+            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        }
         popover.contentViewController = controller
         popover.behavior = .transient
-        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+    }
+
+    /// The install for the active unit while analysis reports its
+    /// dependencies missing.
+    private var missingDependencySetup: DependencySetup? {
+        guard model.exactCoordinator.readiness == .ready,
+              model.exactCoordinator.analysisEnvironment?.limitations
+                .contains(.dependenciesUnavailableOffline) == true
+        else { return nil }
+        return model.exactCoordinator.dependencySetup
+    }
+
+    /// Opens the status popover once per unit and window when analysis
+    /// first reports missing dependencies, if the window is in front and
+    /// nothing else is showing there.
+    private func nudgeMissingDependencies() {
+        guard let setup = missingDependencySetup,
+              !dependencyNudges.contains(setup.directory.path),
+              window?.isKeyWindow == true,
+              window?.attachedSheet == nil,
+              !exactStatusPopover.isShown
+        else { return }
+        dependencyNudges.insert(setup.directory.path)
+        showExactStatusDetails(nil)
     }
 
     @objc private func restartExactAnalysis(_ sender: NSButton) {
@@ -2223,6 +2287,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func beginTeardown(runFinalCheckpoint: Bool) {
         guard !isClosing else { return }
         isClosing = true
+        activationObserver.map(NotificationCenter.default.removeObserver)
+        keyWindowObserver.map(NotificationCenter.default.removeObserver)
+        model.cancelDependencyFetch()
         model.symbolHover.dismiss()
         symbolDocCard.hide()
         readerController.cancelDerivedDataSubscription()
@@ -2925,6 +2992,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.exactCoordinator.readiness
             _ = model.exactCoordinator.analysisEnvironment
             _ = model.exactCoordinator.trustMode
+            _ = model.dependencyFetch
             _ = model.contextWindow.stage
             _ = model.contextWindow.mode
             _ = model.contextWindow.tracking
@@ -3384,7 +3452,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let statusDetail: String?
         switch coordinator.readiness {
         case .ready:
-            if environment?.limitations.contains(.dependenciesUnavailableOffline) == true {
+            if model.dependencyFetch == .running {
+                status = localized("main.exact.deps.fetching")
+                color = theme.chromeSecondaryColor
+                reach = .exact
+            } else if environment?.limitations.contains(.dependenciesUnavailableOffline) == true {
                 status = localizedFormat("main.exact.deps.unavailable.offline", trustSuffix)
                 color = theme.warningColor
                 reach = .exact
@@ -3450,6 +3522,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         exactLabel.stringValue = status
         exactLabel.textColor = color
         exactLabel.toolTip = detail
+        if let setup = missingDependencySetup {
+            if exactStatusPopover.isShown, dependencySetupView.window != nil {
+                dependencySetupView.update(setup: setup, fetch: model.dependencyFetch)
+            }
+            // Let the status settle before pointing at it.
+            if !dependencyNudges.contains(setup.directory.path) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                    guard let self, !self.isClosing else { return }
+                    self.nudgeMissingDependencies()
+                }
+            }
+        } else if exactStatusPopover.isShown, dependencySetupView.window != nil {
+            // Analysis restarted after the download; the advice is stale.
+            exactStatusPopover.close()
+        }
         exactStones.update(certainty: reach, theme: theme)
         exactStones.toolTip = detail
     }

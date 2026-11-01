@@ -195,6 +195,14 @@ func typeScriptIsLabelledOfflineOnlyWithoutNodeModulesInTheUnit() throws {
     )
     #expect(limitations().isEmpty)
     #expect(limitations(borrowed: true) == [.dependenciesBorrowedFromWorkspace])
+    // A monorepo package resolves the root's install, as Node does.
+    let package = unit.appendingPathComponent("packages/a", isDirectory: true)
+    try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+    #expect(TypeScriptLanguageServerProvider.baseEnvironment(
+        trustMode: .safe,
+        projectURL: package,
+        borrowedFromWorkspace: false
+    ).limitations.isEmpty)
 }
 
 @Test
@@ -380,4 +388,21 @@ func relationExpansionFromADependencyItemAndPythonPathAnswer() throws {
     let answer = try #require(server.configurationAnswer as? [Any])
     #expect((answer.first as? [String: String]) == ["pythonPath": python])
     #expect(answer.last is NSNull)
+}
+
+@Test
+func rustDownloadRunsOnlyWhenACargoLockPinsIt() throws {
+    let workspace = FileManager.default.temporaryDirectory
+        .appendingPathComponent("rust-fetch-\(UUID().uuidString)", isDirectory: true)
+    let member = workspace.appendingPathComponent("crates/a", isDirectory: true)
+    try FileManager.default.createDirectory(at: member, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: workspace) }
+    // Without a lock `cargo fetch` would write one into the repository.
+    let unlocked = try #require(DependencySetup.suggestion(language: .rust, unitRoot: member))
+    #expect(!unlocked.runsInApp)
+    // A workspace member's lock sits at the workspace root.
+    try Data().write(to: workspace.appendingPathComponent("Cargo.lock"))
+    let locked = try #require(DependencySetup.suggestion(language: .rust, unitRoot: member))
+    #expect(locked.runsInApp)
+    #expect(locked.command == "cargo fetch --locked")
 }

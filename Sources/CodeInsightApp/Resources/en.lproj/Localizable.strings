@@ -132,7 +132,8 @@
 "main.enum.case" = "Enum case";
 "main.macro" = "Macro";
 "main.variable" = "Variable";
-"main.exact.deps.unavailable.offline" = "Exact: deps unavailable (offline)%@";
+"main.exact.deps.unavailable.offline" = "Exact: ready · deps missing%@";
+"main.exact.deps.fetching" = "Exact: downloading dependencies…";
 "main.exact.off.safe" = "Exact: off (Safe)";
 "main.exact.preparing" = "Exact: preparing%@";
 "main.exact.provider.status" = "Exact provider status";
@@ -866,3 +867,15 @@
 "panel.symbols.listSeparator" = ", ";
 "panel.symbols.footer" = "%1$lld symbols · %2$lld files · %3$@";
 "panel.symbols.footer.filtered" = "Showing %1$lld / %2$lld symbols · %3$lld files · %4$@";
+"main.deps.title" = "Dependencies missing on this Mac";
+"main.deps.summary" = "Your project's code is analyzed as usual; definitions, hover docs and references into third-party libraries are missing. Analysis itself never uses the network.";
+"main.deps.copy" = "Copy Command";
+"main.deps.cancel" = "Cancel";
+"main.deps.fetch" = "Download Dependencies";
+"main.deps.fetching" = "Downloading…";
+"main.deps.retry" = "Retry";
+"main.deps.open.terminal" = "Copy Command and Open Terminal";
+"main.deps.note.fetch" = "Download Dependencies is the one time Cairn uses the network: it downloads the crates in Cargo.lock into ~/.cargo, runs no project code and leaves the repository untouched. Analysis restarts when it finishes.";
+"main.deps.note.unlocked" = "The repository has no Cargo.lock and this command would create one, so Cairn does not run it. Run it yourself in Terminal.";
+"main.deps.note.terminal" = "Installing runs the packages' own scripts and writes into the repository, so run it yourself in Terminal. Cairn checks again when you come back.";
+"main.deps.note.remaining" = "The project's dependencies are downloaded, but analysis still reports a gap, most likely in the Rust standard library's own dependencies; your project's code is unaffected.";
