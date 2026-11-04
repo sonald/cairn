@@ -168,6 +168,13 @@ private func typeScriptWalk(
             function: node, bytes: bytes, depth: depth, kind: .enum,
             spans: &spans, facets: &facets
         )
+    case "interface_declaration", "type_alias_declaration":
+        // Same kinds the index assigns (`OutlineKind.init(_:isMethod:)`).
+        appendTypeScriptDeclaration(
+            function: node, bytes: bytes, depth: depth,
+            kind: node.kind == "interface_declaration" ? .trait : .typeAlias,
+            spans: &spans, facets: &facets
+        )
     case "enum_body":
         for member in node.namedChildren where member.kind != "comment" {
             let nameNode = member.kind == "enum_assignment"
@@ -196,7 +203,8 @@ private func typeScriptWalk(
         guard let child = node.child(at: index) else { continue }
         if ["function_declaration", "generator_function_declaration", "class_declaration",
             "abstract_class_declaration", "method_definition", "abstract_method_signature",
-            "public_field_definition", "enum_declaration"].contains(node.kind),
+            "public_field_definition", "enum_declaration", "interface_declaration",
+            "type_alias_declaration"].contains(node.kind),
            child.byteRange == node.child(namedField: "name")?.byteRange,
            child.kind != "computed_property_name",
            contentRegionKind(nodeKind: child.kind, language: .typescript) == nil
@@ -252,7 +260,7 @@ private func appendTypeScriptDeclaration(
     if nameNode.kind != "computed_property_name",
        contentRegionKind(nodeKind: nameNode.kind, language: .typescript) == nil {
         let highlight: HighlightKind = kind == .field ? .property
-            : (kind == .class || kind == .enum ? .declarationTitle : .functionName)
+            : ([.class, .enum, .trait, .typeAlias].contains(kind) ? .declarationTitle : .functionName)
         spans.append(HighlightSpan(range: nameRange, kind: highlight))
     }
     facets.append(OutlineFacet(
@@ -279,8 +287,7 @@ private func appendTypeScriptVariableArrowFunctionFacet(
               let name = typeScriptText(bytes, range: coreRange(nameNode)),
               let value = declarator.child(namedField: "value"),
               value.kind == "arrow_function"
-                || value.kind == "function_expression",
-              value.child(namedField: "body")?.kind == "statement_block"
+                || value.kind == "function_expression"
         else { continue }
         let nameRange = coreRange(nameNode)
         spans.append(HighlightSpan(range: nameRange, kind: .functionName))

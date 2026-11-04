@@ -69,6 +69,9 @@ func typeScriptReaderUsesOneParseForBothHighlightAndOutline() throws {
             }
         }
         const render = () => { return <div />; };
+        export interface Trigger { id: string }
+        export type Id = string;
+        export const twice = (n: number): number => n * 2;
         """
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
     let result = try TypeScriptExtractor.$parseObserver.withValue({
@@ -84,9 +87,10 @@ func typeScriptReaderUsesOneParseForBothHighlightAndOutline() throws {
     let kinds = result.outlineFacets.map(\.kind)
     let depths = result.outlineFacets.map(\.depth)
     #expect(kinds == [
-        OutlineKind.fn, .class, .method, .fn,
+        OutlineKind.fn, .class, .method, .fn, .trait, .typeAlias, .fn,
     ])
-    #expect(depths == [0, 0, 1, 0])
+    #expect(result.outlineFacets.suffix(3).map(\.name) == ["Trigger", "Id", "twice"])
+    #expect(depths == [0, 0, 1, 0, 0, 0, 0])
     #expect(result.spans.contains { $0.kind == HighlightKind.keyword })
     #expect(result.spans.contains { $0.kind == HighlightKind.number })
     #expect(result.spans.contains { $0.kind == HighlightKind.string })
@@ -343,7 +347,7 @@ func typeScriptReaderTsxParseAndSingleLineArrowFolds() throws {
         mode: LanguageMode(language: .typescript, variant: "tsx")
     )
 
-    #expect(result.outlineFacets.map(\.kind) == [OutlineKind.fn])
+    #expect(result.outlineFacets.map(\.name) == ["A", "single"])
     #expect(result.foldRegions.contains { $0.kind == .declaration })
     #expect(!result.foldRegions.contains {
         $0.kind == .declaration
