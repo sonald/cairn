@@ -143,17 +143,17 @@ extension CodeInsight {
                 trustMode: .safe
             )
             defer { session.close() }
-            let result = try session.typeDefinition(
+            let result = try session.definition(
                 file: relative,
                 byteOffset: Int(byteOffset)
             )
             let locations: [ExactTarget] = switch result {
             case .completed(let targets): targets
-            case .cancelled: throw ValidationError("typeDefinition query cancelled")
+            case .cancelled: throw ValidationError("definition query cancelled")
             case .unavailable(let reason): throw ValidationError(reason)
             }
             guard !locations.isEmpty else {
-                throw ValidationError("type definition not found")
+                throw ValidationError("definition not found")
             }
 
             for target in locations {

@@ -194,6 +194,10 @@ public final class ReaderDocument: Sendable {
 
     private let localReferenceRanges: [CodeInsightCore.ByteRange]
     private let localReferenceBindingIndices: [Int]
+    /// Binding indices ordered by declaration start. Extractors emit bindings
+    /// in walk order (TypeScript declares a name after visiting its value),
+    /// so `localBindings` itself is not sorted.
+    private let localBindingIndicesByDeclaration: [Int]
 
     package init(
         bytes: [UInt8],
@@ -226,6 +230,10 @@ public final class ReaderDocument: Sendable {
             ? FoldTopology.rejectionReason(regions: foldRegions, sourceMap: byteUTF16Map) : nil
         self.localBindings = localBindings
         self.referencesByBinding = referencesByBinding
+        localBindingIndicesByDeclaration = localBindings.indices.sorted {
+            localBindings[$0].declarationRange.lowerBound
+                < localBindings[$1].declarationRange.lowerBound
+        }
         let references = referencesByBinding.enumerated().flatMap {
             bindingIndex, ranges in
             ranges.map { (range: $0, bindingIndex: bindingIndex) }
@@ -296,20 +304,21 @@ public final class ReaderDocument: Sendable {
         binding: BindingRecord,
         references: [CodeInsightCore.ByteRange]
     )? {
+        let order = localBindingIndicesByDeclaration
         var low = 0
-        var high = localBindings.count
+        var high = order.count
         while low < high {
             let middle = low + (high - low) / 2
-            if localBindings[middle].declarationRange.lowerBound <= byteOffset {
+            if localBindings[order[middle]].declarationRange.lowerBound <= byteOffset {
                 low = middle + 1
             } else {
                 high = middle
             }
         }
         if low > 0,
-           localBindings[low - 1].declarationRange.contains(byteOffset)
+           localBindings[order[low - 1]].declarationRange.contains(byteOffset)
         {
-            let index = low - 1
+            let index = order[low - 1]
             return (index, localBindings[index], referencesByBinding[index])
         }
 

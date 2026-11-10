@@ -692,6 +692,20 @@ func localReferenceIndexSeparatesNestedShadowing() throws {
 }
 
 @Test
+func localBindingIsFoundAtDeclarationNestedInsideAnotherDeclarationsValue() throws {
+    // TypeScript declares `f` after walking its value, so `b` precedes `f`
+    // in the binding list although it starts later in the file.
+    let source = "const f = () => { const b = 1; return b }\n"
+    let ranges = tokenRanges(of: "b", in: source)
+    let document = try typeScriptDocumentWithLocalReferences(
+        source: source, mode: LanguageMode(language: .typescript))
+    let atDeclaration = try #require(document.localBinding(at: ranges[0].lowerBound))
+
+    #expect(atDeclaration.binding.declarationRange == ranges[0])
+    #expect(atDeclaration.references == [ranges[1]])
+}
+
+@Test
 func localReferenceIndexSeparatesSiblingScopes() throws {
     let source = """
         fn first() {
