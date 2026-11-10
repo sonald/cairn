@@ -1147,6 +1147,7 @@ public final class ContextWindowModel {
             let targetRange: ByteRange
             let targetOffset: UInt32
             let bindingKind: String?
+            let usesBindingContext: Bool
             // TypeScript binds an imported name lexically; Rust and Python
             // resolve to the import binding itself.
             var isImportBinding = resolution.target.localKind == .importBinding
@@ -1160,14 +1161,21 @@ public final class ContextWindowModel {
                index.bindings.indices.contains(Int(resolution.target.localIndex))
             {
                 let binding = index.bindings[Int(resolution.target.localIndex)]
-                targetRange = binding.declarationRange
+                let declaration = binding.kind == .assignment
+                    ? index.symbols.first(where: {
+                        $0.kind == .pythonVariable && $0.nameRange == binding.declarationRange
+                    })
+                    : nil
+                targetRange = declaration?.range ?? binding.declarationRange
                 targetOffset = binding.declarationRange.lowerBound
+                usesBindingContext = declaration == nil
                 isImportBinding = !isMember && binding.kind == .importBinding
                 bindingKind = isMember
                     ? localized("model.typehop.field")
                     : bindingLabel(binding.kind)
             } else {
                 bindingKind = nil
+                usesBindingContext = false
                 switch resolution.target.localKind {
                 case .binding:
                     continue
@@ -1212,7 +1220,7 @@ public final class ContextWindowModel {
                 text = excerpt(
                     for: targetRange,
                     in: document,
-                    binding: bindingKind != nil
+                    binding: usesBindingContext
                 )
             } else {
                 text = ""

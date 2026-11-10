@@ -47,6 +47,8 @@ func pythonReaderHighlightWithFolds(
         candidates: &candidates
     )
     try checkReaderCancellation(shouldCancel)
+    var moduleVariableNames: Set<String> = []
+    facets.removeAll { $0.kind == .variable && !moduleVariableNames.insert($0.name).inserted }
     let folds = candidates.resolve(
         outlineFacets: facets,
         observer: nil as (@Sendable (Double, Int, Int) -> Void)?
@@ -136,15 +138,27 @@ private func pythonWalk(
     default:
         break
     }
-    if node.kind == "assignment", directClassMember,
+    if node.kind == "assignment", directClassMember || depth == 0,
        let name = node.child(namedField: "left"), name.kind == "identifier",
        let text = pythonText(bytes, range: coreRange(name))
     {
         let detail = node.child(namedField: "type")
             .flatMap { pythonText(bytes, range: coreRange($0)) }
             .map { ": " + $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") } ?? ""
+        let assignmentRange = coreRange(node)
+        let range: CodeInsightCore.ByteRange
+        if !directClassMember,
+           let right = node.child(namedField: "right"), right.kind == "assignment"
+        {
+            // Chained module targets are peers in the outline.
+            range = CodeInsightCore.ByteRange(
+                lowerBound: assignmentRange.lowerBound, upperBound: coreRange(right).lowerBound
+            )
+        } else {
+            range = assignmentRange
+        }
         facets.append(OutlineFacet(
-            kind: .field, name: text, range: coreRange(node),
+            kind: directClassMember ? .field : .variable, name: text, range: range,
             nameRange: coreRange(name), depth: depth, detail: detail
         ))
     }

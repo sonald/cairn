@@ -1826,6 +1826,46 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
 
 @MainActor
 @Test
+func contextShowsEntirePythonModuleAssignmentAfterExactUpgrade() async throws {
+    let declaration = #"""
+        ANALYST_PROMPT = f"""
+        First line.
+        Second line.
+        Third line.
+        Last line."""
+        """#
+    let source = declaration + "\n\ndef analyze():\n    return ANALYST_PROMPT\n"
+    let root = try exactTemporaryPythonProject(["main.py": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+
+    let reference = exactByteOffset(of: "return ANALYST_PROMPT", in: source)
+        + UInt32("return ".utf8.count)
+    model.tokenClicked(file: "main.py", offset: reference)
+    try #require(await testWaitUntil("assignment candidate and Exact request") {
+        model.displayedCandidate != nil && gate.count == 1
+    })
+    #expect(model.displayedCandidate?.excerpt == declaration)
+
+    gate.complete(0, with: exactEntry(file: "main.py", byteOffset: 0))
+    try #require(await testWaitUntil("assignment upgraded to Exact") {
+        model.displayedCandidate?.certainty == .exact
+    })
+    #expect(model.displayedCandidate?.targetByteOffset == 0)
+    #expect(model.displayedCandidate?.excerpt == declaration)
+}
+
+@MainActor
+@Test
 func contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }

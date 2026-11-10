@@ -412,11 +412,25 @@ func typeScriptByteErrorsRejectWithoutParserObserver() throws {
 }
 @Test
 func pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() throws {
-    let source = """
+    let prompt = #"""
+        ANALYST_PROMPT = """
+        Review the requirements.
+        Cite your evidence.
+        """
+        """#
+    let source = prompt + "\n\n" + """
         import os
         import sys
 
+        ANALYST_PROMPT = "later value"
+        if enabled:
+            retries: int = 3
+        primary = backup = 1
+        left, right = (1, 2)
+
         class Greeter:
+            prefix: str = "hello"
+
             def hello(self, name):
                 return name
 
@@ -434,8 +448,17 @@ func pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() throws {
 
     #expect(parseCount.withLock { $0 } == 1)
     #expect(result.outlineFacets.map(\.kind) == [
-        OutlineKind.class, .method, .fn,
+        OutlineKind.variable, .variable, .variable, .variable, .class, .field, .method, .fn,
     ])
+    let variables = result.outlineFacets.filter { $0.kind == .variable }
+    #expect(variables.map(\.name) == ["ANALYST_PROMPT", "retries", "primary", "backup"])
+    #expect(variables.allSatisfy { $0.depth == 0 })
+    let promptFacet = try #require(variables.first)
+    #expect(promptFacet.nameRange == ByteRange(lowerBound: 0, upperBound: 14))
+    #expect(promptFacet.range == ByteRange(lowerBound: 0, upperBound: UInt32(prompt.utf8.count)))
+    let primary = try #require(variables.first { $0.name == "primary" })
+    let backup = try #require(variables.first { $0.name == "backup" })
+    #expect(!primary.range.overlaps(backup.range))
     #expect(result.folds.contains { $0.kind == .imports })
     #expect(result.folds.contains { $0.kind == .container })
     #expect(result.folds.contains { $0.kind == .declaration })
