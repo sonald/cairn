@@ -580,3 +580,27 @@ func pythonAnnotatedAssignmentsCarryTypeRef() throws {
     #expect(typeRef("count") == .primitive(pyLineRange(of: "int", line: 3, in: source)))
     #expect(typeRef("current") == .named(pyLineRange(of: "Holder", line: 5, in: source)))
 }
+
+/// Decorators run in the enclosing scope and an assignment target can hold
+/// calls; a bare `*` or `/` separator is not a parameter.
+@Test
+func decoratorAndAssignmentTargetCallsAreRecordedAndSeparatorsAreNotParameters() throws {
+    let source = """
+        @register(make())
+        def handler(a, /, b, *, c):
+            obj.attr[index()] = 1
+        """
+    let result = try extract(source)
+    func region(of call: String) -> ExecutableRegionKind? {
+        result.index.calls.first { result.names.resolve($0.nameID) == call }
+            .map { result.index.executableRegions[Int($0.regionID.rawValue)].kind }
+    }
+    #expect(region(of: "register") == .moduleInitializer)
+    #expect(region(of: "make") == .moduleInitializer)
+    #expect(region(of: "index") == .function)
+    let parameters = result.index.bindings.filter { $0.kind == .param }
+        .map { result.names.resolve($0.localNameID) }
+    #expect(!parameters.contains("/"))
+    #expect(!parameters.contains("*"))
+    #expect(parameters == ["a", "b", "c"])
+}

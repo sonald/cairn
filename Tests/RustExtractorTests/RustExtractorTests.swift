@@ -801,3 +801,20 @@ func rustFieldFacetCarriesTypeRef() throws {
     #expect(inner.typeRef == .named(lineRange(of: "Inner", line: 3, in: source)))
     #expect(count.typeRef == .primitive(lineRange(of: "u32", line: 4, in: source)))
 }
+
+/// `mut x: T` binds `x`; a body-less trait method's parameters bind nowhere.
+@Test
+func mutParametersBindAndSignatureParametersDoNot() throws {
+    let result = try extract("""
+        trait Shape { fn scale(&self, factor: f64); }
+        struct A;
+        fn f(mut x: A, y: i32) {}
+        """)
+    let parameters = result.index.bindings.filter { $0.kind == .param }
+        .map { result.names.resolve($0.localNameID) }
+    #expect(parameters.contains("x"))
+    #expect(!parameters.contains("self"))
+    #expect(!parameters.contains("factor"))
+    let x = try #require(result.index.bindings.first { result.names.resolve($0.localNameID) == "x" })
+    #expect(x.targetHint.map { result.names.resolve($0.nameID) } == "A")
+}

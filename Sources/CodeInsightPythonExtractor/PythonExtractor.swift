@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 6
+    public static let extractorVersion: UInt32 = 7
 
     public init() {}
 
@@ -440,6 +440,10 @@ private func buildIndex(
         switch node.kind {
         case "decorated_definition":
             guard let definition = childField(node, "definition") else { return }
+            // Decorators run in the enclosing scope, before the definition.
+            for child in node.namedChildren where child.kind == "decorator" {
+                walk(child, directClassMember: false, moduleScope: moduleScope)
+            }
             if definition.kind == "function_definition" {
                 if enterFunction(definition, wrapper: node, isMethod: directClassMember) {
                     let scopeID = scopeStack.last
@@ -484,8 +488,10 @@ private func buildIndex(
                 for child in node.namedChildren {
                     // `self` / `cls` map to the enclosing class (Q6/Q11);
                     // annotated parameters carry their TypeRef (P4).
+                    // A bare `*` or `/` separator names nothing.
+                    guard let nameNode = parameterName(child) else { continue }
                     let typeRef: TypeRef?
-                    if let name = parameterName(child).flatMap({ text($0, in: bytes) }),
+                    if let name = text(nameNode, in: bytes),
                        name == "self" || name == "cls"
                     {
                         typeRef = selfParameterTypeRef()
@@ -493,7 +499,7 @@ private func buildIndex(
                         typeRef = parameterTypeRef(child)
                     }
                     appendBinding(
-                        parameterName(child) ?? child,
+                        nameNode,
                         scopeID: scopeID,
                         kind: .param,
                         typeRef: typeRef
@@ -501,12 +507,13 @@ private func buildIndex(
                 }
             } else if let scopeID = currentScope() {
                 for child in node.namedChildren {
+                    guard let nameNode = parameterName(child) else { continue }
                     let typeRef: TypeRef? = (text(child, in: bytes) == "self"
-                        || parameterName(child).flatMap({ text($0, in: bytes) }) == "cls")
+                        || text(nameNode, in: bytes) == "cls")
                         ? selfParameterTypeRef()
                         : parameterTypeRef(child)
                     appendBinding(
-                        parameterName(child) ?? child,
+                        nameNode,
                         scopeID: scopeID,
                         kind: .param,
                         typeRef: typeRef
@@ -520,6 +527,11 @@ private func buildIndex(
         if node.kind == "assignment" {
             if let right = childField(node, "right") {
                 walk(right, directClassMember: false, moduleScope: moduleScope)
+            }
+            // `obj.attr[f()] = …`: a target that is not a plain name can
+            // hold calls.
+            if let left = childField(node, "left"), simpleIdentifier(left) == nil {
+                walk(left, directClassMember: false, moduleScope: moduleScope)
             }
             if let currentScopeID = currentScope(),
                let left = childField(node, "left"),

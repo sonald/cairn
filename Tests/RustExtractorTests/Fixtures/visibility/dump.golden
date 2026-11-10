@@ -19,9 +19,8 @@ bindings:
   - #0 scope=#2 kind=param name=self at=8:24..8:28 bytes=126..<130 typeRef=selfType@7:6..7:9 bytes=97..<100
   - #1 scope=#4 kind=param name=self at=9:29..9:33 bytes=163..<167 typeRef=selfType@7:6..7:9 bytes=97..<100
   - #2 scope=#6 kind=param name=self at=10:14..10:18 bytes=185..<189 typeRef=selfType@7:6..7:9 bytes=97..<100
-  - #3 scope=#0 kind=param name=self at=14:13..14:17 bytes=228..<232
-  - #4 scope=#8 kind=param name=self at=15:15..15:19 bytes=255..<259
-  - #5 scope=#11 kind=param name=self at=19:13..19:17 bytes=301..<305 typeRef=selfType@18:17..18:20 bytes=283..<286
+  - #3 scope=#8 kind=param name=self at=15:15..15:19 bytes=255..<259
+  - #4 scope=#11 kind=param name=self at=19:13..19:17 bytes=301..<305 typeRef=selfType@18:17..18:20 bytes=283..<286
 regions:
   - #0 kind=method scope=#2 facet=#5 range=8:5..8:32 bytes=107..<134
   - #1 kind=method scope=#4 facet=#6 range=9:5..9:37 bytes=139..<171

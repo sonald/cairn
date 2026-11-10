@@ -417,7 +417,7 @@ func tsxSourceHasErrorInTsModeButNotTsxMode() throws {
 }
 
 @Test
-func wrongModeVariantBomAndInvalidUTF8FailBeforeParse() throws {
+func wrongModeVariantAndInvalidUTF8FailBeforeParse() throws {
     let extractor = TypeScriptExtractor()
     let contentID = ContentID.sha256(of: Array("x".utf8))
 
@@ -438,21 +438,6 @@ func wrongModeVariantBomAndInvalidUTF8FailBeforeParse() throws {
         } catch is CocoaError {
             // expected
         }
-    }
-
-    let bom = Array<UInt8>([0xEF, 0xBB, 0xBF]) + Array("function f() {}".utf8)
-    do {
-        _ = try extractor.extractWithDiagnostics(
-            bytes: bom,
-            key: ContentKey.make(contentID: ContentID.sha256(of: bom), mode: .tsTS),
-            interner: ExtractionInterners(
-                names: Interner<NameID>(),
-                strings: Interner<StringID>()
-            )
-        )
-        Issue.record("Expected BOM failure")
-    } catch is CocoaError {
-        // expected
     }
 
     let invalid = Array<UInt8>([0xFF, 0xFE, 0x00])
@@ -478,7 +463,6 @@ func parserObserverIsZeroCalledForPreParseRejections() throws {
     let cases: [(bytes: [UInt8], mode: LanguageMode)] = [
         (base, LanguageMode(language: .rust)),
         (base, LanguageMode(language: .typescript, variant: "bad")),
-        ([0xEF, 0xBB, 0xBF] + base, .tsTS),
         ([0xFF, 0xFE, 0x00], .tsTS),
     ]
 
@@ -729,4 +713,44 @@ func identifierRangesSurviveDeeplyNestedExpressions() throws {
         named: "kw", in: Array(source.utf8), mode: .tsTS
     )
     #expect(ranges.count == 3000)
+}
+
+/// Calls in a destructuring initialiser, an `export default` expression and
+/// a decorator on an export statement run at module level and are indexed.
+@Test
+func callsInDestructuringInitialisersAndDefaultExportsAreRecorded() throws {
+    let source = """
+        const { a = fallback() } = makeA();
+        let [b] = makeB();
+        @decorate(options())
+        export class Widget {}
+        export default build();
+        """
+    let result = try extract(source, mode: .tsTS)
+    let callNames = Set(result.index.calls.map { result.names.resolve($0.nameID) })
+    #expect(callNames.contains("fallback"))
+    #expect(callNames.contains("makeA"))
+    #expect(callNames.contains("makeB"))
+    #expect(callNames.contains("decorate"))
+    #expect(callNames.contains("options"))
+    #expect(callNames.contains("build"))
+}
+
+/// A BOM-prefixed file indexes like any other, with ranges in file bytes.
+@Test
+func bomPrefixedSourceIndexesInFileByteCoordinates() throws {
+    let bytes = Array<UInt8>([0xEF, 0xBB, 0xBF]) + Array("function f() {}".utf8)
+    for mode in [LanguageMode.tsTS, LanguageMode(language: .typescript, variant: "tsx")] {
+        let names = Interner<NameID>()
+        let result = try TypeScriptExtractor().extractWithDiagnostics(
+            bytes: bytes,
+            key: ContentKey.make(contentID: ContentID.sha256(of: bytes), mode: mode),
+            interner: ExtractionInterners(names: names, strings: Interner<StringID>())
+        )
+        #expect(!result.containsErrorNodes)
+        let f = try #require(result.index.symbols.first { names.resolve($0.nameID) == "f" })
+        #expect(f.nameRange == CodeInsightCore.ByteRange(lowerBound: 12, upperBound: 13))
+        #expect(try TypeScriptExtractor().identifierRanges(named: "f", in: bytes, mode: mode)
+            == [CodeInsightCore.ByteRange(lowerBound: 12, upperBound: 13)])
+    }
 }

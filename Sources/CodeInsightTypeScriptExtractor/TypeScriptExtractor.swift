@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct TypeScriptExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 5
+    public static let extractorVersion: UInt32 = 6
 
     #if DEBUG
     @TaskLocal
@@ -123,13 +123,8 @@ private func requireSupported(_ mode: LanguageMode) throws {
     }
 }
 
+/// A UTF-8 BOM is fine: the grammar skips U+FEFF, ranges stay in file bytes.
 private func requireSupportedBytes(_ bytes: [UInt8]) throws {
-    if bytes.starts(with: [0xEF, 0xBB, 0xBF]) {
-        throw CocoaError(.fileReadCorruptFile, userInfo: [
-            NSLocalizedFailureReasonErrorKey:
-                "TypeScriptExtractor rejects UTF-8 BOM before parsing"
-        ])
-    }
     guard String(bytes: bytes, encoding: .utf8) != nil else {
         throw CocoaError(.fileReadCorruptFile, userInfo: [
             NSLocalizedFailureReasonErrorKey:
@@ -620,7 +615,12 @@ let tsPrimitiveNames: Set<String> = [
             guard let nameNode = childField(child, "name"),
                   nameNode.kind == "identifier",
                   let name = text(nameNode, in: bytes)
-            else { continue }
+            else {
+                // A destructuring pattern binds nothing here, but its
+                // defaults and initialiser still run.
+                walk(child)
+                continue
+            }
             let scopeID = currentScope() ?? moduleScopeID
             // `const s: Snapshot[] | undefined = …` — the declarator's
             // annotation rides its type field (P4).
@@ -842,6 +842,9 @@ let tsPrimitiveNames: Set<String> = [
     }
 
     func walkExport(_ node: Node) {
+        for child in node.namedChildren where child.kind == "decorator" {
+            walk(child)
+        }
         if let declaration = childField(node, "declaration") {
             walk(declaration)
             if declaration.kind == "lexical_declaration"
@@ -863,11 +866,12 @@ let tsPrimitiveNames: Set<String> = [
             }
             return
         }
-        // `export default name;` makes the local declaration public.
-        if let value = childField(node, "value"), value.kind == "identifier",
-           let name = text(value, in: bytes)
-        {
-            exportedLocalNames.insert(name)
+        if let value = childField(node, "value") {
+            // `export default name;` makes the local declaration public.
+            if value.kind == "identifier", let name = text(value, in: bytes) {
+                exportedLocalNames.insert(name)
+            }
+            walk(value)
         }
         if let source = childField(node, "source"),
            let specifier = unquote(source, in: bytes)

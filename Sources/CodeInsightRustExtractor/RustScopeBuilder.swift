@@ -118,7 +118,11 @@ struct RustScopeBuilder {
             )
         }
 
-        registerPatterns(from: node, byteOffset: byteOffset)
+        registerPatterns(
+            from: node,
+            owner: ancestors.dropLast().last,
+            byteOffset: byteOffset
+        )
         if !collectReferences {
             pushRegionIfNeeded(
                 for: node,
@@ -251,16 +255,26 @@ struct RustScopeBuilder {
         }
     }
 
+    /// `owner` is the node holding the parameter list, for parameters.
     private mutating func registerPatterns(
         from node: Node,
+        owner: Node?,
         byteOffset: UInt32
     ) {
         guard let scopeID = currentScopeID else { return }
+        // A body-less signature (`fn area(&self);`) or a `fn(x: T)` type
+        // declares no binding in the surrounding scope.
+        if node.kind == "parameter" || node.kind == "self_parameter",
+           owner?.kind == "function_signature_item" || owner?.kind == "function_type"
+        {
+            return
+        }
 
         switch node.kind {
         case "parameter":
             register(
-                node.namedChildren.first,
+                // `mut x: T` — the pattern, not the `mut`.
+                node.child(namedField: "pattern"),
                 scopeID: scopeID,
                 kind: .param,
                 targetHint: collectReferences ? nil : annotatedTargetHint(

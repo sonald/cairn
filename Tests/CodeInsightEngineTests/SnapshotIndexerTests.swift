@@ -2188,16 +2188,16 @@ func deeplyNestedExpressionsIndexWithoutOverflowingTheExtractionStack() throws {
     }
 }
 
-/// The TypeScript extractor rejects a BOM; that one file stays listed with
-/// its bytes but no index, and the rest of the project still indexes.
+/// The TypeScript extractor rejects invalid UTF-8; that one file stays listed
+/// with its bytes but no index, and the rest of the project still indexes.
 @Test
 func snapshotIndexerKeepsIndexingWhenTheExtractorRejectsOneFile() throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("RejectedFile-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
-    let bom = [UInt8]([0xEF, 0xBB, 0xBF]) + Array("export const a = 1;\n".utf8)
-    try Data(bom).write(to: root.appendingPathComponent("bom.ts"))
+    let invalid = Array("export const a = \"".utf8) + [0xFF] + Array("\";\n".utf8)
+    try Data(invalid).write(to: root.appendingPathComponent("invalid.ts"))
     try Data("export function good() {}\n".utf8).write(to: root.appendingPathComponent("good.ts"))
 
     let session = try ProjectIndexer().indexSnapshot(
@@ -2206,9 +2206,9 @@ func snapshotIndexerKeepsIndexingWhenTheExtractorRejectsOneFile() throws {
         language: .typescript
     )
     let rejected = try #require(session.manifest.files.first {
-        session.paths.resolve($0.pathID) == "bom.ts"
+        session.paths.resolve($0.pathID) == "invalid.ts"
     })
-    #expect(session.sourceBytesByContent[rejected.contentID] == bom)
+    #expect(session.sourceBytesByContent[rejected.contentID] == invalid)
     #expect(!session.contentIndexes.keys.contains { $0.contentID == rejected.contentID })
     #expect(session.contentIndexes.values.contains { index in
         index.symbols.contains { session.names.resolve($0.nameID) == "good" }
