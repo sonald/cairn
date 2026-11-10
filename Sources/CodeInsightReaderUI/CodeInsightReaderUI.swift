@@ -336,6 +336,8 @@ public final class ReaderTextView {
             // input clears the anchor. Scrolling does not change style data:
             // style only fragments that lack this generation's attributes.
             self.styleUnstyledVisibleFragments(in: layoutManager, updateLayout: true)
+            // TextKit can reposition glyphs while AppKit reuses the scrolled background.
+            self.view.setNeedsDisplay(self.view.visibleRect)
             self.ruler?.needsDisplay = true
             self.onViewportChange?()
         }
