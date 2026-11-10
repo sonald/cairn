@@ -103,7 +103,6 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         ])
         configurePopover()
         apply(settings: ReaderSettings())
-        render()
     }
 
     required init?(coder: NSCoder) {
@@ -123,6 +122,8 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         detailText.textColor = theme.foregroundColor
         restoreButton.contentTintColor = theme.accentColor
         readingSetButton.contentTintColor = theme.accentColor
+        // The breadcrumb labels carry their colours; rebuild them.
+        render()
         tableView.reloadData()
         renderDetail()
     }

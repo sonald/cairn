@@ -273,6 +273,7 @@
 "panel.bookmark.delete" = "删除";
 "panel.bookmark.deleteNote" = "书签笔记也将被删除。";
 "panel.bookmark.empty" = "暂无书签\n阅读文件时使用“切换书签”（⇧⌘M）。";
+"panel.bookmark.exportFailed" = "无法导出书签";
 "panel.bookmark.exportMarkdown" = "导出 Markdown…";
 "panel.bookmark.filter" = "筛选书签";
 "panel.bookmark.filteredEmpty" = "未找到书签\n请尝试其他筛选条件。";

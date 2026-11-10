@@ -35,6 +35,9 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
     private var fullGhost = ""
     private var hintsEnabled = true
     private var syncingSelection = false
+    private var collapsedPaths: Set<String> = []
+    private var collapsedQuery = ""
+    private var shownSuggestions: [QuerySuggestion] = []
     private var chipTexts: [String] = []
     private var chipRemovals: [(inout ProjectSearchQuery) -> Void] = []
     private weak var chipEditor: NSTextField?
@@ -102,7 +105,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
     }
     func moveResult(by delta: Int) {
         if delta < 0 { panelModel.selectPrevious() } else { panelModel.selectNext() }
-        renderSelection()
+        revealSelection()
         openSelection(focusReader: false)
     }
     func dismissHints() { hideHints() }
@@ -410,7 +413,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         case #selector(NSResponder.moveDown(_:)):
             view.window?.makeFirstResponder(outlineView)
             if panelModel.selectedIndex == nil { panelModel.selectNext() }
-            renderSelection()
+            revealSelection()
             openSelection(focusReader: false)
         case #selector(NSResponder.insertNewline(_:)):
             panelModel.commitQuery()
@@ -655,10 +658,19 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         }
         syncingSelection = true
         outlineView.reloadData()
-        outlineView.expandItem(nil, expandChildren: true)
+        // Every result set opens expanded; within one query a file the user
+        // collapsed stays collapsed until they open it or step into it.
+        if collapsedQuery != panelModel.query { collapsedPaths = []; collapsedQuery = panelModel.query }
+        if collapsedPaths.isEmpty { outlineView.expandItem(nil, expandChildren: true) }
+        else { for group in panelModel.groups where !collapsedPaths.contains(group.path) { outlineView.expandItem(group) } }
         renderSelection()
         syncingSelection = false
         onResultsChanged?()
+    }
+    /// Stepping to a result opens its collapsed file group.
+    private func revealSelection() {
+        if let selected = panelModel.selectedIndex, let (group, _) = item(atFlatIndex: selected) { outlineView.expandItem(group) }
+        renderSelection()
     }
     private func renderSelection() {
         guard let selected = panelModel.selectedIndex, let item = item(atFlatIndex: selected) else { return }
@@ -743,6 +755,14 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         row.edgeInsets = .init(top: 1, left: 10, bottom: 1, right: 10)
         row.toolTip = match.value.lineText
         return row
+    }
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        guard !syncingSelection, let group = notification.userInfo?["NSObject"] as? SearchPanelModel.Group else { return }
+        collapsedPaths.insert(group.path)
+    }
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        guard !syncingSelection, let group = notification.userInfo?["NSObject"] as? SearchPanelModel.Group else { return }
+        collapsedPaths.remove(group.path)
     }
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !syncingSelection, let match = outlineView.item(atRow: outlineView.selectedRow) as? SearchPanelModel.Match,
@@ -836,6 +856,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
     private func showSuggestions() {
         let suggestions = Array(panelModel.suggestions.prefix(3))
         guard !suggestions.isEmpty else { return }
+        shownSuggestions = suggestions
         let rows = suggestions.enumerated().map { index, suggestion -> NSView in
             let button = NSButton(title: suggestion.title, target: self, action: #selector(chooseSuggestion(_:)))
             let title = NSMutableAttributedString(string: suggestion.title, attributes: [.font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular), .foregroundColor: theme.foregroundColor])
@@ -861,8 +882,9 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         }
     }
     @objc private func chooseSuggestion(_ button: NSButton) {
-        guard panelModel.suggestions.indices.contains(button.tag) else { return }
-        let suggestion = panelModel.suggestions[button.tag]
+        // The bubble's own rows: the model's list may have changed since it opened.
+        guard shownSuggestions.indices.contains(button.tag) else { return }
+        let suggestion = shownSuggestions[button.tag]
         hideHints()
         panelModel.applySuggestion(suggestion)
         input.stringValue = panelModel.query
@@ -896,6 +918,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
         idleTask?.cancel(); clearGhost()
         if let bubble { bubble.parent?.removeChildWindow(bubble); bubble.orderOut(nil) }
         bubble = nil
+        shownSuggestions = []
     }
     private var bubbleWidth: CGFloat { min(440, max(220, input.bounds.width)) }
     private func showBubble(rows: [NSView]) {

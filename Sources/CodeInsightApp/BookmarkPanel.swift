@@ -276,10 +276,22 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     @discardableResult
     func exportRawCopy(to url: URL) -> Bool {
         guard let bytes = appModel.bookmarkModel.rescueBytes else { return false }
+        return export(bytes, to: url)
+    }
+
+    /// Writes an export; a failure is reported on this panel, never dropped.
+    @discardableResult
+    private func export(_ data: Data, to url: URL) -> Bool {
         do {
-            try bytes.write(to: url)
+            try data.write(to: url, options: .atomic)
             return true
         } catch {
+            guard let window else { return false }
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = localized("panel.bookmark.exportFailed")
+            alert.informativeText = error.localizedDescription
+            alert.beginSheetModal(for: window)
             return false
         }
     }
@@ -453,17 +465,17 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     }
 
     @objc private func exportMarkdown(_ sender: Any?) {
-        let text = markdownText()
+        let data = Data(markdownText().utf8)
         if let path = ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_MARKDOWN_EXPORT_PATH"] {
-            try? text.write(toFile: path, atomically: true, encoding: .utf8)
+            export(data, to: URL(fileURLWithPath: path))
             return
         }
         let save = NSSavePanel()
         save.nameFieldStringValue = "bookmarks.md"
         guard let window else { return }
-        save.beginSheetModal(for: window) { response in
+        save.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = save.url else { return }
-            try? text.write(to: url, atomically: true, encoding: .utf8)
+            self?.export(data, to: url)
         }
     }
 

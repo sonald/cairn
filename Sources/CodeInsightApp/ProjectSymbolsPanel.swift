@@ -509,6 +509,9 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         cell.title.alphaValue = model.isDimmed(item.node) ? 0.5 : 1
         cell.icon.alphaValue = cell.title.alphaValue
         cell.detail.textColor = theme.chromeTertiaryColor
+        // Reused cells must not keep the previous row's help or value.
+        cell.toolTip = nil
+        cell.setAccessibilityValue(nil)
         switch node.content {
         case let .symbol(rowIndex, merged):
             guard let row = model.row(rowIndex) else { return cell }

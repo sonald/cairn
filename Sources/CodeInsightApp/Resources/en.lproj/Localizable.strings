@@ -273,6 +273,7 @@
 "panel.bookmark.delete" = "Delete";
 "panel.bookmark.deleteNote" = "Its note will be removed.";
 "panel.bookmark.empty" = "No bookmarks yet\nUse Toggle Bookmark (⇧⌘M) while reading a file.";
+"panel.bookmark.exportFailed" = "Bookmarks could not be exported";
 "panel.bookmark.exportMarkdown" = "Export Markdown…";
 "panel.bookmark.filter" = "Filter bookmarks";
 "panel.bookmark.filteredEmpty" = "No bookmarks found\nTry a different filter.";

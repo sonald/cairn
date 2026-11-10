@@ -85,6 +85,29 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func relationsExcerptCapCountsOnlyShownExcerpts() async throws {
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            possibleMatchCount: 55,
+            capturedSourceAvailable: false
+        )
+        defer { fixture.close() }
+        var captured: (String, [ReadingSetExcerpt], [String])?
+        fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
+
+        fixture.controller.selfTestOpenAsReadingSet()
+
+        // Skipped nodes show nothing, so they must not use up the cap.
+        let result = try #require(captured)
+        #expect(result.1.isEmpty)
+        #expect(!result.2.isEmpty)
+        #expect(result.2.allSatisfy {
+            $0 == CodeInsightApp.localized("relation.skip.source")
+        })
+    }
+
+    @MainActor
+    @Test
     func relationsOpenAnEmptyReadingSetWithEverySourceSkipReason() async throws {
         let fixture = try await makeRelationUXFixture(
             capturedSourceAvailable: false

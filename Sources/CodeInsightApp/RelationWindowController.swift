@@ -1441,8 +1441,9 @@ final class RelationWindowController: NSViewController,
         guard !nodes.isEmpty else { return }
         var excerpts: [ReadingSetExcerpt] = []
         var skippedReasons: [String] = []
-        for (index, node) in nodes.enumerated() {
-            guard index < 50 else {
+        for node in nodes {
+            // The cap counts excerpts shown, not nodes skipped on the way.
+            guard excerpts.count < 50 else {
                 skippedReasons.append("display cap (50 excerpts)")
                 continue
             }

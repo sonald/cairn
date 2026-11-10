@@ -102,6 +102,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         if isViewLoaded {
             container.layer?.backgroundColor = theme.chromeColor.cgColor
             applyHeaderStyle()
+            // Rows and the type hop bake theme colours into their content.
+            if !typeHopLabel.isHidden { renderTypeHopLabel() }
+            renderCandidateList()
+            if !stones.isHidden { stones.update(certainty: stones.certainty, theme: theme) }
             view.needsDisplay = true
         }
         applyBadgeStyle()
@@ -123,6 +127,12 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         pathLabel.textColor = theme.chromeSecondaryColor
         countLabel.textColor = theme.chromeSecondaryColor
         placeholderLabel.textColor = theme.chromeSecondaryColor
+        typeHopArrowLabel.textColor = theme.chromeTertiaryColor
+        typeHopBoundLabel.textColor = theme.chromeTertiaryColor
+        enclosingKindLabel.textColor = theme.chromeSecondaryColor
+        enclosingNameLabel.textColor = theme.foregroundColor
+        previousTokenNoteLabel.textColor = theme.chromeTertiaryColor
+        enclosingBodyNoteLabel.textColor = theme.chromeSecondaryColor
     }
 
     var selfTestLensStyle: (headerFill: CGColor?, stones: Certainty?, stonesVisible: Bool,
@@ -258,21 +268,15 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         typeHopTargetButton.target = self
         typeHopTargetButton.action = #selector(showTypeHopType(_:))
         typeHopArrowLabel.font = .systemFont(ofSize: 12, weight: .regular)
-        typeHopArrowLabel.textColor = theme.chromeTertiaryColor
         typeHopBoundLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        typeHopBoundLabel.textColor = theme.chromeTertiaryColor
         enclosingKindLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        enclosingKindLabel.textColor = theme.chromeSecondaryColor
         enclosingNameLabel.font = cairnSerifFont(ofSize: 15, weight: .medium)
         enclosingNameLabel.lineBreakMode = .byTruncatingTail
-        enclosingNameLabel.textColor = theme.foregroundColor
         previousTokenNoteLabel.font = .systemFont(ofSize: 10)
-        previousTokenNoteLabel.textColor = theme.chromeTertiaryColor
         previousTokenNoteLabel.alignment = .right
         previousTokenNoteLabel.stringValue = localized("lens.previousTokenNote")
         previousTokenNoteLabel.isHidden = true
         enclosingBodyNoteLabel.font = .systemFont(ofSize: 11)
-        enclosingBodyNoteLabel.textColor = theme.chromeSecondaryColor
         enclosingBodyNoteLabel.alignment = .left
         enclosingBodyNoteLabel.isHidden = true
         typeHopLabel.orientation = .horizontal
@@ -492,6 +496,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         guard !isClosing else { return }
         withObservationTracking {
             _ = model.mode
+            _ = model.tracking
             _ = model.stage
             _ = model.unavailableReason
         } onChange: { [weak self] in
