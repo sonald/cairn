@@ -431,9 +431,11 @@ public final class AppModel {
     /// activity keeps re-arming the 250 ms debounce, so this instant caps
     /// how long a dirty state can stay unsaved (~2 s).
     @ObservationIgnored private var sessionCheckpointDirtyAt: ContinuousClock.Instant?
-    /// The generation whose tabs are incomplete. A failed/cancelled restore
-    /// remains protected until a complete restore or a new workspace open.
-    @ObservationIgnored private var sessionRestoreWriteSuspension: UInt64?
+    /// True while a restore's tabs may be incomplete. Survives an index
+    /// refresh or snapshot switch that interrupts the restore; lifted only by
+    /// restore completion, the user's first tab/navigation action, or a new
+    /// workspace open/close.
+    @ObservationIgnored private var sessionRestoreWritesSuspended = false
     @ObservationIgnored private var sessionRestoreOwner: UUID?
     @ObservationIgnored package var sessionFileResolutionWillBegin: (@MainActor (URL) async -> Void)?
     /// Nil when this model persists no reading session.
@@ -655,7 +657,7 @@ public final class AppModel {
         panelPreset: PanelPresetModel,
         allowsPendingTopology: Bool
     ) throws {
-        guard sessionRestoreWriteSuspension != generation,
+        guard !sessionRestoreWritesSuspended,
               let sessionStore,
               let snapshot = makeSessionSnapshot(
                   panelPreset: panelPreset,
@@ -695,6 +697,7 @@ public final class AppModel {
         activeNavigationRequest = nil
         sessionStore.clear(projectRoot: root)
         // The empty snapshot is now the last valid state for this project.
+        sessionRestoreWritesSuspended = false
         try writeSessionCheckpoint(panelPreset: panelPreset)
     }
 
@@ -953,7 +956,7 @@ public final class AppModel {
         replayNotice = nil
         staleIndexNotice = nil
         projectFailureReason = nil
-        sessionRestoreWriteSuspension = nil
+        sessionRestoreWritesSuspended = false
         endIndexRefresh()
         tabStrip.reset()
         restoredDependencyFiles.removeAll()
@@ -1002,6 +1005,7 @@ public final class AppModel {
         replayNotice = nil
         staleIndexNotice = nil
         projectFailureReason = nil
+        sessionRestoreWritesSuspended = false
         endIndexRefresh()
         tabStrip.reset()
         return openGeneration
@@ -1069,10 +1073,13 @@ public final class AppModel {
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
         ).standardizedFileURL
-        // Bind protection to the workspace being opened. Failure keeps its
-        // partial state protected; a later fresh open advances the generation.
-        sessionRestoreWriteSuspension = generation &+ 1
+        // Suspend checkpoint writes so an exit, a debounced save, or a
+        // project-switch flush cannot replace the last valid snapshot with a
+        // partial strip. Armed after the open (which resets it, with no await
+        // in between); a failed, cancelled, or refresh/switch-interrupted
+        // restore stays protected until the user acts or a new open.
         let worktreeTask = openProject(root: root)
+        sessionRestoreWritesSuspended = true
         // Opening another project drops the previous one's highlights and
         // reference pane; these are the restored project's own.
         highlightedNames = HighlightedNames(restoring: snapshot.highlights)
@@ -1088,16 +1095,6 @@ public final class AppModel {
               snapshotPhase == .fullReady
         else { return false }
 
-        // The workspace is installed but the tab strip is still empty or
-        // partial until the loop below finishes. Suspend checkpoint writes
-        // so an exit, a debounced save, or a project-switch flush cannot
-        // replace the last valid snapshot with this intermediate state.
-        // Every exit past this point either reinstalls a fully restored
-        // state (which commits a fresh snapshot first) or fails a
-        // generation guard, after which `makeSessionSnapshot` keeps
-        // blocking writes until another complete workspace publishes.
-        sessionRestoreWriteSuspension = generation
-
         var revisionUnavailable = false
         if let revision = snapshot.revision {
             let revisionExists = await Task.detached {
@@ -1112,7 +1109,6 @@ public final class AppModel {
             )
             else { return false }
             if revisionExists {
-                sessionRestoreWriteSuspension = generation &+ 1
                 switchSnapshot(revision: revision)
                 let revisionGeneration = generation
                 let revisionTask = snapshotTask
@@ -1124,8 +1120,8 @@ public final class AppModel {
                 else { return false }
                 if snapshotPhase != .fullReady {
                     revisionUnavailable = true
-                    sessionRestoreWriteSuspension = generation &+ 1
                     let fallbackTask = openProject(root: root)
+                    sessionRestoreWritesSuspended = true
                     let fallbackGeneration = generation
                     await fallbackTask.value
                     guard canPublishWorkspaceResult(
@@ -1290,7 +1286,7 @@ public final class AppModel {
         // The restored state is complete: release write protection and
         // commit the first full snapshot for this project so the disk
         // reflects what was restored, not what the previous session left.
-        sessionRestoreWriteSuspension = nil
+        sessionRestoreWritesSuspended = false
         if sessionStore != nil,
            let preset = PanelPresetModel(rawValue: snapshot.panelPreset)
         {
@@ -1815,6 +1811,7 @@ public final class AppModel {
         _ request: NavigationRequest,
         leaving current: JumpRecord?
     ) {
+        sessionRestoreWritesSuspended = false
         replayTask?.cancel()
         if request.cause != .historyReplay { replayNotice = nil }
         if request.destination.expectedContentID != nil { staleIndexNotice = nil }
@@ -1904,6 +1901,7 @@ public final class AppModel {
         _ url: URL,
         selectionByteOffset: UInt32? = nil
     ) {
+        sessionRestoreWritesSuspended = false
         replayTask?.cancel()
         tabStrip.open(
             url,
@@ -1918,6 +1916,7 @@ public final class AppModel {
         excerpts: [ReadingSetExcerpt],
         skippedReasons: [String] = []
     ) {
+        sessionRestoreWritesSuspended = false
         replayTask?.cancel()
         tabStrip.openReadingSet(
             title: title,
@@ -2613,6 +2612,7 @@ public final class AppModel {
 
     public func activateTab(_ index: Int) {
         guard tabStrip.tabs.indices.contains(index) else { return }
+        sessionRestoreWritesSuspended = false
         tabStrip.activate(index)
         guard let tab = tabStrip.activeTab else { return }
         guard let file = tab.fileURL else {
@@ -2632,6 +2632,7 @@ public final class AppModel {
 
     public func selectRelativeTab(_ delta: Int) {
         guard tabStrip.tabs.count > 1 else { return }
+        sessionRestoreWritesSuspended = false
         tabStrip.selectRelative(delta)
         guard let tab = tabStrip.activeTab else { return }
         guard let file = tab.fileURL else {
@@ -2651,6 +2652,7 @@ public final class AppModel {
 
     public func closeTab(_ index: Int) {
         let closesActive = tabStrip.activeIndex == index
+        sessionRestoreWritesSuspended = false
         _ = tabStrip.close(index)
         guard closesActive else { return }
         if let tab = tabStrip.activeTab, let file = tab.fileURL {

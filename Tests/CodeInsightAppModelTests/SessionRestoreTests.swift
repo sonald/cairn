@@ -1857,3 +1857,37 @@ func sessionRestoreInterruptedByIndexRefreshLeavesAUsableStrip() async throws {
     #expect(model.tabStrip.tabs.compactMap { $0.fileURL?.lastPathComponent } == ["a.rs"])
     #expect(model.tabStrip.activeIndex == 0)
 }
+
+@MainActor
+@Test
+func interruptedRestoreKeepsSavedSessionUntilTheFirstUserAction() async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn a() {}", "b.rs": "fn b() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    let snapshot = SessionCodec.Snapshot(projectRoot: root.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: ["a.rs", "b.rs"].map { .file(.init(path: $0, anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)) })
+    #expect(await model.restoreSession(snapshot))
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 2)
+    var gate: CheckedContinuation<Void, Never>?
+    model.sessionFileResolutionWillBegin = { file in
+        if file.lastPathComponent == "b.rs" { await withCheckedContinuation { gate = $0 } }
+    }
+    let restore = Task { await model.restoreSession(snapshot) }
+    try #require(await testWaitUntil("b.rs gated") { gate != nil })
+    model.refreshIndex(leaving: nil)
+    gate?.resume()
+    #expect(await restore.value == false)
+    try #require(await testWaitUntil("refresh installed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+    })
+    #expect(model.tabStrip.tabs.count == 1)
+    // A save with no user action (debounce, window close, quit) keeps the full session.
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 2)
+    // The first deliberate action makes the current strip the session again.
+    model.closeTab(0)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
+}
