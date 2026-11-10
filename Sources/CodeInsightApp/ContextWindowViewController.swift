@@ -699,12 +699,8 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         let targetShownName: String
         if hop.targets.isEmpty {
             // P2: the syntax spelled no type and the Exact layer is pending
-            // (resolving) or unable to answer (not ready).
-            targetShownName = modelText(
-                hop.pendingExact
-                    ? "model.typehop.resolving"
-                    : "model.typehop.pendingExact"
-            )
+            // (resolving), answered with nothing, or unable to answer.
+            targetShownName = hop.unresolvedText
         } else if showingType {
             targetShownName = Self.declaredName(
                 in: model.displayedCandidate?.excerpt ?? ""

@@ -274,52 +274,44 @@ func semanticNavigationRejectsDeletedInvalidUTF8AndOutOfRangeTargets() async thr
     let binary = root.appendingPathComponent("src/binary.rs")
     let indexIdentity = ContentID.sha256(of: Array(source.utf8))
     let targetOffset = byteOffset(of: "target", in: source)
-    let openedBefore = opened.count
+
+    func jump(to file: URL, at offset: UInt32) -> NavigationRequest {
+        NavigationRequest(
+            destination: SourceDestination(
+                file: file,
+                byteOffset: offset,
+                expectedContentID: indexIdentity
+            ),
+            cause: .search,
+            policy: .explicitSemantic
+        )
+    }
+    // Each rejection must raise its own notice: a valid jump commits and
+    // clears the previous one, so a sticky notice cannot pass vacuously.
+    func expectRejected(_ request: NavigationRequest, _ label: String) async {
+        let openedBefore = opened.count
+        model.navigate(request)
+        #expect(await testWaitUntil("\(label) rejected") {
+            model.staleIndexNotice != nil
+        })
+        #expect(opened.count == openedBefore, "\(label) must not navigate")
+        model.navigate(jump(to: lib, at: targetOffset))
+        #expect(await testWaitUntil("valid jump after \(label) commits") {
+            opened.count == openedBefore + 1 && model.staleIndexNotice == nil
+        })
+    }
 
     // Offset beyond the indexed content: no navigation even though the
     // identity itself matches.
-    model.navigate(NavigationRequest(
-        destination: SourceDestination(
-            file: lib,
-            byteOffset: 10_000,
-            expectedContentID: indexIdentity
-        ),
-        cause: .search,
-        policy: .explicitSemantic
-    ))
-    try await Task.sleep(for: .milliseconds(300))
-    #expect(opened.count == openedBefore)
-    #expect(model.staleIndexNotice != nil)
+    await expectRejected(jump(to: lib, at: 10_000), "out-of-range offset")
 
     // Invalid UTF-8 content cannot produce a readable jump target.
     try Data([0xFF, 0xFE, 0x00, 0xD8, 0x41]).write(to: binary)
-    model.navigate(NavigationRequest(
-        destination: SourceDestination(
-            file: binary,
-            byteOffset: 1,
-            expectedContentID: indexIdentity
-        ),
-        cause: .search,
-        policy: .explicitSemantic
-    ))
-    try await Task.sleep(for: .milliseconds(300))
-    #expect(opened.count == openedBefore)
-    #expect(model.staleIndexNotice != nil)
+    await expectRejected(jump(to: binary, at: 1), "invalid UTF-8")
 
     // Deleted target: the jump is rejected instead of failing mid-display.
     try FileManager.default.removeItem(at: gone)
-    model.navigate(NavigationRequest(
-        destination: SourceDestination(
-            file: gone,
-            byteOffset: targetOffset,
-            expectedContentID: indexIdentity
-        ),
-        cause: .search,
-        policy: .explicitSemantic
-    ))
-    try await Task.sleep(for: .milliseconds(300))
-    #expect(opened.count == openedBefore)
-    #expect(model.staleIndexNotice != nil)
+    await expectRejected(jump(to: gone, at: targetOffset), "deleted target")
 }
 
 @MainActor
@@ -2877,6 +2869,7 @@ func lensStopsResolvingWhenExactGivesNoAnswer() async throws {
     #expect(await testWaitUntil("no longer resolving") {
         model.activeTypeHop != nil && model.activeTypeHop?.pendingExact == false
     })
+    #expect(model.activeTypeHop?.unresolvedText == "Type needs exact analysis · not ready")
 }
 
 /// An Exact reply that completes with no type also ends "resolving".
@@ -2898,11 +2891,14 @@ func lensStopsResolvingWhenExactFindsNoType() async throws {
         offset: byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
     )
     #expect(await testWaitUntil("pending") { model.activeTypeHop?.pendingExact == true })
+    #expect(model.activeTypeHop?.unresolvedText == "Resolving type…")
     #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
     gate.resumeAll(with: .completed([]))
     #expect(await testWaitUntil("no longer resolving") {
         model.activeTypeHop != nil && model.activeTypeHop?.pendingExact == false
     })
+    // An empty answer is "nothing found", not "not ready": nothing to wait for.
+    #expect(model.activeTypeHop?.unresolvedText == "No type found")
 }
 
 /// Holds document loads for one file name until released.
@@ -3386,13 +3382,23 @@ func caretLeavingTokenCancelsPendingExact() async throws {
     let (model, root) = try makeCaretLensModel(source, requestLog: log)
     defer { try? FileManager.default.removeItem(at: root) }
 
+    // A dwell long enough that the second caret move lands inside it even
+    // when the parallel suite starves the main actor.
+    model.exactDwell = .seconds(1)
     let alphaUse = byteOffset(of: "alpha();", in: source)
     let betaUse = byteOffset(of: "beta();", in: source)
     model.tokenClicked(file: "main.rs", offset: alphaUse, trigger: .caret)
-    try await Task.sleep(for: .milliseconds(80))
+    #expect(await testWaitUntil("alpha shown, its dwell pending") {
+        model.displayedCandidate?.excerpt.contains("fn alpha") == true
+    })
+    #expect(log.recorded.isEmpty)
     // The caret moves on before alpha's dwell elapses.
     model.tokenClicked(file: "main.rs", offset: betaUse, trigger: .caret)
-    try await Task.sleep(for: .milliseconds(700))
+    // beta's dwell started after alpha's, so once beta's request is out,
+    // alpha's deadline has passed too.
+    #expect(await testWaitUntil("beta's request sent after its dwell") {
+        log.recorded.contains(betaUse)
+    })
 
     // alpha's pending request never fired; only beta's did.
     #expect(log.recorded == [betaUse])

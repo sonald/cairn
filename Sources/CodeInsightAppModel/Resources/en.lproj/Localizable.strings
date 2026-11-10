@@ -238,6 +238,7 @@
 "model.typehop.showDeclarationHint" = "Click to show the declaration";
 "model.typehop.resolving" = "Resolving type…";
 "model.typehop.pendingExact" = "Type needs exact analysis · not ready";
+"model.typehop.noTypeFound" = "No type found";
 "model.typehop.accessibility" = "%1$@, %2$@, type %3$@";
 
 "model.query.suggest.same" = "Find both terms in the same function";

@@ -238,6 +238,7 @@
 "model.typehop.showDeclarationHint" = "点击查看声明";
 "model.typehop.resolving" = "类型解析中…";
 "model.typehop.pendingExact" = "类型需要精确分析 · 未就绪";
+"model.typehop.noTypeFound" = "未找到类型";
 "model.typehop.accessibility" = "%1$@，%2$@，类型 %3$@";
 
 "model.query.suggest.same" = "在同一个函数里查找两个词";

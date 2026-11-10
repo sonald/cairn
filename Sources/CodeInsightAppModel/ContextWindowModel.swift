@@ -212,6 +212,18 @@ public final class ContextWindowModel {
         public var boundNote: String?
         /// Set while a `typeDefinition` request is in flight (P2).
         public var pendingExact: Bool
+        /// Exact answered the type query but nothing was presentable (P2).
+        public var exactFoundNoType = false
+
+        /// Target text while `targets` is empty (P2): resolving, nothing
+        /// found, or the exact layer is not ready.
+        public var unresolvedText: String {
+            localized(
+                pendingExact ? "model.typehop.resolving"
+                    : exactFoundNoType ? "model.typehop.noTypeFound"
+                    : "model.typehop.pendingExact"
+            )
+        }
 
         public init(
             via: Candidate,
@@ -1549,7 +1561,7 @@ public final class ContextWindowModel {
                 }
                 // No entry (or none presentable) promoted the hop: stop
                 // resolving instead of spinning forever.
-                if requestID == request { markTypeHopExactUnavailable() }
+                if requestID == request { markTypeHopExactUnavailable(foundNoType: true) }
             case .unsupported:
                 // The server never answers typeDefinition (TypeScript,
                 // Pyright): that is not "not ready". Leave the pending hop
@@ -1580,14 +1592,15 @@ public final class ContextWindowModel {
         }
     }
 
-    /// P2: the exact layer cannot answer the type hop — surface the
-    /// "not ready" status instead of an endless resolving state.
-    private func markTypeHopExactUnavailable() {
+    /// P2: the exact layer cannot answer the type hop, or answered with no
+    /// presentable type — surface that instead of an endless resolving state.
+    private func markTypeHopExactUnavailable(foundNoType: Bool = false) {
         guard case let .typeHop(hop, selected) = stage, hop.pendingExact else {
             return
         }
         var updated = hop
         updated.pendingExact = false
+        updated.exactFoundNoType = foundNoType
         stage = .typeHop(updated, selected: selected)
     }
 

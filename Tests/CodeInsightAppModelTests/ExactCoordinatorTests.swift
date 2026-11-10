@@ -1902,7 +1902,8 @@ func contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() async th
     try "struct A;\nstruct B;\nfn f<T>(value: T) { value.close(); }\n"
         .write(to: root.appendingPathComponent("main.rs"), atomically: true, encoding: .utf8)
     gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: secondDefinition))
-    try await Task.sleep(for: .milliseconds(300))
+    // The stale report is where the upgrade is abandoned.
+    #expect(await testWaitUntil("drift reported") { staleReports.contains("main.rs") })
 
     #expect(
         model.displayedCandidate?.certainty != .exact,
@@ -1912,7 +1913,6 @@ func contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() async th
         model.displayedCandidate?.provenanceBadge.contains("Exact") != true
     )
     #expect(model.candidateCount == 2, "index-consistent fuzzy candidates stay")
-    #expect(staleReports.contains("main.rs"))
 }
 
 @MainActor
@@ -1952,11 +1952,10 @@ func contextExactInsertRequiresMatchingTargetBytes() async throws {
         file: "main.rs",
         byteOffset: exactByteOffset(of: "never_fuzzy", in: source)
     ))
-    try await Task.sleep(for: .milliseconds(300))
+    #expect(await testWaitUntil("drift reported") { staleReports.contains("main.rs") })
 
     #expect(model.candidateCount == candidateCountBeforeExact)
     #expect(model.displayedCandidate?.certainty != .exact)
-    #expect(staleReports.contains("main.rs"))
 }
 
 @MainActor
@@ -1997,13 +1996,12 @@ func contextExactUpgradeSuspendsWhenSourceFileDrifts() async throws {
         file: "main.rs",
         byteOffset: exactByteOffset(of: "target", in: mainSource)
     ))
-    try await Task.sleep(for: .milliseconds(300))
+    #expect(await testWaitUntil("drift reported") { staleReports.contains("caller.rs") })
 
     #expect(
         model.displayedCandidate?.certainty != .exact,
         "a drifted query source must suspend the Exact upgrade"
     )
-    #expect(staleReports.contains("caller.rs"))
 }
 
 private let twoCloseSource = """
