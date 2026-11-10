@@ -4016,3 +4016,68 @@ func exactCoordinatorReactivatesTheParkedWorkspaceSessionThroughASwitch()
     #expect(!coordinator.hasSession(in: .worktree))
     #expect(!coordinator.hasSession(in: .checkout))
 }
+
+@MainActor
+@Test
+func exactCoordinatorFinishesACrashRestartWhoseRequestWasCancelled() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState { ordinal, _, _ in
+        if ordinal == 1 { throw LSPError.processExited(9, "test crash") }
+        return ExactLocation(file: "main.rs", byteOffset: 0, line: 1, column: 1)
+    }
+    let coordinator = fixture.coordinator(state: state)
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    try #require(await testWaitUntil("ready") { coordinator.readiness == .ready })
+
+    let batch = ExactRequestBatch()
+    let request = Task {
+        await coordinator.definition(file: "main.rs", byteOffset: 0, generation: 1, batch: batch)
+    }
+    try #require(await testWaitUntil("restart begins") { coordinator.readiness == .preparing })
+    batch.cancel()
+    guard case .cancelled = await request.value else {
+        Issue.record("a cancelled request should report cancelled")
+        return
+    }
+    for _ in 0..<200 where coordinator.readiness != .ready {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(coordinator.readiness == .ready)
+    #expect(state.prepareCount == 2)
+
+    // The restarted session serves the next request without another restart.
+    guard case .completed = await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 1
+    ) else {
+        Issue.record("restarted session did not answer")
+        return
+    }
+    #expect(state.prepareCount == 2)
+}
+
+@MainActor
+@Test
+func exactCoordinatorReportsTheStatusReasonWithoutASession() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let coordinator = fixture.coordinator(state: ExactProviderState())
+    let reason = localized("model.exact.noProject")
+    #expect(await coordinator.hover(
+        file: "main.rs", byteOffset: 0, generation: 0, batch: ExactRequestBatch()
+    ) == .unavailable(reason))
+    guard case .unavailable(reason) = await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 0
+    ), case .unavailable(reason) = await coordinator.typeDefinition(
+        file: "main.rs", byteOffset: 0, generation: 0
+    ) else {
+        Issue.record("definition requests did not report the status reason")
+        return
+    }
+    // Between invalidate and the next prepare nothing has failed yet.
+    coordinator.invalidate(generation: 1)
+    #expect(coordinator.readiness == .preparing)
+    #expect(await coordinator.hover(
+        file: "main.rs", byteOffset: 0, generation: 1, batch: ExactRequestBatch()
+    ) == .cancelled)
+}

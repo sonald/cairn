@@ -1256,6 +1256,15 @@ public final class ExactCoordinator {
         return trustedRepositories.contains { $0.path == path }
     }
 
+    /// The status's own reason when no session answers. Nil while one is
+    /// still coming: a request then gets no answer rather than a complaint.
+    private var inactiveReason: String? {
+        switch readiness {
+        case .unavailable(let reason), .off(let reason): reason
+        case .preparing, .ready: nil
+        }
+    }
+
     public func definition(
         file: String,
         byteOffset: UInt32,
@@ -1266,7 +1275,7 @@ public final class ExactCoordinator {
         guard batch?.isCurrent != false else { return .cancelled }
         guard expectedGeneration == generation else { return nil }
         guard let current = active else {
-            return .unavailable(String(describing: readiness))
+            return inactiveReason.map { .unavailable($0) } ?? .cancelled
         }
         guard current.generation == generation else { return nil }
         guard let requestFile = providerRelativeRequestPath(
@@ -1328,7 +1337,7 @@ public final class ExactCoordinator {
         guard batch?.isCurrent != false else { return .cancelled }
         guard expectedGeneration == generation else { return nil }
         guard let current = active else {
-            return .unavailable(String(describing: readiness))
+            return inactiveReason.map { .unavailable($0) } ?? .cancelled
         }
         guard current.generation == generation else { return nil }
         guard current.session.negotiatedCapabilities.contains(.typeDefinition)
@@ -1383,7 +1392,7 @@ public final class ExactCoordinator {
         guard batch.isCurrent else { return .cancelled }
         guard expectedGeneration == generation else { return nil }
         guard let current = active else {
-            return .unavailable(String(describing: readiness))
+            return inactiveReason.map { .unavailable($0) } ?? .cancelled
         }
         guard current.generation == generation else { return nil }
         guard current.session.negotiatedCapabilities.contains(.hover) else {
@@ -1477,61 +1486,68 @@ public final class ExactCoordinator {
         byteOffset: Int,
         batch: ExactRequestBatch?
     ) async -> DefinitionResult? {
-        guard batch?.isCurrent != false else { return .cancelled }
-        guard isCurrent(previous) else { return nil }
-        readiness = .preparing
-        try? await Task.sleep(for: .milliseconds(100))
-        guard batch?.isCurrent != false else { return .cancelled }
-        guard isCurrent(previous) else { return nil }
-
+        let restarted: Active
         do {
-            let newSession = try await Task.detached(priority: .utility) {
-                try previous.provider.prepare(
-                    snapshot: previous.providerSnapshot,
-                    profile: previous.profile,
-                    trustMode: previous.trustMode
-                )
-            }.value
-            guard batch?.isCurrent != false, isCurrent(previous) else {
-                await Task.detached { newSession.close() }.value
-                return batch?.isCurrent == false ? .cancelled : nil
+            guard let session = try await restartSession(previous) else {
+                return nil
             }
-            var restarted = previous
-            restarted.session = newSession
-            active = restarted
-            slots[restarted.slot] = restarted
-            observeEnvironment(from: restarted)
-            analysisEnvironment = newSession.attribution.environment
-            Task.detached { previous.session.close() }
-
-            do {
-                let result = try await request(
-                    session: newSession,
-                    file: file,
-                    byteOffset: byteOffset,
-                    batch: batch
-                )
-                guard batch?.isCurrent != false else { return .cancelled }
-                return publish(
-                    result,
-                    from: restarted,
-                    file: file,
-                    byteOffset: byteOffset
-                )
-            } catch {
-                guard batch?.isCurrent != false, isCurrent(restarted) else {
-                    return batch?.isCurrent == false ? .cancelled : nil
-                }
-                readiness = .unavailable(
-                    localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
-                )
-                return .unavailable(localizedFormat("model.exact.restartExhausted", exactFailureReason(error)))
-            }
+            restarted = session
         } catch {
-            guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
+            guard isCurrent(previous) else { return nil }
             readiness = .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
             return .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
         }
+        guard batch?.isCurrent != false else { return .cancelled }
+        do {
+            let result = try await request(
+                session: restarted.session,
+                file: file,
+                byteOffset: byteOffset,
+                batch: batch
+            )
+            guard batch?.isCurrent != false else { return .cancelled }
+            return publish(
+                result,
+                from: restarted,
+                file: file,
+                byteOffset: byteOffset
+            )
+        } catch {
+            guard batch?.isCurrent != false, isCurrent(restarted) else {
+                return batch?.isCurrent == false ? .cancelled : nil
+            }
+            readiness = .unavailable(
+                localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
+            )
+            return .unavailable(localizedFormat("model.exact.restartExhausted", exactFailureReason(error)))
+        }
+    }
+
+    /// Replaces a crashed session. The restart belongs to the coordinator,
+    /// not to the request that saw the crash: cancelling that request must
+    /// not leave the status preparing with the dead session installed.
+    /// Returns nil when the generation or session moved on meanwhile.
+    private func restartSession(_ previous: Active) async throws -> Active? {
+        guard isCurrent(previous) else { return nil }
+        readiness = .preparing
+        try? await Task.sleep(for: .milliseconds(100))
+        guard isCurrent(previous) else { return nil }
+        let newSession = try await Task.detached(priority: .utility) {
+            try previous.provider.prepare(
+                snapshot: previous.providerSnapshot,
+                profile: previous.profile,
+                trustMode: previous.trustMode
+            )
+        }.value
+        guard isCurrent(previous) else {
+            await Task.detached { newSession.close() }.value
+            return nil
+        }
+        var restarted = previous
+        restarted.session = newSession
+        activate(restarted)
+        Task.detached { previous.session.close() }
+        return restarted
     }
 
     private func request(
@@ -1679,54 +1695,36 @@ public final class ExactCoordinator {
         direction: RelationTreeModel.Direction,
         batch: ExactRequestBatch?
     ) async -> RelationQueryResult? {
-        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
-        readiness = .preparing
-        try? await Task.sleep(for: .milliseconds(100))
-        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
-
+        let restarted: Active
         do {
-            let newSession = try await Task.detached(priority: .utility) {
-                try previous.provider.prepare(
-                    snapshot: previous.providerSnapshot,
-                    profile: previous.profile,
-                    trustMode: previous.trustMode
-                )
-            }.value
-            guard batch?.isCurrent != false, isCurrent(previous) else {
-                await Task.detached { newSession.close() }.value
+            guard let session = try await restartSession(previous) else {
                 return nil
             }
-            var restarted = previous
-            restarted.session = newSession
-            active = restarted
-            slots[restarted.slot] = restarted
-            observeEnvironment(from: restarted)
-            analysisEnvironment = newSession.attribution.environment
-            Task.detached { previous.session.close() }
-
-            do {
-                let result = try await requestRelations(
-                    session: newSession,
-                    file: file,
-                    byteOffset: byteOffset,
-                    item: item,
-                    direction: direction,
-                    batch: batch
-                )
-                guard batch?.isCurrent != false else { return nil }
-                return publish(result, from: restarted)
-            } catch {
-                guard batch?.isCurrent != false, isCurrent(restarted) else {
-                    return nil
-                }
-                readiness = .unavailable(
-                    localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
-                )
-                return nil
-            }
+            restarted = session
         } catch {
-            guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
+            guard isCurrent(previous) else { return nil }
             readiness = .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
+            return nil
+        }
+        guard batch?.isCurrent != false else { return nil }
+        do {
+            let result = try await requestRelations(
+                session: restarted.session,
+                file: file,
+                byteOffset: byteOffset,
+                item: item,
+                direction: direction,
+                batch: batch
+            )
+            guard batch?.isCurrent != false else { return nil }
+            return publish(result, from: restarted)
+        } catch {
+            guard batch?.isCurrent != false, isCurrent(restarted) else {
+                return nil
+            }
+            readiness = .unavailable(
+                localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
+            )
             return nil
         }
     }

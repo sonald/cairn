@@ -538,6 +538,13 @@ public final class RelationTreeModel {
                   possibleValidationBatch === batch,
                   generation == currentGeneration
             else { return }
+            // A row with no reconciliation got no definition answer; the
+            // next visibility pass asks again. Nothing to republish then.
+            let unanswered = zip(rows, promoted.edges).filter {
+                $0.1.explanation?.reconciliationRefs.isEmpty != false
+            }.map { ObjectIdentifier($0.0) }
+            scheduledPossibleRows.subtract(unanswered)
+            guard unanswered.count < rows.count else { return }
             let container = parent.kind == .group ? parent.parent : parent
             guard let container else { return }
             let selectedIDs = Dictionary(
@@ -549,18 +556,24 @@ public final class RelationTreeModel {
                 selectedIDs[ObjectIdentifier(row)] ?? row.loadedEdge
             }
             combined += promoted.edges.dropFirst(rows.count)
-            let wasTruncated = container.children?.contains {
-                $0.kind == .truncated
-                    && $0.isUpstreamTruncation
-            } == true
-            let children = makeChildren(
+            // Only relation rows are rebuilt. Status, truncation, loading and
+            // evidence rows describe the root query, which this does not
+            // redo; the status goes once a row is verified, as in makeChildren.
+            var children = makeChildren(
                 from: LoadResult(
                     edges: Self.deduplicateExact(combined),
-                    isTruncated: wasTruncated
+                    isTruncated: false
                 ),
                 under: container,
                 direction: direction
-            )
+            ).filter { $0.kind == .edge || $0.kind == .group }
+            let hasExact = children.contains {
+                $0.kind == .edge && $0.certainty == .exact
+            }
+            children += (container.children ?? []).filter {
+                $0.kind != .edge && $0.kind != .group
+                    && !(hasExact && $0.isVerificationStatus)
+            }
             container.children = reusingPublishedRows(
                 children,
                 from: container.children ?? [],
@@ -1112,6 +1125,31 @@ public final class RelationTreeModel {
         providerOnly: Bool = false,
         explanation: RelationRowExplanation
     ) -> LoadedEdge {
+        // A caller's call site resolves to the root; the row stays the caller.
+        // Its call site is kept like an exact incoming call's, so two sites
+        // in one caller fold into one row that cycles both.
+        if direction == .callers, !providerOnly {
+            return LoadedEdge(
+                title: edge.title,
+                certainty: .exact,
+                dispatch: edge.dispatch,
+                symbol: edge.symbol,
+                path: edge.path,
+                byteOffset: edge.byteOffset,
+                line: edge.line,
+                evidence: [],
+                identityTarget: edge.identityTarget,
+                // ponytail: column is unknown here and no call-site reader uses it.
+                callSites: [ExactLocation(
+                    file: edge.path,
+                    byteOffset: Int(edge.byteOffset),
+                    line: Int(edge.line),
+                    column: 0
+                )],
+                exactOrigin: verification.origin,
+                explanation: explanation
+            )
+        }
         let location = verification.target.location
         let byteOffset = UInt32(location.byteOffset)
         let line = UInt32(location.line)

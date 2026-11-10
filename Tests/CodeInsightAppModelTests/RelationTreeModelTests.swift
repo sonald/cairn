@@ -3621,3 +3621,161 @@ func relationGroupsKeepIdentityWhenDisplayTitlesChange() async throws {
     #expect(frozen.display(language: "en").verificationBody != frozen.display(language: "zh-Hans").verificationBody)
     #expect(frozen.display(language: "en").nodeTitle == frozen.display(language: "zh-Hans").nodeTitle)
 }
+
+@MainActor
+@Test
+func relationTreePossibleValidationKeepsStatusTruncationAndLoadingRows()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edges = (0..<501).map { index in
+        RelationTreeModel.LoadedEdge(
+            title: "possible-\(index)", certainty: .possible, dispatch: .direct,
+            symbol: fixture.b, path: "main.rs", byteOffset: UInt32(index), line: 1,
+            evidence: [], exactQuery: ("main.rs", UInt32(index), 1),
+            fuzzyTarget: ("main.rs", UInt32(index))
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: edges, isTruncated: false) },
+        exactResolver: { _, _, _, _ in .completed([]) },
+        exactRelationsResolver: { _, _, _, _, _, _ in .unsupported }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    await model.setRoot(target: .engine(fixture.a), direction: .calls)?.value
+    func statusTitles() -> [String] {
+        model.root?.children?.filter { $0.kind == .truncated }.map(\.title) ?? []
+    }
+    let before = statusTitles()
+    #expect(before == [
+        localized("model.relation.unsupportedCalls"),
+        localizedFormat("model.relation.relationsTruncated", 501),
+    ])
+    var published = false
+    model.onNodeChange = { _ in published = true }
+    model.validatePossible(try relationPossibleRows(in: model.root))
+    try #require(await testWaitUntil("validation published") { published })
+    #expect(statusTitles() == before)
+
+    // Validation landing while the root exact query is pending keeps the
+    // loading row.
+    let exact = RelationAsyncGate()
+    let pending = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: Array(edges.prefix(2)), isTruncated: false) },
+        exactResolver: { _, _, _, _ in .completed([]) },
+        exactRelationsResolver: { _, _, _, _, _, _ in
+            await exact.wait()
+            return .unsupported
+        }
+    )
+    pending.updateProjectState(.ready(fixture.session, fixture.context))
+    let load = pending.setRoot(target: .engine(fixture.a), direction: .calls)
+    try #require(await testWaitUntil("heuristic rows publish before exact") {
+        exact.isPending && pending.root?.children?.contains { $0.candidateGroup == .possible } == true
+    })
+    published = false
+    pending.onNodeChange = { _ in published = true }
+    pending.validatePossible(try relationPossibleRows(in: pending.root))
+    try #require(await testWaitUntil("pending validation published") { published })
+    #expect(pending.root?.children?.contains { $0.kind == .loading } == true)
+    exact.release()
+    await load?.value
+}
+
+@MainActor
+@Test
+func relationTreeVerifiedCallersKeepTheirOwnRowAndLocation() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let rootOffset: UInt32 = 19
+    // Shaped like `load(.callers)`: the candidate and fuzzy target are the
+    // root, the identity is the caller, the row sits at the call site.
+    let callers = [
+        (UInt32(9), UInt32(3)), (UInt32(11), UInt32(0)), (UInt32(13), UInt32(3)),
+    ].map { callSite, caller in
+        RelationTreeModel.LoadedEdge(
+            title: "caller-\(caller)", certainty: .possible, dispatch: .direct,
+            symbol: caller == 3 ? fixture.a : nil, path: "main.rs",
+            byteOffset: callSite, line: 1, evidence: [],
+            candidate: CandidateObservation(
+                target: .occurrence(fixture.b), certainty: .possible,
+                dispatch: .direct, provenance: .fuzzyResolver,
+                completeness: .complete, evidence: []
+            ),
+            exactQuery: ("main.rs", callSite, 1),
+            fuzzyTarget: ("main.rs", rootOffset),
+            identityTarget: ("main.rs", caller)
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: callers, isTruncated: false) },
+        exactResolver: { _, _, _, _ in
+            .completed([relationExactEntry(file: "main.rs", byteOffset: rootOffset)])
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    await model.setRoot(target: .engine(fixture.b), direction: .callers)?.value
+    var published = false
+    model.onNodeChange = { _ in published = true }
+    model.validatePossible(try relationPossibleRows(in: model.root))
+    try #require(await testWaitUntil("validation published") { published })
+
+    let verified = relationVisibleEdgeRows(model.root).filter { $0.certainty == .exact }
+    #expect(verified.map(\.title) == ["caller-3", "caller-0"])
+    #expect(verified.map { $0.target?.byteOffset } == [9, 11])
+    #expect(verified.first?.symbol == fixture.a)
+    // Two call sites in one caller fold into its row and keep both sites.
+    #expect(verified.first?.modifiers.contains(
+        localizedFormat("model.relation.callSites", 2)
+    ) == true)
+}
+
+@MainActor
+@Test
+func relationTreeRetriesPossibleRowsWhoseDefinitionFailed() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edge = RelationTreeModel.LoadedEdge(
+        title: "b", certainty: .possible, dispatch: .direct, symbol: fixture.b,
+        path: "main.rs", byteOffset: 19, line: 1, evidence: [],
+        exactQuery: ("main.rs", 9, 1), fuzzyTarget: ("main.rs", 19)
+    )
+    let failures = 3
+    var requests = 0
+    var publishes = 0
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: [edge], isTruncated: false) },
+        exactResolver: { _, _, _, _ in
+            requests += 1
+            return requests > failures
+                ? .completed([relationExactEntry(file: "main.rs", byteOffset: 19)])
+                : .unavailable("timeout")
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    await model.setRoot(target: .engine(fixture.a), direction: .calls)?.value
+    model.onNodeChange = { _ in publishes += 1 }
+    let row = try #require(try relationPossibleRows(in: model.root).first)
+
+    // Each visibility pass asks at most once; failed answers republish
+    // nothing, and a later pass asks again.
+    var passes = 0
+    while requests < failures, passes < 200 {
+        model.validatePossible([row])
+        passes += 1
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(requests == failures)
+    #expect(requests <= passes)
+    #expect(publishes == 0)
+    #expect(row.badge == "Inferred")
+
+    for _ in 0..<200 where row.badge != "Verified" {
+        model.validatePossible([row])
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(row.badge == "Verified")
+    #expect(requests == failures + 1)
+    #expect(publishes == 1)
+}
