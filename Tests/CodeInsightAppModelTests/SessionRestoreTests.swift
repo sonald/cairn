@@ -1807,3 +1807,53 @@ func savedQueryExecutesAfterProjectRestoration() async throws {
     #expect(model.projectSearch.openSelection()?.path == "main.rs")
     await model.closeProject()
 }
+
+@MainActor
+@Test
+func openingAnotherProjectDropsHighlightsAndReferencePaneButRestoreBringsItsOwn() async throws {
+    let a = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let b = try sessionRestoreProject(["b.rs": "fn b() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [a, b, state] { try? FileManager.default.removeItem(at: path) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    await model.openProject(root: a).value
+    model.highlightedNames.toggle("a")
+    model.referencePane = ReferencePaneState(file: a.appendingPathComponent("a.rs"), byteOffset: 0)
+
+    await model.openProject(root: b).value
+    #expect(model.highlightedNames.isEmpty)
+    #expect(model.referencePane == nil)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: b).snapshot?.highlights.isEmpty == true)
+
+    let saved = SessionCodec.Snapshot(projectRoot: a.path, language: .rust, revision: nil, activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue, tabs: [],
+        highlights: [.init(name: "a", slot: 2)], referencePane: .init(path: "a.rs", byteOffset: 3))
+    #expect(await model.restoreSession(saved))
+    #expect(model.highlightedNames.entries == saved.highlights)
+    #expect(model.referencePane?.file.path == a.appendingPathComponent("a.rs").path)
+    #expect(model.referencePane?.byteOffset == 3)
+}
+
+@MainActor
+@Test
+func sessionRestoreInterruptedByIndexRefreshLeavesAUsableStrip() async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn a() {}", "b.rs": "fn b() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    let snapshot = SessionCodec.Snapshot(projectRoot: root.path, language: .rust, revision: nil, activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: ["a.rs", "b.rs"].map { .file(.init(path: $0, anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)) })
+    var gate: CheckedContinuation<Void, Never>?
+    model.sessionFileResolutionWillBegin = { file in
+        if file.lastPathComponent == "b.rs" { await withCheckedContinuation { gate = $0 } }
+    }
+    let restore = Task { await model.restoreSession(snapshot) }
+    try #require(await testWaitUntil("b.rs gated") { gate != nil })
+    model.refreshIndex(leaving: nil)
+    gate?.resume()
+    #expect(await restore.value == false)
+    #expect(model.tabStrip.tabs.compactMap { $0.fileURL?.lastPathComponent } == ["a.rs"])
+    #expect(model.tabStrip.activeIndex == 0)
+}

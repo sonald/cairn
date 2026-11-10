@@ -2879,6 +2879,242 @@ func lensStopsResolvingWhenExactGivesNoAnswer() async throws {
     })
 }
 
+/// An Exact reply that completes with no type also ends "resolving".
+@MainActor
+@Test
+func lensStopsResolvingWhenExactFindsNoType() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        fn make_s() -> S { S { n: 1 } }
+        fn main() {
+            let made = make_s();
+            let _ = made;
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
+    )
+    #expect(await testWaitUntil("pending") { model.activeTypeHop?.pendingExact == true })
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
+    gate.resumeAll(with: .completed([]))
+    #expect(await testWaitUntil("no longer resolving") {
+        model.activeTypeHop != nil && model.activeTypeHop?.pendingExact == false
+    })
+}
+
+/// Holds document loads for one file name until released.
+private actor GatedDocumentLoader {
+    private let gatedName: String
+    private var isOpen = false
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private(set) var gatedLoads = 0
+
+    init(gating name: String) { gatedName = name }
+
+    var heldCount: Int { held.count }
+
+    func load(_ file: URL, _ languageMode: LanguageMode) async -> ReaderDocument? {
+        if file.lastPathComponent == gatedName {
+            if !isOpen { await withCheckedContinuation { held.append($0) } }
+            gatedLoads += 1
+        }
+        return try? DocumentLoader().load(file: file, languageMode: languageMode).document
+    }
+
+    func release() {
+        isOpen = true
+        held.forEach { $0.resume() }
+        held = []
+    }
+}
+
+/// A type hop still presenting its targets when a newer click lands must
+/// neither take over the lens nor start Exact work for the old token.
+@MainActor
+@Test
+func lensDropsATypeHopThatFinishesAfterANewerClick() async throws {
+    let models = """
+        class Holder:
+            pass
+        """
+    let use = """
+        from models import Holder
+
+        def beta():
+            pass
+
+        def go(h: Holder):
+            keep = h
+            beta()
+        """
+    let root = try temporaryProject(["models.py": models, "use.py": use])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let loader = GatedDocumentLoader(gating: "models.py")
+    let log = ExactRequestLog()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        loader: { await loader.load($0, $1) },
+        exactResolver: { _, offset, _, _ in
+            log.append(offset)
+            return .completed([])
+        },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            let spelling = try? session.bindingSpelling(file: file, offset: offset, context: context)
+            return ContextWindowModel.TypeHopAnswer(
+                result: result,
+                viaText: spelling?.text,
+                viaKind: spelling?.kind,
+                boundNote: spelling?.boundNote
+            )
+        }
+    )
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    let binding = byteOffset(of: "keep = h", in: use) + UInt32("keep = ".utf8.count)
+    let call = byteOffset(of: "    beta()", in: use) + 4
+    let betaDeclaration = byteOffset(of: "beta():", in: use)
+
+    model.tokenClicked(file: "use.py", offset: binding)
+    #expect(await testWaitUntil("type target load held") { await loader.heldCount == 1 })
+    model.tokenClicked(file: "use.py", offset: call)
+    #expect(await testWaitUntil("beta shown") {
+        model.displayedCandidate?.targetByteOffset == betaDeclaration
+            && log.recorded.contains(call)
+    })
+    await loader.release()
+    #expect(await testWaitUntil("held load served") { await loader.gatedLoads == 1 })
+    try await Task.sleep(for: .milliseconds(100))
+
+    #expect(model.activeTypeHop == nil)
+    #expect(model.displayedCandidate?.targetByteOffset == betaDeclaration)
+    #expect(!log.recorded.contains(binding))
+}
+
+/// While a newer click is still resolving, ⌘-click on it answers with its
+/// own declaration, not the previous token's candidate.
+@MainActor
+@Test
+func explicitJumpDuringAnInFlightLookupAnswersTheNewToken() async throws {
+    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let resolver = HoldingContextResolver()
+    let model = ContextWindowModel(resolver.resolve)
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    let alpha = byteOffset(of: "alpha();", in: source)
+    let beta = byteOffset(of: "beta();", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: alpha)
+    #expect(await testWaitUntil("alpha shown") { model.displayedCandidate?.line == 1 })
+    resolver.isHolding = true
+    model.tokenClicked(file: "main.rs", offset: beta)
+    #expect(await testWaitUntil("beta held") { resolver.heldCount == 1 })
+    let jump = Task { await model.explicitJump(file: "main.rs", offset: beta) }
+    for _ in 0..<20 { await Task.yield() }
+    resolver.release()
+
+    #expect(await jump.value?.targetByteOffset == byteOffset(of: "beta() {}", in: source))
+    #expect(await testWaitUntil("beta shown") { model.displayedCandidate?.line == 2 })
+}
+
+@MainActor
+private final class HoldingContextResolver {
+    var isHolding = false
+    private var held: [CheckedContinuation<Void, Never>] = []
+
+    var heldCount: Int { held.count }
+
+    func resolve(
+        session: EngineSession,
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) async throws -> [ResolutionCandidate] {
+        if isHolding { await withCheckedContinuation { held.append($0) } }
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+
+    func release() {
+        isHolding = false
+        held.forEach { $0.resume() }
+        held = []
+    }
+}
+
+/// An Exact upgrade of an import-binding candidate keeps the import fact.
+@MainActor
+@Test
+func exactUpgradeKeepsTheImportBindingFlag() async throws {
+    let source = "use std::io::Read; fn f() { Read(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    let click = byteOffset(of: "Read();", in: source)
+    let resolve: ContextWindowModel.Resolver = { session, file, offset, context in
+        try session.resolve(file: file, offset: offset, context: context)
+    }
+    let local = ContextWindowModel(resolve)
+    local.updateProjectState(.ready(session, context), root: root)
+    local.tokenClicked(file: "main.rs", offset: click)
+    #expect(await testWaitUntil("local import binding") { local.displayedCandidate != nil })
+    let importBinding = try #require(local.displayedCandidate)
+    try #require(importBinding.isImportBinding)
+
+    let model = ContextWindowModel(
+        resolve,
+        exactResolver: { _, _, _, _ in
+            .completed([exactTypeEntry(file: "main.rs", offset: importBinding.targetByteOffset)])
+        }
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+    model.tokenClicked(file: "main.rs", offset: click)
+    #expect(await testWaitUntil("upgraded") { model.displayedCandidate?.exactAttribution != nil })
+    #expect(model.displayedCandidate?.isImportBinding == true)
+}
+
+/// R5.2: the body line count does not depend on where the signature ends.
+@MainActor
+@Test
+func enclosingScopeCountsBodyLinesTheSameForAnySignatureLayout() async throws {
+    let source = """
+        fn same_line() {
+            let a = 1;
+            let b = 2;
+        }
+        fn split(
+            x: u32,
+        ) {
+            let a = 1;
+            let b = 2;
+        }
+        fn short() {
+        }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let document = try DocumentLoader().load(file: root.appendingPathComponent("main.rs")).document
+    let model = ContextWindowModel()
+    model.setTracking(.enclosing)
+
+    model.caretMoved(file: "main.rs", offset: byteOffset(of: "let a", in: source), document: document)
+    #expect(model.activeEnclosingScope?.name == "same_line")
+    #expect(model.activeEnclosingScope?.bodyLineCount == 2)
+    model.caretMoved(file: "main.rs", offset: byteOffset(of: "x: u32", in: source), document: document)
+    #expect(model.activeEnclosingScope?.name == "split")
+    #expect(model.activeEnclosingScope?.bodyLineCount == 2)
+    model.caretMoved(file: "main.rs", offset: byteOffset(of: "short", in: source), document: document)
+    #expect(model.activeEnclosingScope?.name == "short")
+    #expect(model.activeEnclosingScope?.bodyLineCount == 0)
+}
+
 /// Q4: a manual declaration/type toggle before the Exact reply blocks the
 /// auto-switch.
 @MainActor
@@ -3224,4 +3460,20 @@ func lensKeepsPreviousContentWhenCaretLeavesSymbols() async throws {
     #expect(await testWaitUntil("model.isShowingPreviousToken == false") {
         !model.isShowingPreviousToken
     })
+}
+
+@MainActor
+@Test
+func compareKeepsItsSnapshotLoadingAndFailureAcrossFileChanges() {
+    let compare = CompareModel()
+    let file = URL(fileURLWithPath: "/nonexistent/main.rs")
+    compare.beginLoading(revision: "C")
+    compare.update(file: file, leftSource: nil, languageMode: nil)
+    #expect(compare.isLoading)
+
+    let generation = compare.beginLoading(revision: "C")
+    compare.fail(generation: generation, error: CocoaError(.fileReadNoSuchFile))
+    compare.update(file: file, leftSource: nil, languageMode: nil)
+    #expect(!compare.isLoading)
+    #expect(compare.errorMessage != nil)
 }

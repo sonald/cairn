@@ -631,13 +631,7 @@ public final class ContextWindowModel {
             requestID &+= 1
             cancelExactUpgrade()
             pendingToken = nil
-            let hasDisplayedLocatedToken = if let displayedToken, let locatedToken {
-                locatedToken.file == displayedToken.file
-                    && locatedToken.range.contains(displayedToken.offset)
-            } else {
-                false
-            }
-            if !hasDisplayedLocatedToken { locatedToken = nil }
+            if !displaysLocatedToken { locatedToken = nil }
         }
         mode = pinned ? .pinned : .follow
         isPinned = pinned
@@ -653,6 +647,14 @@ public final class ContextWindowModel {
                 request: requestID
             )
         }
+    }
+
+    /// The stage shows the located token's answer. While its lookup is in
+    /// flight (or found nothing) the stage still holds the previous token's.
+    private var displaysLocatedToken: Bool {
+        guard let displayedToken, let locatedToken else { return false }
+        return locatedToken.file == displayedToken.file
+            && locatedToken.range.contains(displayedToken.offset)
     }
 
     public func updateProjectState(
@@ -832,10 +834,6 @@ public final class ContextWindowModel {
                 break
             }
         }
-        // Fallback: display just the name's line.
-        if signatureEndLine == nameLine {
-            bodyFirstLine = nameLine
-        }
 
         let docStart: UInt32
         if let docRange = docCommentRange(above: facet.range, in: document),
@@ -926,6 +924,7 @@ public final class ContextWindowModel {
         if let locatedToken,
            locatedToken.file == file,
            locatedToken.range.contains(offset),
+           displaysLocatedToken,
            let current = symbolCandidate
         {
             return current
@@ -1004,8 +1003,12 @@ public final class ContextWindowModel {
            locatedToken.range.contains(token.offset)
         {
             // Back on the located symbol: the "kept previous" note is stale.
+            // An echo never restarts the in-flight lookup; its answer, until
+            // the stage shows it, is resolved without touching the stage.
             isShowingPreviousToken = false
-            return symbolCandidate
+            return displaysLocatedToken
+                ? symbolCandidate
+                : await resolvedCandidate(file: token.file, offset: token.offset)
         }
         // Only a new token supersedes the displayed one. A miss (blank,
         // keyword) or a caret echo inside the same token keeps the displayed
@@ -1042,7 +1045,9 @@ public final class ContextWindowModel {
            locatedToken.range == range
         {
             isShowingPreviousToken = false
-            return symbolCandidate
+            return displaysLocatedToken
+                ? symbolCandidate
+                : await resolvedCandidate(file: token.file, offset: token.offset)
         }
         requestID &+= 1
         cancelExactUpgrade()
@@ -1079,6 +1084,9 @@ public final class ContextWindowModel {
                     context: context,
                     request: currentRequest
                 )
+                // A newer lookup took over during the type hop: its dwell
+                // and Exact batch must not be replaced by this stale one.
+                guard requestID == currentRequest else { return nil }
             }
             if trigger == .caret {
                 // R4.2: delay exact requests until the caret dwells on this
@@ -1270,7 +1278,7 @@ public final class ContextWindowModel {
         switch answer.result {
         case let .targets(resolutions, certainty) where !resolutions.isEmpty:
             var targets = await present(resolutions, session: session)
-            if targets.isEmpty { return false }
+            guard requestID == request, !targets.isEmpty else { return false }
             targets = targets.map { candidate in
                 candidate.withCertainty(certainty)
             }
@@ -1539,6 +1547,9 @@ public final class ContextWindowModel {
                         selectionEpoch: requestSelectionEpoch
                     )
                 }
+                // No entry (or none presentable) promoted the hop: stop
+                // resolving instead of spinning forever.
+                if requestID == request { markTypeHopExactUnavailable() }
             case .unsupported:
                 // The server never answers typeDefinition (TypeScript,
                 // Pyright): that is not "not ready". Leave the pending hop
@@ -1824,7 +1835,9 @@ public final class ContextWindowModel {
             excerpt: candidate.excerpt,
             bindingKind: candidate.bindingKind,
             targetByteOffset: candidate.targetByteOffset,
-            basis: .exact(attribution, origin: origin, language: language)
+            basis: .exact(attribution, origin: origin, language: language),
+            note: candidate.note,
+            isImportBinding: candidate.isImportBinding
         )
     }
 

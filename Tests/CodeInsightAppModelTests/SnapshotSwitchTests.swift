@@ -243,6 +243,41 @@ func workspaceWithoutAnalyzedLanguagesOpensBrowseOnlyAndSwitchesCommits() async 
 
 @MainActor
 @Test
+func browseOnlyHistoryGoesBackAcrossSnapshots() async throws {
+    let files = ["README.md": "# notes\n", "notes.txt": "one\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let worktree = TestSnapshot(label: "worktree", files: files)
+    let commit = TestSnapshot(label: "C", files: files)
+    let service = ControlledSnapshotIndexService(
+        worktreeSnapshot: worktree,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+    let readme = root.appendingPathComponent("README.md").standardizedFileURL
+    await model.openProject(root: root).value
+    model.navigate(to: readme)
+    model.switchToCommit("C", leaving: snapshotJumpRecord(
+        "README.md", offset: 0, snapshotID: worktree.snapshotID))
+    #expect(await testWaitUntil("commit browsing") {
+        model.currentSnapshotID == commit.snapshotID && model.projectState.isOpen
+    })
+
+    model.goBack(from: snapshotJumpRecord(
+        "notes.txt", offset: 0, snapshotID: commit.snapshotID))
+    #expect(await testWaitUntil("back on the worktree") {
+        model.currentSnapshotID == worktree.snapshotID
+            && model.currentRevision == nil
+            && model.selectedFile == readme
+    }, "notice: \(model.replayNotice ?? "nil")")
+    guard case .browsing = model.projectState else {
+        Issue.record("expected browse-only state, got \(model.projectState)")
+        return
+    }
+}
+
+@MainActor
+@Test
 func mixedOpenDoesNotPublishUntilAllFullSessionsComplete() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }

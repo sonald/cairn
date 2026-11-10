@@ -974,6 +974,9 @@ public final class AppModel {
         if projectRoot != root {
             projectSearch.clearSession()
             restoredDependencyFiles.removeAll()
+            highlightedNames.removeAll()
+            referencePane = nil
+            cancelDependencyFetch()
         }
         projectRoot = root
         projectLanguages = []
@@ -1070,6 +1073,12 @@ public final class AppModel {
         // partial state protected; a later fresh open advances the generation.
         sessionRestoreWriteSuspension = generation &+ 1
         let worktreeTask = openProject(root: root)
+        // Opening another project drops the previous one's highlights and
+        // reference pane; these are the restored project's own.
+        highlightedNames = HighlightedNames(restoring: snapshot.highlights)
+        referencePane = snapshot.referencePane.map {
+            ReferencePaneState(file: root.appendingPathComponent($0.path), byteOffset: $0.byteOffset)
+        }
         let worktreeGeneration = generation
         await worktreeTask.value
         guard canPublishWorkspaceResult(
@@ -1144,8 +1153,11 @@ public final class AppModel {
         // (preview replacement, dedup activation, LRU eviction), with the
         // saved preview flag and relative activation ranks reinstated.
         tabStrip.beginRestoredBatch()
+        // A refresh or snapshot switch keeps the strip, so an interrupted
+        // restore still closes its batch; a new open resets the strip and a
+        // newer restore takes ownership.
         defer {
-            if sessionRestoreOwner == owner, generation == restoreGeneration {
+            if sessionRestoreOwner == owner {
                 tabStrip.endRestoredBatch(activating: nil)
             }
         }
@@ -3437,8 +3449,10 @@ public final class AppModel {
                                                 root: root),
                       navigationToken == replayNavigationToken
                 else { return }
-                guard validatedWorkspaceSessions(completed,
-                                                 snapshotID: snapshot.snapshotID) != nil
+                // A browse-only project has no sessions to validate.
+                guard languages.isEmpty
+                        || validatedWorkspaceSessions(completed,
+                                                      snapshotID: snapshot.snapshotID) != nil
                 else { throw CocoaError(.fileReadCorruptFile) }
                 snapshotTask?.cancel()
                 compareSnapshotTask?.cancel()
@@ -3451,10 +3465,16 @@ public final class AppModel {
                 pendingReplay = nil
                 publishFirstPaint(snapshot, root: root, revision: revision,
                                   generation: generation)
-                _ = installWorkspaceSessions(completed, generation: generation,
-                                             root: root,
-                                             expectedSnapshotID: snapshot.snapshotID,
-                                             phase: .fullReady)
+                if languages.isEmpty {
+                    workspaceSessions.removeAll(keepingCapacity: true)
+                    snapshotPhase = .fullReady
+                    publishProjectState(.browsing(root: root), root: root)
+                } else {
+                    _ = installWorkspaceSessions(completed, generation: generation,
+                                                 root: root,
+                                                 expectedSnapshotID: snapshot.snapshotID,
+                                                 phase: .fullReady)
+                }
                 lastInstalledRevision = currentRevision
                 lastInstalledProjectRoot = projectRoot
                 lastInstalledGeneration = generation

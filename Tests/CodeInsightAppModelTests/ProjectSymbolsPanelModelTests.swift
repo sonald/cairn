@@ -323,3 +323,21 @@ func projectSymbolsFollowFirstPaintThenFullSilentlyAndGoStaleAcrossCommits() asy
     #expect(panel.expandedKeys == [panel.key(of: methodGroup)])
     #expect(panel.summary.files == 2)
 }
+
+@MainActor
+@Test
+func projectSymbolsOrganizationChosenWhileLoadingApplies() async {
+    let listings = randomListings(seed: 7)
+    let reference = await loaded(listings)
+    let model = ProjectSymbolsPanelModel(defaults: UserDefaults(suiteName: NSTemporaryDirectory() + "ProjectSymbolsTests-\(UUID())")!)
+    let other: ProjectSymbolOrganization = model.organization == .kind ? .module : .kind
+    reference.setOrganization(other)
+    model.load(listings: listings)
+    model.setOrganization(other)
+    await model.pendingLoad?.value
+    func top(_ panel: ProjectSymbolsPanelModel) -> [ProjectSymbolNode.Content] {
+        panel.visibleChildren(of: panel.rootNode).map { panel.node($0)!.content }
+    }
+    #expect(!top(reference).isEmpty)
+    #expect(top(model) == top(reference))
+}

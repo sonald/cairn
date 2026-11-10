@@ -450,7 +450,10 @@ public final class ProjectSymbolsPanelModel {
             guard let self, self.loadID == id, let built else { return }
             let parts = started.duration(to: .now).components
             self.lastLoadMilliseconds = Double(parts.seconds) * 1_000 + Double(parts.attoseconds) / 1e15
-            self.install(data: built.0, tree: built.1)
+            // The organisation may have changed while the tree was built.
+            let tree = self.organization == organization
+                ? built.1 : ProjectSymbolsTree(data: built.0, organization: self.organization)
+            self.install(data: built.0, tree: tree)
         }
     }
 

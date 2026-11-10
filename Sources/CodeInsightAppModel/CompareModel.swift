@@ -77,9 +77,11 @@ public final class CompareModel {
         functionChanges = []
         selectedHunkIndex = nil
         rightBytes = nil
+        // Until the right snapshot installs, loading and failure are its own.
+        guard let rightSource else { return }
         isLoading = false
         errorMessage = nil
-        guard let file, let rightSource, let languageMode else { return }
+        guard let file, let languageMode else { return }
 
         do {
             let left = try (leftSource ?? Self.readFile)(file)
