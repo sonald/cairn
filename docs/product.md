@@ -203,7 +203,7 @@ Settings → 快捷键提供搜索、按键搜索、录制、冲突替换及恢�
 
 ## 非源码预览
 
-Markdown 使用只读富文本，HTML 使用受控 WKWebView（关闭 JavaScript、网络及本地子资源），图片和 PDF 使用只读预览，其余严格 UTF-8 文本可选择复制；未知二进制明确为不支持。
+Markdown 使用只读富文本；Jupyter Notebook（`.ipynb`，nbformat 4）按同一渲染显示：Markdown 单元原样，代码单元按内核语言着色，输出以引用块列在其下——流和错误（去除 ANSI 颜色）为等宽文本，PNG/JPEG/GIF 图像内联显示，其他富输出（HTML 表格、组件、LaTeX）显示其 `text/plain` 形式；单元附件图片不显示，无法解析的 notebook 作为普通文本预览。HTML 使用受控 WKWebView（关闭 JavaScript、网络及本地子资源），图片和 PDF 使用只读预览，其余严格 UTF-8 文本可选择复制；未知二进制明确为不支持。
 
 配置、脚本，以及 Cairn 不分析的源码语言（C/C++、Objective-C、C#、Java、Kotlin、Go、Swift、PHP、Perl、CSS、SQL、Pascal、Visual Basic、Ada、汇编）按后缀做词法着色：关键字、注释、字符串、数字、预处理指令、注解和形如 `name(` 的调用，与 Source Insight 语言文件同一层次，不提供跳转。`.h` 按 C++ 着色。JS/JSX（`.js`、`.jsx`、`.mjs`、`.cjs`）用内置的 TSX 语法树着色，超过约 20 万 UTF-16 单元时显示为不着色等宽文本（预览在主线程同步着色）；其他格式的上限为 150 万。`.rs`、`.py`、`.ts`、`.tsx` 在项目未分析该语言时（只在切换到工作区没有该语言的 commit 时出现）同样以对应语法树预览着色。Markdown 代码块使用同一套规则。
 

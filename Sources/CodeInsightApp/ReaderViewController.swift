@@ -2725,6 +2725,22 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             if let anchor { scrollPreview(toAnchor: anchor) }
             return
         }
+        if extensionName == "ipynb", let notebook = NotebookMarkdown.markdown(fromNotebook: Data(bytes)) {
+            let render = { (theme: ReaderTheme) in
+                MarkdownPreviewRenderer(theme: theme, baseURL: file).render(notebook)
+            }
+            if let attributed = render(readerTheme) {
+                displayPreviewText(
+                    attributed,
+                    kind: .markdown,
+                    kindName: "Notebook",
+                    accessibilityLabel: localized("main.notebook.preview")
+                )
+                previewRestyle = render
+                if let anchor { scrollPreview(toAnchor: anchor) }
+                return
+            }
+        }
         if extensionName == "html" || extensionName == "htm" {
             displayPreviewHTML(string, file: file)
             return

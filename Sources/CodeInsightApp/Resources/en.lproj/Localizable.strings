@@ -175,6 +175,7 @@
 "main.line.breaks.are.not.supported" = "Line breaks are not supported";
 "main.loading.files" = "Loading files…";
 "main.markdown.preview" = "Markdown preview";
+"main.notebook.preview" = "Notebook preview";
 "main.match.case" = "Match case";
 "main.method" = "Method";
 "main.module" = "Module";

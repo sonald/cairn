@@ -830,7 +830,7 @@ final class SidebarViewController: NSViewController,
         } else {
             symbol = switch node.url.pathExtension.lowercased() {
             case "json", "toml", "yaml", "yml", "lock": "slider.horizontal.3"
-            case "md", "txt", "rst": "doc.text"
+            case "md", "txt", "rst", "ipynb": "doc.text"
             case "png", "jpg", "jpeg", "svg": "photo"
             case "swift": "swift"
             default: "doc"

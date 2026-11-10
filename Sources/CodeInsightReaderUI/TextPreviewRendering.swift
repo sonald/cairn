@@ -658,7 +658,8 @@ package struct MarkdownPreviewRenderer {
         for (index, run) in block.runs.enumerated() {
             var text = String(markdown[run.range].characters)
             if index == 0, taskState != nil { text = String(text.dropFirst(4)) }
-            appendInline(text, run: run, baseFont: baseFont, color: color, into: paragraph)
+            appendInline(text, run: run, baseFont: baseFont, color: color,
+                         quoteDepth: quoteBlocks.count, into: paragraph)
         }
         if taskState == true {
             paragraph.addAttribute(.foregroundColor, value: theme.chromeSecondaryColor,
@@ -717,6 +718,7 @@ package struct MarkdownPreviewRenderer {
         run: AttributedString.Runs.Run?,
         baseFont: NSFont,
         color: NSColor,
+        quoteDepth: Int = 0,
         into paragraph: NSMutableAttributedString
     ) {
         let inline = run?.inlinePresentationIntent ?? []
@@ -729,7 +731,8 @@ package struct MarkdownPreviewRenderer {
             text = "\u{2028}"
         }
         if let imageURL = run?.imageURL {
-            if let attachment = imageAttachment(imageURL, width: nil) {
+            // Each quote level indents by its 3 pt bar and 14 pt padding.
+            if let attachment = imageAttachment(imageURL, width: nil, inset: CGFloat(quoteDepth) * 17) {
                 paragraph.append(NSAttributedString(attachment: attachment))
                 return
             }
@@ -970,16 +973,24 @@ package struct MarkdownPreviewRenderer {
         return String(tag[index..<end])
     }
 
-    /// Local images only: previews never reach the network.
-    private func imageAttachment(_ url: URL, width requestedWidth: CGFloat?) -> NSTextAttachment? {
-        let file = url.absoluteURL
-        guard file.isFileURL,
-              let size = (try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize,
-              size < 20_000_000,
-              let image = NSImage(contentsOf: file),
-              image.size.width > 0, image.size.height > 0
-        else { return nil }
-        let maxWidth = min(requestedWidth ?? image.size.width, MarkdownPreviewTextView.readableWidth - 8)
+    /// Local images and base64 data URLs only: previews never reach the network.
+    private func imageAttachment(_ url: URL, width requestedWidth: CGFloat?, inset: CGFloat = 0) -> NSTextAttachment? {
+        let image: NSImage?
+        if url.scheme == "data" {
+            let string = url.absoluteString
+            image = string.utf8.count < 27_000_000
+                ? string.range(of: ";base64,")
+                    .flatMap { Data(base64Encoded: String(string[$0.upperBound...])) }
+                    .flatMap(NSImage.init(data:))
+                : nil
+        } else {
+            let file = url.absoluteURL
+            image = file.isFileURL
+                && ((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? .max) < 20_000_000
+                ? NSImage(contentsOf: file) : nil
+        }
+        guard let image, image.size.width > 0, image.size.height > 0 else { return nil }
+        let maxWidth = min(requestedWidth ?? image.size.width, MarkdownPreviewTextView.readableWidth - 8 - inset)
         let scale = min(1, maxWidth / image.size.width)
         let attachment = NSTextAttachment()
         attachment.image = image

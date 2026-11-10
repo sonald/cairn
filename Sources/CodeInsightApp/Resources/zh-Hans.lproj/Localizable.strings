@@ -175,6 +175,7 @@
 "main.line.breaks.are.not.supported" = "不支持换行符";
 "main.loading.files" = "正在加载文件…";
 "main.markdown.preview" = "Markdown 预览";
+"main.notebook.preview" = "Notebook 预览";
 "main.match.case" = "区分大小写";
 "main.method" = "方法";
 "main.module" = "模块";
