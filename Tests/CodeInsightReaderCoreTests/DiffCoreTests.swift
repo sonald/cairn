@@ -341,3 +341,21 @@ func functionSummaryTreatsRenameAsRemovedAndAdded() throws {
         "nested::new_name", "nested::old_name",
     ])
 }
+
+/// Compare runs on a detached task's 512 KB stack; the Python and TypeScript
+/// extractors recurse per syntax node, so a long `+` chain crashed it.
+@Test
+func functionChangesSurviveDeeplyNestedExpressions() throws {
+    let terms = Array(repeating: "kw", count: 3000).joined(separator: " +\n  ")
+    for (source, language) in [
+        ("def f():\n    return \(terms)\n", LanguageID.python),
+        ("function f() { return \(terms); }\n", LanguageID.typescript),
+    ] {
+        let left = Array(source.utf8)
+        let right = Array(source.replacingOccurrences(of: "kw", with: "kv").utf8)
+        let changes = try DiffCore().functionChanges(
+            left: left, right: right, languageMode: LanguageMode(language: language)
+        )
+        #expect(changes.count == 1, "\(language)")
+    }
+}

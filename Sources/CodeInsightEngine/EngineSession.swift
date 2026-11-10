@@ -589,8 +589,21 @@ public final class EngineSession: Sendable {
         offset: UInt32,
         context: QueryContext
     ) throws -> [ResolutionCandidate] {
+        try resolve(file: file, offset: offset, context: context, memberHops: 0)
+    }
+
+    /// `memberHops` counts the Python attribute hops already on the stack
+    /// (`resolve → typeHop of the receiver → resolve …`), so a receiver
+    /// whose annotation spells the name being resolved (`config:
+    /// config.Config`) stops instead of recursing forever.
+    func resolve(
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext,
+        memberHops: Int
+    ) throws -> [ResolutionCandidate] {
         try validate(context)
-        return Resolver(session: self).resolve(
+        return Resolver(session: self, memberHops: memberHops).resolve(
             file: file,
             offset: offset,
             context: context
@@ -605,9 +618,18 @@ public final class EngineSession: Sendable {
         offset: UInt32,
         context: QueryContext
     ) throws -> TypeHopResult {
+        try typeHop(file: file, offset: offset, context: context, memberHops: 0)
+    }
+
+    func typeHop(
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext,
+        memberHops: Int
+    ) throws -> TypeHopResult {
         try validate(context)
         guard let candidates = try? resolve(
-            file: file, offset: offset, context: context
+            file: file, offset: offset, context: context, memberHops: memberHops
         ) else { return .none }
 
         // Only value bindings and rust fields carry a spelled type today.
@@ -652,6 +674,7 @@ public final class EngineSession: Sendable {
                 file: typeFile,
                 firstHop: firstHop,
                 context: context,
+                memberHops: memberHops,
                 capAtProbable: false
             )
         case let .constructed(range):
@@ -660,6 +683,7 @@ public final class EngineSession: Sendable {
                 file: typeFile,
                 firstHop: firstHop,
                 context: context,
+                memberHops: memberHops,
                 capAtProbable: true
             )
         case let .genericBound(_, bound):
@@ -668,6 +692,7 @@ public final class EngineSession: Sendable {
                 file: typeFile,
                 firstHop: firstHop,
                 context: context,
+                memberHops: memberHops,
                 capAtProbable: false
             )
         }
@@ -852,10 +877,12 @@ public final class EngineSession: Sendable {
         file: PathID,
         firstHop: ResolutionCandidate,
         context: QueryContext,
+        memberHops: Int,
         capAtProbable: Bool
     ) throws -> TypeHopResult {
         var secondHop = try resolve(
-            file: file, offset: spelling.lowerBound, context: context
+            file: file, offset: spelling.lowerBound, context: context,
+            memberHops: memberHops
         ).filter { candidate in
             guard candidate.target.localKind == .declarationFacet,
                   let index = content(at: candidate.target.pathID)?.1,

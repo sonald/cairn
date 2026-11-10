@@ -1729,6 +1729,30 @@ func sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() async throws 
 }
 
 @MainActor
+@Test
+func sessionClearKeepsAnotherProjectsUnmigratedLegacySession() throws {
+    let a = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let b = try sessionRestoreProject(["b.rs": "fn b() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [a, b, state] { try? FileManager.default.removeItem(at: path) } }
+    let legacy = state.appendingPathComponent("session.json")
+    let snapshot = SessionCodec.Snapshot(projectRoot: b.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue, tabs: [.file(.init(path: "b.rs", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil))])
+    let bytes = try SessionCodec.encode(snapshot, maximumTabCount: 12, dependencyAllowed: exactLocationIsInDependency)
+    try bytes.write(to: legacy)
+    let store = SessionCheckpointStore(legacyURL: legacy, maximumTabCount: 12)
+
+    store.clear(projectRoot: a)
+    #expect(try Data(contentsOf: legacy) == bytes)
+    #expect(!FileManager.default.fileExists(atPath: legacy.path + ".migrated"))
+    #expect(store.load(forProject: b).snapshot?.tabs.count == 1)
+
+    store.clear(projectRoot: b)
+    #expect(!FileManager.default.fileExists(atPath: legacy.path))
+    #expect(try Data(contentsOf: URL(fileURLWithPath: legacy.path + ".migrated")) == bytes)
+}
+
+@MainActor
 @Test(arguments: [false, true])
 func sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema: Bool) async throws {
     let root = try sessionRestoreProject(["a.rs": "fn a() {}"])

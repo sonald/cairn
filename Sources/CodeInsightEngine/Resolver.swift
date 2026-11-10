@@ -2,6 +2,8 @@ import CodeInsightCore
 
 struct Resolver {
     let session: EngineSession
+    /// Attribute hops already on the stack; see `EngineSession.resolve`.
+    var memberHops = 0
 
     func tokenRange(file: PathID, offset: UInt32) -> ByteRange? {
         guard let (_, index) = session.content(at: file) else { return nil }
@@ -598,9 +600,14 @@ struct Resolver {
         while cursor > 0, isSpace(bytes[cursor - 1]) { cursor -= 1 }
         guard cursor > 0, isIdentifierByte(bytes[cursor - 1]) else { return nil }
         let receiverOffset = UInt32(cursor - 1)
-        guard case let .targets(classes, certainty) = try? session.typeHop(
-            file: file, offset: receiverOffset, context: context
-        ) else { return nil }
+        // ponytail: a fixed depth also bounds legitimate `a.b.c…` chains;
+        // eight attribute hops is deeper than any real annotation chain.
+        guard memberHops < 8,
+              case let .targets(classes, certainty) = try? session.typeHop(
+                  file: file, offset: receiverOffset, context: context,
+                  memberHops: memberHops + 1
+              )
+        else { return nil }
 
         var result: [ResolutionCandidate] = []
         for classCandidate in classes {

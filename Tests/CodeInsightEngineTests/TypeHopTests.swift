@@ -640,3 +640,28 @@ func clickOnALetDeclarationNameResolvesTheBindingAndHopsToItsType() throws {
     }
     #expect(targets.contains { facet(named: "S", at: $0, in: session) != nil })
 }
+
+/// `config: config.Config` names the module `config` as the receiver of its
+/// own annotation; the hop must stop instead of recursing forever.
+@Test
+func pythonAnnotationThroughSameNamedModuleTerminates() throws {
+    let session = try makeSession([
+        "app.py": """
+        import config
+
+        config: config.Config
+        print(config)
+        """,
+        "config.py": """
+        class Config:
+            pass
+        """,
+    ], language: .python)
+    let context = queryContext(for: session)
+    let file = try pathID("app.py", in: session)
+    for (line, column) in [(3, 16), (4, 7)] {
+        let at = try offset(line: UInt32(line), column: UInt32(column), in: session, path: "app.py")
+        _ = try session.resolve(file: file, offset: at, context: context)
+        _ = try session.typeHop(file: file, offset: at, context: context)
+    }
+}

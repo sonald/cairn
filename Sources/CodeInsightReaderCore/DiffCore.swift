@@ -30,9 +30,6 @@ public struct DiffCore: Sendable {
 
     public struct Hunk: Equatable, Sendable {
         public let lines: [Line]
-
-        public var leftStartLine: Int? { lines.lazy.compactMap(\.leftLine).first }
-        public var rightStartLine: Int? { lines.lazy.compactMap(\.rightLine).first }
     }
 
     public struct Result: Equatable, Sendable {
@@ -307,6 +304,28 @@ public struct DiffCore: Sendable {
         return (left, right)
     }
 
+    /// The Python and TypeScript extractors recurse once per syntax node;
+    /// Compare calls this from a detached task whose 512 KB stack overflowed
+    /// on a long `+` chain. The caller blocks until the thread finishes, so
+    /// nothing is shared concurrently.
+    // ponytail: copy of DocumentLoader.onLargeStack (private in another file);
+    // share that one if a third caller appears.
+    private static func onLargeStack<T>(_ body: @escaping () throws -> T) throws -> T {
+        nonisolated(unsafe) let work = body
+        nonisolated(unsafe) var outcome: Swift.Result<T, Error>?
+        let finished = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            outcome = Swift.Result { try work() }
+            finished.signal()
+        }
+        thread.name = "CodeInsight.DiffCore.extract"
+        thread.qualityOfService = .userInitiated
+        thread.stackSize = 64 << 20
+        thread.start()
+        finished.wait()
+        return try outcome!.get()
+    }
+
     private func extractFunctions(
         _ bytes: [UInt8],
         languageMode: LanguageMode
@@ -319,11 +338,14 @@ public struct DiffCore: Sendable {
             grammarVersion: extractor(for: languageMode).grammarVersion,
             extractorVersion: extractor(for: languageMode).extractorVersion
         )
-        let contentIndex = try extractor(for: languageMode).extract(
-            bytes: bytes,
-            key: key,
-            interner: ExtractionInterners(names: names, strings: strings)
-        )
+        let extractor = extractor(for: languageMode)
+        let contentIndex = try Self.onLargeStack {
+            try extractor.extract(
+                bytes: bytes,
+                key: key,
+                interner: ExtractionInterners(names: names, strings: strings)
+            )
+        }
         var result: [FunctionKey: [ExtractedFunction]] = [:]
         for facet in contentIndex.symbols where facet.kind.shape == .function {
             var chain = [names.resolve(facet.nameID)]

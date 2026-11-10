@@ -1680,7 +1680,6 @@ public final class AppModel {
         compareSnapshotTask?.cancel()
         let compareGeneration = compare.beginLoading(revision: revision)
         let mainGeneration = generation
-        let languages = projectLanguages
         compareSnapshotTask = Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
@@ -1767,7 +1766,6 @@ public final class AppModel {
         // Slow path: verify the bytes the Reader will load, off the main
         // actor, and only publish while the request is still current.
         guard let root = projectRoot else { return }
-        let expectedLanguages = projectLanguages
         let workspaceGeneration = generation
         let navigationTokenAtRequest = navigationToken
         let source = documentSource
@@ -2274,6 +2272,9 @@ public final class AppModel {
             self.snapshotTask = nil
             self.compareSnapshotTask = nil
             self.replayTask = nil
+            // The jump cancels an in-flight Refresh Index; without this the
+            // refresh never ends and session checkpoints stay suspended.
+            self.endIndexRefresh()
             self.exactCoordinator.invalidate(generation: installedGeneration)
             self.compare.clear()
             self.commitPicker.setCurrentRevision(revision)
@@ -2354,7 +2355,6 @@ public final class AppModel {
             return
         }
         let indexService = indexService
-        let languages = projectLanguages
         bookmarkModel.beginAttempt(for: record, workspaceGeneration: workspaceGeneration) {
             guard case let .commit(fullOID) = record.snapshot else {
                 return .notEvaluated

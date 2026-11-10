@@ -644,6 +644,69 @@ func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
     _ = firstDone.wait(timeout: .now() + 5)
 }
 
+/// The first server is a real process: it answers `initialize`, closes
+/// stdout (the next request sees a closed connection) and exits only when
+/// the restart closes it, so its termination callback fires mid-restart.
+@Test(.timeLimit(.minutes(1)))
+func sessionStaysReadyAfterRestartWhenOldServerExitsDuringRestart() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let initializeResponse = root.appendingPathComponent("initialize.lsp")
+    try LSPFraming.encode([
+        "jsonrpc": "2.0", "id": 1,
+        "result": ["capabilities": [
+            "definitionProvider": true, "referencesProvider": true,
+        ]],
+    ]).write(to: initializeResponse)
+    let firstClient = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [
+            "-c", "head -c 1 >/dev/null; cat \"$1\"; exec 1>&-; exec sleep 30",
+            "sh", initializeResponse.path,
+        ]
+    )
+    let session = try LSPLanguageSession.start(
+        client: firstClient,
+        restartClient: {
+            let clientToServer = Pipe()
+            let serverToClient = Pipe()
+            TypeScriptFakeServer(
+                input: clientToServer.fileHandleForReading,
+                output: serverToClient.fileHandleForWriting,
+                done: {}
+            ).start()
+            return LSPClient(
+                readHandle: serverToClient.fileHandleForReading,
+                writeHandle: clientToServer.fileHandleForWriting
+            )
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        language: .typeScript(initializationOptions: [:]),
+        requestTimeout: 5,
+        closeGrace: 0.05,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer { session.close() }
+
+    let first = try session.definition(file: "main.ts", byteOffset: 0)
+    guard case .completed(let targets) = first else {
+        Issue.record("expected the restarted server to answer, got \(first)")
+        return
+    }
+    #expect(targets.count == 1)
+    #expect(!firstClient.isRunning, "the old server exited during the restart")
+    #expect(session.readiness == .ready)
+    let second = try session.definition(file: "main.ts", byteOffset: 0)
+    guard case .completed = second else {
+        Issue.record("expected a later request to reach the restarted server, got \(second)")
+        return
+    }
+}
+
 @Test
 func typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() throws {
     let root = try temporaryTestDirectory()

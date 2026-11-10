@@ -679,15 +679,18 @@ public struct ProjectIndexer: Sendable {
             throw invalidIdentity("Extraction input language does not match extractor")
         }
         let drafts = try parallelMap(inputs.count, width: parallelism) {
-            index -> ExtractionDraft in
+            index -> ExtractionDraft? in
             let input = inputs[index]
             let names = Interner<NameID>()
             let strings = Interner<StringID>()
-            let result = try extractor.extractWithDiagnostics(
+            // A file the extractor rejects (the TypeScript extractor refuses
+            // a BOM or invalid UTF-8) must not fail the project: like an LFS
+            // pointer it stays in the manifest with its bytes but no index.
+            guard let result = try? extractor.extractWithDiagnostics(
                 bytes: input.bytes,
                 key: input.key,
                 interner: ExtractionInterners(names: names, strings: strings)
-            )
+            ) else { return nil }
             guard result.index.key == input.key else {
                 throw invalidIdentity("Extractor returned a different ContentIndexKey")
             }
@@ -700,7 +703,7 @@ public struct ProjectIndexer: Sendable {
                 containsErrorNodes: result.containsErrorNodes
             )
         }
-        return drafts.sorted { $0.order < $1.order }
+        return drafts.compactMap { $0 }.sorted { $0.order < $1.order }
     }
 
     private func remap(

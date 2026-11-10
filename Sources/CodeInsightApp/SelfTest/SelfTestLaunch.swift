@@ -139,6 +139,17 @@ func launchSelfTestIfRequested(
         ))
         Darwin.exit(2)
     }
+    // The bookmark self-test writes bookmarks and notes; without an
+    // isolated store it would write into the user's real one.
+    if bookmarkSelfTestRoot != nil,
+       ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_SESSION_URL"] == nil
+    {
+        FileHandle.standardError.write(Data((
+            "usage: CAIRN_BOOKMARK_SESSION_URL=<session.json> "
+                + "codeinsight-app --self-test-bookmarks <rust-project-root>\n"
+        ).utf8))
+        Darwin.exit(2)
+    }
     let bookmarkRestartSessionURL = arguments.firstIndex(of: "--self-test-bookmarks-restart")
         .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         .map(URL.init(fileURLWithPath:))
@@ -360,10 +371,10 @@ func launchSelfTestIfRequested(
                 )
             )
         } else {
-            let bookmarkSessionURL = bookmarkSelfTestRoot.map { _ in
+            let bookmarkSessionURL = bookmarkSelfTestRoot.flatMap { _ in
                 ProcessInfo.processInfo.environment[
                     "CAIRN_BOOKMARK_SESSION_URL"
-                ].map(URL.init(fileURLWithPath:)) ?? AppModel.defaultSessionURL
+                ].map(URL.init(fileURLWithPath:))
             }
             // One store shared by the model and the delegate: the model
             // advances the last-session pointer when a project's

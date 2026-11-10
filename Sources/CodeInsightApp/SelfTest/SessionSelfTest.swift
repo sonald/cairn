@@ -1937,6 +1937,8 @@ private func axContains(_ tree: [[String: String]], _ label: String) -> Bool {
 
 @MainActor
 private func bookmarkSelfTestSessionURL() -> URL {
-    ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_SESSION_URL"]
-        .map(URL.init(fileURLWithPath:)) ?? AppModel.defaultSessionURL
+    // Launch refuses to start the bookmark self-test without this variable.
+    guard let path = ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_SESSION_URL"]
+    else { preconditionFailure("CAIRN_BOOKMARK_SESSION_URL is required") }
+    return URL(fileURLWithPath: path)
 }

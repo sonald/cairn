@@ -323,19 +323,27 @@ final class SessionCheckpointStore {
     }
 
     /// Forgets `root`'s saved session: removes its per-project file, lifts
-    /// its write protection, and retires the legacy migration source so the
-    /// cleared session cannot be re-imported.
+    /// its write protection, and retires the legacy migration source when it
+    /// records this project, so the cleared session cannot be re-imported.
+    /// A legacy file of another project, or one whose root cannot be read,
+    /// stays in place for its own migration.
     func clear(projectRoot root: URL) {
         overwriteBlockedKeys.remove(Self.projectKey(for: root))
         try? FileManager.default.removeItem(at: fileURL(forProjectRoot: root.path))
-        if FileManager.default.fileExists(atPath: legacyURL.path) {
-            let backupURL = URL(
-                fileURLWithPath: legacyURL.path + ".migrated",
-                isDirectory: false
-            )
-            try? FileManager.default.removeItem(at: backupURL)
-            try? FileManager.default.moveItem(at: legacyURL, to: backupURL)
-        }
+        guard let data = try? Data(contentsOf: legacyURL),
+              let legacy = try? SessionCodec.decode(
+                  data,
+                  maximumTabCount: maximumTabCount,
+                  dependencyAllowed: exactLocationIsInDependency
+              ),
+              Self.isSameProjectRoot(legacy.projectRoot, root)
+        else { return }
+        let backupURL = URL(
+            fileURLWithPath: legacyURL.path + ".migrated",
+            isDirectory: false
+        )
+        try? FileManager.default.removeItem(at: backupURL)
+        try? FileManager.default.moveItem(at: legacyURL, to: backupURL)
         legacyRootPendingMigration = nil
     }
 }

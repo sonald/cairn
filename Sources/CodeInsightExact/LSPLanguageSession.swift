@@ -90,6 +90,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     var attribution: ExactAttribution {
         stateLock.lock()
         let environment = currentEnvironment
+        let baseAttribution = baseAttribution
         stateLock.unlock()
         return ExactAttribution(
             provider: baseAttribution.provider,
@@ -112,6 +113,13 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
     /// it the switch fails and a cold start (≈0.4 s) replaces the session.
     static let configReloadWindow: TimeInterval = 5
 
+    /// Lock order: `operationLock` → client's `condition` → `stateLock`.
+    /// The client calls `shouldStart`/`shouldContinue` (which take
+    /// `stateLock`) with its condition held, so never call into a client or
+    /// take `operationLock` while holding `stateLock`: copy what you need,
+    /// unlock, then call. `operationLock` guards `openedFiles` and covers
+    /// every restart, so no request talks to a client before `initialize`.
+    ///
     /// A condition so requests can wait out a switch.
     private let stateLock = NSCondition()
     private let operationLock = NSLock()
@@ -147,7 +155,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
 
     var readiness: ExactReadiness {
         stateLock.lock()
-        defer { stateLock.unlock() }
+        let state = state
+        let client = client
+        stateLock.unlock()
         if case .unavailable(let reason) = state {
             // Read at presentation time so diagnostics arriving after process exit
             // are included too.
@@ -820,12 +830,20 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             } catch LSPError.cancelled {
                 return nil
             } catch LSPError.processExited where !retriedAfterCrash {
-                activeClient = try restartAfterCrash()
+                activeClient = try withOperationLock(
+                    batch: batch,
+                    cancelledResult: nil
+                ) { try restartAfterCrash(replacing: activeClient) }
+                guard activeClient != nil else { return nil }
                 retriedAfterCrash = true
                 attempt = 0
                 continue
             } catch LSPError.connectionClosed where !retriedAfterCrash {
-                activeClient = try restartAfterCrash()
+                activeClient = try withOperationLock(
+                    batch: batch,
+                    cancelledResult: nil
+                ) { try restartAfterCrash(replacing: activeClient) }
+                guard activeClient != nil else { return nil }
                 retriedAfterCrash = true
                 attempt = 0
                 continue
@@ -893,12 +911,12 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                     markPreparing()
                     return (nil, true, true, false)
                 } catch LSPError.processExited where !retriedAfterCrash {
-                    activeClient = try restartAfterCrash()
+                    activeClient = try restartAfterCrash(replacing: currentClient)
                     retriedAfterCrash = true
                     attempt = 0
                     return (nil, false, false, true)
                 } catch LSPError.connectionClosed where !retriedAfterCrash {
-                    activeClient = try restartAfterCrash()
+                    activeClient = try restartAfterCrash(replacing: currentClient)
                     retriedAfterCrash = true
                     attempt = 0
                     return (nil, false, false, true)
@@ -960,7 +978,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         case .preparing, .ready:
             return activeClient
         case .unavailable where canRestart:
-            return try restartAfterCrash()
+            return try restartAfterCrash(replacing: nil)
         case .unavailable(let reason):
             throw ExactError.unavailable(reason)
         case .closed:
@@ -968,8 +986,16 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         }
     }
 
-    private func restartAfterCrash() throws -> LSPClient {
+    /// Call with `operationLock` held. `failed` is the client the caller
+    /// saw fail; when another request already replaced it, the caller gets
+    /// the replacement instead of "restart exhausted".
+    private func restartAfterCrash(replacing failed: LSPClient?) throws -> LSPClient {
         stateLock.lock()
+        if let failed, client !== failed, state == .preparing || state == .ready {
+            let current = client
+            stateLock.unlock()
+            return current
+        }
         guard state != .closed, !didRestart else {
             let reason = state == .closed
                 ? "session is closed" : "\(language.serverName) restart exhausted"
@@ -1003,6 +1029,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             throw ExactError.unavailable("session is closed")
         }
         client = newClient
+        // The old client's termination callback may have fired since the
+        // first `.preparing`; it no longer describes this session.
+        state = .preparing
         openedFiles.removeAll()
         stateLock.unlock()
         observe(newClient)
@@ -1049,8 +1078,11 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
             guard let self, let observedClient else { return }
             if let onDiagnostic {
+                stateLock.lock()
+                let base = baseAttribution.environment
+                stateLock.unlock()
                 publishEnvironment(
-                    onDiagnostic(baseAttribution.environment, diagnostic),
+                    onDiagnostic(base, diagnostic),
                     from: observedClient
                 )
             }
@@ -1097,19 +1129,21 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         bytes: [UInt8],
         client: LSPClient
     ) throws {
-        if openedFiles.insert(path).inserted {
-            guard let text = String(data: Data(bytes), encoding: .utf8) else {
-                throw ExactError.invalidUTF8(path)
-            }
-            try client.notify("textDocument/didOpen", params: [
-                "textDocument": [
-                    "uri": projectURL.appendingPathComponent(path).absoluteString,
-                    "languageId": language.languageID(path),
-                    "version": 1,
-                    "text": text,
-                ],
-            ])
+        // Recorded only once sent: a failed send (dead client) must not
+        // stop the replacement client from receiving `didOpen`.
+        guard !openedFiles.contains(path) else { return }
+        guard let text = String(data: Data(bytes), encoding: .utf8) else {
+            throw ExactError.invalidUTF8(path)
         }
+        try client.notify("textDocument/didOpen", params: [
+            "textDocument": [
+                "uri": projectURL.appendingPathComponent(path).absoluteString,
+                "languageId": language.languageID(path),
+                "version": 1,
+                "text": text,
+            ],
+        ])
+        openedFiles.insert(path)
     }
 
     private func open(

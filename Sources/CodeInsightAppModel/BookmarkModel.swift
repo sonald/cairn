@@ -15,6 +15,10 @@ package final class SharedBookmarkStore {
     package private(set) var isDirty = false
 
     @ObservationIgnored private let store: BookmarkStore?
+    /// Set when the launch load failed for any reason (corrupt, unreadable,
+    /// newer schema…): the file on disk may hold records memory lacks, so
+    /// it must never be overwritten in this process (§8.1).
+    @ObservationIgnored private var loadFailed = false
     @ObservationIgnored private var observers: [UUID: @MainActor () -> Void] = [:]
 
     package init(fileURL: URL) {
@@ -46,11 +50,13 @@ package final class SharedBookmarkStore {
             storageError = error
             rescueBytes = try? store.rawBytes()
             isDirty = false
+            loadFailed = true
         } catch {
             records = []
             storageError = .unreadable
             rescueBytes = try? store.rawBytes()
             isDirty = false
+            loadFailed = true
         }
     }
 
@@ -67,7 +73,7 @@ package final class SharedBookmarkStore {
             notifyObservers()
             return true
         }
-        guard rescueBytes == nil || storageError == nil else {
+        guard !loadFailed else {
             notifyObservers()
             return false
         }

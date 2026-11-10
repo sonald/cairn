@@ -869,6 +869,78 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
 
 @MainActor
 @Test
+func relationTreeDuplicateRelationKeysKeepOneExactRowAndDistinctReusedNodes() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let index = try #require(relationContentIndex(at: fixture.b.pathID, in: fixture.session))
+    let targetOffset = index.symbols[Int(fixture.b.localIndex)].nameRange.lowerBound
+    // Two call sites to the same callee: two heuristic rows, one exact edge.
+    let exact = RelationAsyncGate()
+    let heuristic = RelationTreeModel.LoadedEdge(
+        title: "b", certainty: .strong, dispatch: .direct, symbol: fixture.b,
+        path: "main.rs", byteOffset: targetOffset, line: 1, evidence: [],
+        identityTarget: ("main.rs", targetOffset)
+    )
+    let merged = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: [heuristic, heuristic], isTruncated: false) },
+        exactRelationsResolver: { _, _, _, _, _, _ in
+            await exact.wait()
+            return .relations([
+                .init(
+                    name: "b",
+                    location: relationExactLocation(file: "main.rs", offset: Int(targetOffset)),
+                    item: nil,
+                    callSites: []
+                ),
+            ], origin: .worktree, attribution: relationExactAttribution())
+        }
+    )
+    merged.updateProjectState(.ready(fixture.session, fixture.context))
+    let load = merged.setRoot(target: .engine(fixture.a), direction: .calls)
+    try #require(await testWaitUntil("both heuristic rows publish before exact") {
+        exact.isPending && relationVisibleEdgeRows(merged.root).count == 2
+    })
+    exact.release()
+    await load?.value
+    let exactRows = relationVisibleEdgeRows(merged.root)
+    #expect(exactRows.count == 1)
+    #expect(exactRows.allSatisfy { $0.badge == "Verified" })
+
+    // Two Possible rows sharing a key must stay two distinct nodes after
+    // validation republishes them.
+    let possibleRows = [UInt32(4), 8].map { callSite in
+        RelationTreeModel.LoadedEdge(
+            title: "b", certainty: .possible, dispatch: .direct, symbol: fixture.b,
+            path: "main.rs", byteOffset: 20, line: 1, evidence: [],
+            exactQuery: ("main.rs", callSite, 1), fuzzyTarget: ("main.rs", 20)
+        )
+    }
+    let validated = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: possibleRows, isTruncated: false) },
+        exactResolver: { _, _, _, _ in .completed([]) }
+    )
+    validated.updateProjectState(.ready(fixture.session, fixture.context))
+    validated.setRoot(target: .engine(fixture.a), direction: .calls)
+    try #require(await testWaitUntil("possible rows publish") {
+        relationTreeFinishedLoading(validated.root)
+    })
+    var published = false
+    validated.onNodeChange = { _ in published = true }
+    validated.validatePossible(try relationPossibleRows(in: validated.root))
+    try #require(await testWaitUntil("validation published") { published })
+    let rows = try relationPossibleRows(in: validated.root)
+    #expect(rows.count == 2)
+    #expect(Set(rows.map(ObjectIdentifier.init)).count == 2)
+
+    // The same node passed twice must not trap.
+    validated.cancelPossibleValidation()
+    published = false
+    validated.validatePossible([rows[0], rows[0]])
+    #expect(await testWaitUntil("repeated-node validation published") { published })
+}
+
+@MainActor
+@Test
 func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }

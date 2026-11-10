@@ -381,6 +381,34 @@ func bookmarkModelRetainsLoadRescueAndDirtyMemoryWhenPersistenceFails() throws {
 
 @MainActor
 @Test
+func bookmarkModelNeverOverwritesAStoreThatCouldNotBeRead() throws {
+    let fileURL = bookmarkModelTestFileURL()
+    defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
+    let store = BookmarkStore(fileURL: fileURL)
+    try store.replace([bookmarkPanelRecord(
+        id: "00000000-0000-4000-8000-00000000010a",
+        path: "src/saved.rs", symbolName: nil, note: "",
+        updatedAt: Date(timeIntervalSince1970: 20)
+    )])
+    let saved = try store.rawBytes()
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: fileURL.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path) }
+
+    let model = BookmarkModel(store: store)
+    #expect(model.storageError == .unreadable)
+    #expect(model.records.isEmpty)
+    let added = bookmarkPanelRecord(
+        id: "00000000-0000-4000-8000-00000000010b",
+        path: "src/added.rs", symbolName: nil, note: "", updatedAt: .now
+    )
+    #expect(model.toggle(added) == .rejected)
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    #expect(try store.rawBytes() == saved)
+}
+
+@MainActor
+@Test
 func bookmarkModelRejectsSemanticStoreFailuresWithoutKeepingInvalidMemory() throws {
     let fileURL = bookmarkModelTestFileURL()
     defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }

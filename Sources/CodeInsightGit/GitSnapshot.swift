@@ -408,8 +408,8 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
 
         var captured: [String: CapturedFile] = [:]
         var excluded: [String] = []
-        var unreadable: [String] = []
         let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
+        var unreadable = walked.unreadableDirectories
         excluded = walked.ruleExcluded
         for file in walked.files {
             let relative = ProjectTreeWalk.relativePath(of: file, under: root)
@@ -470,11 +470,15 @@ public enum ProjectTreeWalk {
     public static func regularFiles(
         under root: URL,
         rules: ProjectPathRules
-    ) throws -> (files: [URL], ruleExcluded: [String]) {
+    ) throws -> (files: [URL], ruleExcluded: [String], unreadableDirectories: [String]) {
         var files: [URL] = []
         var excluded: [String] = []
-        try walk(root, root: root, rules: rules, files: &files, excluded: &excluded)
-        return (files.sorted { $0.path < $1.path }, excluded.sorted())
+        var unreadable: [String] = []
+        try walk(
+            root, root: root, rules: rules,
+            files: &files, excluded: &excluded, unreadable: &unreadable
+        )
+        return (files.sorted { $0.path < $1.path }, excluded.sorted(), unreadable.sorted())
     }
 
     public static func relativePath(of file: URL, under root: URL) -> String {
@@ -488,12 +492,24 @@ public enum ProjectTreeWalk {
         root: URL,
         rules: ProjectPathRules,
         files: inout [URL],
-        excluded: inout [String]
+        excluded: inout [String],
+        unreadable: inout [String]
     ) throws {
         let keys: [URLResourceKey] = [.isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey]
-        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: keys) {
+        // Only an unreadable root fails the walk; an unreadable subfolder
+        // (permissions, privacy protection) or a vanished entry is skipped.
+        let entries: [URL]
+        do {
+            entries = try FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: keys
+            )
+        } catch where directory != root {
+            unreadable.append(relativePath(of: directory, under: root))
+            return
+        }
+        for url in entries {
             if url.lastPathComponent == ".DS_Store" { continue }
-            let values = try url.resourceValues(forKeys: Set(keys))
+            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
             guard values.isSymbolicLink != true else { continue }
             let isDirectory = values.isDirectory == true
             guard isDirectory || values.isRegularFile == true else { continue }
@@ -501,7 +517,10 @@ public enum ProjectTreeWalk {
             switch rules.verdict(for: relative, isDirectory: isDirectory) {
             case .included:
                 if isDirectory {
-                    try walk(url, root: root, rules: rules, files: &files, excluded: &excluded)
+                    try walk(
+                        url, root: root, rules: rules,
+                        files: &files, excluded: &excluded, unreadable: &unreadable
+                    )
                 } else {
                     files.append(url)
                 }

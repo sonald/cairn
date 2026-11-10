@@ -541,8 +541,9 @@ public final class RelationTreeModel {
             let container = parent.kind == .group ? parent.parent : parent
             guard let container else { return }
             let selectedIDs = Dictionary(
-                uniqueKeysWithValues: zip(rows, promoted.edges.prefix(rows.count))
-                    .map { (ObjectIdentifier($0.0), $0.1) }
+                zip(rows, promoted.edges.prefix(rows.count))
+                    .map { (ObjectIdentifier($0.0), $0.1) },
+                uniquingKeysWith: { first, _ in first }
             )
             var combined = relationEdgeRows(in: container).compactMap { row in
                 selectedIDs[ObjectIdentifier(row)] ?? row.loadedEdge
@@ -772,7 +773,9 @@ public final class RelationTreeModel {
                     } else if result.engineFailed {
                         engineLoadFailed = true
                         relationQueryContexts[relationContextID]?.candidateQuery = .failed
-                    } else {
+                    } else if !result.timedOut {
+                        // A timeout carries no exact answer; it must not
+                        // erase one that already arrived.
                         exactResult = result.exact
                         if let exactResult {
                             relationQueryContexts[relationContextID]?.exactQuery =
@@ -1242,7 +1245,8 @@ public final class RelationTreeModel {
                 matchedExactIndexes.contains($0) ? nil : exactEdges[$0]
             }
             return LoadResult(
-                edges: edges,
+                // Several heuristic rows (call sites) can match one exact edge.
+                edges: Self.deduplicateExact(edges),
                 isTruncated: loaded.isTruncated,
                 exactState: .queried(attribution.environment)
             )
@@ -1426,17 +1430,22 @@ public final class RelationTreeModel {
         }
 
         var currentRows: [CycleKey: Node] = [:]
+        // Duplicate keys are legitimate (two call sites to one callee), but
+        // an old row survives only while the new batch still has a row for it.
+        var currentRowCounts: [CycleKey: Int] = [:]
         var currentTopLevelKeys: Set<CycleKey> = []
         var currentGroupRowKeys: [Node.CandidateGroup?: Set<CycleKey>] = [:]
         for child in children {
             if child.kind == .edge, let key = child.cycleKey {
                 currentRows[key] = child
+                currentRowCounts[key, default: 0] += 1
                 currentTopLevelKeys.insert(key)
             }
             if child.kind == .group {
                 for row in child.children ?? [] where row.kind == .edge {
                     if let key = row.cycleKey {
                         currentRows[key] = row
+                        currentRowCounts[key, default: 0] += 1
                         currentGroupRowKeys[child.candidateGroup, default: []]
                             .insert(key)
                     }
@@ -1450,8 +1459,10 @@ public final class RelationTreeModel {
                 guard let key = item.cycleKey,
                       let current = currentRows[key],
                       currentTopLevelKeys.contains(key),
+                      currentRowCounts[key, default: 0] > 0,
                       let parent = item.parent ?? current.parent
                 else { continue }
+                currentRowCounts[key, default: 0] -= 1
                 consumed.insert(key)
                 updatePublishedRow(item, from: current, parent: parent)
                 result.append(item)
@@ -1461,8 +1472,10 @@ public final class RelationTreeModel {
             item.children = item.children?.compactMap { previous in
                 guard let key = previous.cycleKey,
                       let current = currentRows[key],
-                      currentGroupRowKeys[previousGroup]?.contains(key) == true
+                      currentGroupRowKeys[previousGroup]?.contains(key) == true,
+                      currentRowCounts[key, default: 0] > 0
                 else { return nil }
+                currentRowCounts[key, default: 0] -= 1
                 consumed.insert(key)
                 updatePublishedRow(previous, from: current, parent: item)
                 return previous
@@ -1554,14 +1567,17 @@ public final class RelationTreeModel {
         from previous: [Node],
         parent: Node
     ) -> [Node] {
-        let previousRows = Dictionary(
-            previous.flatMap { child in
+        // Rows sharing a key queue up in order; each old node is reused once.
+        var previousRows = Dictionary(
+            grouping: previous.flatMap { child in
                 child.kind == .group ? child.children ?? [] : [child]
-            }.compactMap { row in
-                row.cycleKey.map { ($0, row) }
-            },
-            uniquingKeysWith: { first, _ in first }
+            }.filter { $0.cycleKey != nil },
+            by: { $0.cycleKey! }
         )
+        func takePrevious(_ key: CycleKey) -> Node? {
+            guard previousRows[key]?.isEmpty == false else { return nil }
+            return previousRows[key]?.removeFirst()
+        }
         let previousGroups = Dictionary(
             previous.filter { $0.kind == .group }.map {
                 ($0.candidateGroup, $0)
@@ -1571,7 +1587,7 @@ public final class RelationTreeModel {
         return children.map { child in
             if child.kind == .edge,
                let key = child.cycleKey,
-               let old = previousRows[key]
+               let old = takePrevious(key)
             {
                 updatePublishedRow(old, from: child, parent: parent)
                 return old
@@ -1583,7 +1599,7 @@ public final class RelationTreeModel {
             group.parent = parent
             group.children = child.children?.map { row in
                 guard let key = row.cycleKey,
-                      let old = previousRows[key]
+                      let old = takePrevious(key)
                 else { return row }
                 updatePublishedRow(old, from: row, parent: group)
                 return old

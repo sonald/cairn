@@ -920,6 +920,31 @@ func worktreeCaptureSkipsAndReportsUnreadableFiles() throws {
     #expect(snapshot.listFiles().map(\.path) == ["main.rs"])
 }
 
+// root can list a mode-000 directory, so the case cannot be built there.
+@Test(.enabled(if: getuid() != 0))
+func worktreeCaptureSkipsAndReportsUnreadableDirectories() throws {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnreadableDir-\(UUID().uuidString)", isDirectory: true)
+    let locked = root.appendingPathComponent("locked")
+    try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+    defer {
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: locked.path)
+        try? FileManager.default.removeItem(at: root)
+    }
+    try Data("fn main() {}\n".utf8).write(to: root.appendingPathComponent("main.rs"))
+    try Data("fn hidden() {}\n".utf8).write(to: locked.appendingPathComponent("hidden.rs"))
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
+
+    let snapshot = try WorktreeSnapshot(repositoryURL: root)
+
+    #expect(snapshot.listFiles().map(\.path) == ["main.rs"])
+    #expect(snapshot.unreadablePaths == ["locked"])
+
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: root.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path) }
+    #expect(throws: (any Error).self) { try WorktreeSnapshot(repositoryURL: root) }
+}
+
 @Test
 func treeWalkKeepsExactlyFilesWhoseAncestorsAndSelfAreIncluded() throws {
     let root = FileManager.default.temporaryDirectory
