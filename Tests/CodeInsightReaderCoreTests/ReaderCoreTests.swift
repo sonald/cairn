@@ -389,9 +389,8 @@ func typeScriptLargeDocumentLoadsPlainThenDetachedSyntax() async throws {
 @Test
 func typeScriptByteErrorsRejectWithoutParserObserver() throws {
     let parserCount = OSAllocatedUnfairLock(initialState: 0)
-    let badSources = [
-        [0xEF, 0xBB, 0xBF] + Array("const x = 1\n".utf8),
-        Array([0x61, 0xFF, 0x62]),
+    let badSources: [[UInt8]] = [
+        [0x61, 0xFF, 0x62],
     ]
     for bytes in badSources {
         do {
@@ -410,6 +409,21 @@ func typeScriptByteErrorsRejectWithoutParserObserver() throws {
     }
     #expect(parserCount.withLock { $0 } == 0)
 }
+
+/// The index accepts a BOM-prefixed `.ts` file, so the reader highlights it
+/// too, in the file's own byte coordinates.
+@Test
+func typeScriptReaderHighlightsBOMPrefixedSourceInFileBytes() throws {
+    let bytes = [0xEF, 0xBB, 0xBF] + Array("const x = 1\n".utf8)
+    let result = try typeScriptReaderHighlightWithFolds(
+        bytes: bytes,
+        mode: LanguageMode(language: .typescript)
+    )
+    let number = try #require(result.spans.first { $0.kind == .number })
+    #expect(number.range == ByteRange(lowerBound: 13, upperBound: 14))
+    #expect(result.spans.allSatisfy { $0.range.lowerBound >= 3 })
+}
+
 @Test
 func pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() throws {
     let prompt = #"""

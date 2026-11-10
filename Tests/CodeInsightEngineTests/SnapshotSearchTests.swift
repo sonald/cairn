@@ -128,6 +128,34 @@ func typescriptReferenceSearchUsesTsGrammarAndExcludesSpoofs() async throws {
 }
 
 @Test
+func typescriptReferenceSearchCountsTypePositionsAndMemberAccessButNotKeys() async throws {
+    let bytes = Array("""
+        interface Shape { Shape: string }
+        let s: Shape
+        function f(x: Shape): Shape { return x }
+        obj.Shape()
+        const o = { Shape: 1 }
+        """.utf8)
+    let source = FakeSnapshotSource([("a.ts", bytes)], language: .typescript)
+
+    let result = try await collect(try SnapshotSearchService(
+        source: source,
+        language: .typescript,
+        extractor: TypeScriptExtractor()
+    ).searchReferences(
+        ContentSearchQuery(pattern: "Shape", caseSensitive: true),
+        excludingPathID: PathID(rawValue: .max),
+        excludingRange: ByteRange(lowerBound: .max, upperBound: .max),
+        context: context(for: source)
+    ))
+
+    // Interface name, annotation, parameter + return type, member call;
+    // the property signature (line 1, col 19) and object key (line 5) are not.
+    #expect(result.matches.map { "\($0.line):\($0.column)" }.sorted()
+        == ["1:11", "2:8", "3:15", "3:23", "4:5"])
+}
+
+@Test
 func typescriptTsxReferenceSearchExcludesJSXTagsButIncludesValueRefs() async throws {
     let bytes = Array("""
         const foo = 1

@@ -261,7 +261,7 @@ func nestedClassMethodsDoNotGainFacetNorOuterParent() throws {
 }
 
 @Test
-func identifierRangesIncludeParameterAndJSXValueRefsButExcludeTypePropertyAndTagTokens() throws {
+func identifierRangesIncludeTypeAliasParameterAndJSXValueRefsButExcludeKeyAndTagTokens() throws {
     let source = """
         type TypeName = string
         const obj = { TypeName: 1 }
@@ -275,7 +275,9 @@ func identifierRangesIncludeParameterAndJSXValueRefsButExcludeTypePropertyAndTag
         mode: .init(language: .typescript, variant: "tsx")
     )
 
-    #expect(ranges.count == 3)
+    // Type alias name, parameter, JSX value ref, JSX child; not the object
+    // key, the JSX attribute name, or the tag.
+    #expect(ranges.count == 4)
 }
 
 @Test

@@ -78,10 +78,8 @@ func requireSupportedTypeScriptReaderMode(_ mode: LanguageMode) throws {
     }
 }
 
+/// A UTF-8 BOM is fine: the grammar skips U+FEFF, ranges stay in file bytes.
 private func requireSupportedTypeScriptBytes(_ bytes: [UInt8]) throws {
-    if bytes.starts(with: [0xEF, 0xBB, 0xBF]) {
-        throw CocoaError(.fileReadCorruptFile)
-    }
     guard String(bytes: bytes, encoding: .utf8) != nil else {
         throw CocoaError(.fileReadCorruptFile)
     }

@@ -63,9 +63,12 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
         var hits: [CodeInsightCore.ByteRange] = []
         // Explicit stack, not recursion: project search runs this on a
         // cooperative thread, and a long `+` chain nests thousands deep.
-        var pending = [tree.rootNode]
-        while let node = pending.popLast() {
-            if isIdentifierNode(node.kind),
+        // A `property_identifier` counts only as a member access property
+        // (`obj.foo`), never as an object key or property/field declaration.
+        var pending = [(node: tree.rootNode, isMemberProperty: false)]
+        while let (node, isMemberProperty) = pending.popLast() {
+            if node.kind == "identifier" || node.kind == "type_identifier"
+                || (isMemberProperty && node.kind == "property_identifier"),
                (node.byteRange.upperBound - node.byteRange.lowerBound) == UInt32(name.count),
                bytes[Int(node.byteRange.lowerBound)..<Int(node.byteRange.upperBound)]
                 .elementsEqual(name)
@@ -77,10 +80,12 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
             }
             let skippedTagName = ["jsx_opening_element", "jsx_self_closing_element", "jsx_closing_element"]
                 .contains(node.kind) ? childField(node, "name")?.byteRange : nil
+            let memberProperty = node.kind == "member_expression"
+                ? childField(node, "property")?.byteRange : nil
             for child in node.namedChildren.reversed()
                 where child.byteRange != skippedTagName
             {
-                pending.append(child)
+                pending.append((child, child.byteRange == memberProperty))
             }
         }
         return hits
@@ -165,10 +170,6 @@ private func fingerprint(
     return ContentID.sha256(
         of: Array(bytes[Int(range.lowerBound)..<Int(range.upperBound)])
     )
-}
-
-private func isIdentifierNode(_ kind: String) -> Bool {
-    kind == "identifier"
 }
 
 private func unquote(_ node: Node, in bytes: [UInt8]) -> String? {
