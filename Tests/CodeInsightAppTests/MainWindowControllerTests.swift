@@ -1699,3 +1699,37 @@ func projectSymbolPreviewShowsTheSymbolInTheContext() async throws {
     try await Task.sleep(for: .milliseconds(300))
     #expect(!model.contextWindow.isShowingPreviousToken)
 }
+
+/// Each window holds its own copy of the app-wide layout: session saves and
+/// closing an older window must not undo a newer window's layout change.
+@MainActor
+@Test
+func olderWindowSessionSaveKeepsAnotherWindowsLayoutChange() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn main() {}\n"])
+    let suite = NSTemporaryDirectory() + "CairnLayoutWindowsTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer {
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: root)
+    }
+    func makeController() async throws -> MainWindowController {
+        let model = AppModel(indexService: ProjectIndexService())
+        let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true,
+                                              layoutDefaults: defaults)
+        controller.openProject(root: root)
+        try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+        return controller
+    }
+    let stale = try await makeController()
+    let changed = try await makeController()
+    defer { changed.close() }
+    changed.toggleRelations()
+    #expect(!PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")).hidden.contains(.relations))
+    #expect(stale.panelLayout.hidden.contains(.relations), "The older window keeps its own copy")
+    stale.scheduleSessionCheckpointForApplicationLifecycle()
+    stale.checkpointSessionSynchronously()
+    stale.close()
+    #expect(!PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")).hidden.contains(.relations),
+            "The newer window's change survives")
+}

@@ -2313,7 +2313,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if runFinalCheckpoint {
             checkpointSessionSynchronously()
         }
-        savePanelLayout()
         onProjectWindowClosing?(self)
         closeAuxiliaryPanels()
         cancelSessionRestore()
@@ -2393,8 +2392,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelLayout()
     }
 
-    /// True while a temporary override hides panels; the stored layout is
-    /// not written then.
+    /// True while a temporary override hides panels; sizes measured then are
+    /// not recorded.
     private var panelOverrideActive: Bool {
         contentSurfaceMode != .source || readingSetLayoutActive || splitHidesZones
     }
@@ -2632,8 +2631,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         savePanelLayout()
     }
 
+    /// The layout is app-wide but each window holds its own copy, so only an
+    /// actual layout change writes it; session saves and closing never do,
+    /// or a window with an older copy would undo another window's change.
+    /// Overrides never edit `panelLayout`, so a change made under one (a
+    /// panel toggled beside a preview) is written at once.
     private func savePanelLayout() {
-        guard !panelOverrideActive, let layoutDefaults else { return }
+        guard let layoutDefaults else { return }
         layoutDefaults.set(panelLayout.encoded(), forKey: Self.panelLayoutKey)
     }
 
@@ -3054,7 +3058,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         if nextReadingSetLayout != readingSetLayoutActive {
             // A Reading Set hides every panel on top of the stored layout.
-            savePanelLayout()
             readingSetLayoutActive = nextReadingSetLayout
             readingSetRevealed = []
         }
@@ -4845,7 +4848,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         allowsPendingTopology: Bool = false
     ) {
         captureActiveTabState()
-        savePanelLayout()
         try? model.writeSessionCheckpoint(
             panelPreset: panelPreset,
             allowsPendingTopology: allowsPendingTopology
@@ -4858,7 +4860,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         allowsPendingTopology: Bool = false
     ) throws {
         captureActiveTabState()
-        savePanelLayout()
         try model.writeSessionCheckpoint(
             panelPreset: panelPreset,
             allowsPendingTopology: allowsPendingTopology
@@ -4867,7 +4868,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func scheduleSessionCheckpointForApplicationLifecycle() {
         captureActiveTabState()
-        savePanelLayout()
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
