@@ -440,3 +440,44 @@ func markdownHeadingFoldHidesOnlyItsSectionAndCopiesTheWholeText() throws {
     #expect(controller.scrollPreview(toAnchor: "inner"))
     #expect(text.string == full)
 }
+
+@MainActor
+@Test
+func markdownPreviewKeepsFoldsAndScrollWhenANewSnapshotHasTheSameBytes() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let body = (0..<80).map { "line \($0)" }.joined(separator: "\n\n")
+    let source = "# One\n\nalpha\n\n# Two\n\n\(body)\n"
+    let file = try nonSourcePreviewFile(root: root, name: "doc.md", bytes: Array(source.utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
+    controller.display(file, snapshotID: SnapshotID(rawValue: UUID()), languageMode: nil)
+    controller.view.layoutSubtreeIfNeeded()
+    let text = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview"))
+    text.setSelectedRange(NSRange(location: 0, length: 0))
+    #expect(controller.toggleFoldAtSelection())
+    #expect(!text.string.contains("alpha"))
+    let scroll = try #require(text.enclosingScrollView)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 300))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    let origin = scroll.contentView.bounds.origin
+    #expect(origin.y > 0)
+
+    // An index refresh: new snapshot, same bytes.
+    controller.display(file, snapshotID: SnapshotID(rawValue: UUID()), languageMode: nil)
+    let kept = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview"))
+    #expect(kept === text)
+    #expect(!kept.string.contains("alpha"))
+    #expect(kept.enclosingScrollView?.contentView.bounds.origin == origin)
+
+    // Changed bytes still rebuild.
+    controller.display(
+        file,
+        snapshotID: SnapshotID(rawValue: UUID()),
+        source: { _ in Array("# Changed\n".utf8) },
+        languageMode: nil
+    )
+    #expect(controller.selfTestPreviewState.renderedText?.contains("Changed") == true)
+}

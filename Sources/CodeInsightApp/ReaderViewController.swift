@@ -463,6 +463,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var previewImageSize: NSSize?
     private var previewHTMLSource: String?
     private var previewHTMLBaseURL: URL?
+    /// The bytes the preview shows, so a same-content redisplay keeps it.
+    private var previewContentID: ContentID?
     private var previewHTMLFinished = false
     private var previewHTMLLoadError: String?
     private var htmlInitialNavigationAllowed = false
@@ -1640,11 +1642,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         if let pdfView = previewView as? PDFView {
             pdfView.backgroundColor = readerTheme.backgroundColor
         }
+        if let webView = previewView as? WKWebView {
+            webView.underPageBackgroundColor = readerTheme.backgroundColor
+        }
+        // The HTML markup only carries the theme's text and background
+        // colours; reloading for anything else would reset its scroll.
+        let htmlColors = { (theme: ReaderTheme) in
+            [theme.foregroundColor, theme.backgroundColor].map(self.cssColor)
+        }
         if let webView = previewView as? WKWebView,
            let html = previewHTMLSource,
-           let baseURL = previewHTMLBaseURL
+           let baseURL = previewHTMLBaseURL,
+           htmlColors(previousTheme) != htmlColors(readerTheme)
         {
-            webView.underPageBackgroundColor = readerTheme.backgroundColor
             previewHTMLFinished = false
             previewHTMLLoadError = nil
             htmlInitialNavigationAllowed = true
@@ -1668,9 +1678,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onActivate: onActivate,
             onClose: onClose
         )
-        readingSetView.onScroll = { [weak model] offset in
-            model?.updateActiveReadingSetScroll(offset)
-        }
     }
 
     func refreshTabs() {
@@ -2604,6 +2611,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewImageSize = nil
         previewHTMLSource = nil
         previewHTMLBaseURL = nil
+        previewContentID = nil
         previewHTMLFinished = false
         previewHTMLLoadError = nil
         htmlInitialNavigationAllowed = false
@@ -2660,6 +2668,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             displayPreviewError(localizedFormat("main.open.failure", file.lastPathComponent))
             return
         }
+        defer { previewContentID = ContentID.sha256(of: bytes) }
 
         let extensionName = file.pathExtension.lowercased()
         if extensionName == "pdf" {
@@ -3074,14 +3083,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         // A new snapshot with the same bytes (index refresh, a version that
         // did not touch this file) keeps the reader as it is: redisplaying
         // resets the caret and the laid-out geometry, so the viewport could
-        // only come back line-aligned over estimated positions.
+        // only come back line-aligned over estimated positions. Previews keep
+        // their scroll and Markdown folds the same way.
         if let file, file == displayedFile, languageMode == displayedLanguageMode,
-           let contentID = displayedDocument?.contentID,
+           let contentID = displayedDocument?.contentID ?? previewContentID,
            let bytes = try? source.map({ try $0(file) })
                ?? Array(Data(contentsOf: file, options: .mappedIfSafe)),
            ContentID.sha256(of: bytes) == contentID
         {
             displayedSnapshotID = snapshotID
+            if let anchor = pendingPreviewAnchor,
+               anchor.file.standardizedFileURL == file.standardizedFileURL {
+                pendingPreviewAnchor = nil
+                scrollPreview(toAnchor: anchor.fragment)
+            }
             return
         }
         displayedReadingSetKey = nil

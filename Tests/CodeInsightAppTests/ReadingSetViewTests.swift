@@ -38,6 +38,9 @@ func readingSetScrollPublishesItsNumericCheckpointOffset() async throws {
     var observedOffset: Double?
     controller.onReadingSetScrollChange = { observedOffset = $0 }
     controller.loadViewIfNeeded()
+    // The main window wires tabs after the scroll callback; scrolling must
+    // still reach it so the session checkpoint is scheduled.
+    controller.configureTabs(TabStripModel(), onActivate: { _ in }, onClose: { _ in })
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 760, height: 280),
         styleMask: [.titled],
