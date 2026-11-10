@@ -6,11 +6,6 @@ import Testing
 @testable import CodeInsightAppModel
 @testable import CodeInsightEngine
 
-private let snapshotSwitchRepositoryRoot = URL(fileURLWithPath: #filePath)
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-    .deletingLastPathComponent()
-
 @MainActor
 @Test
 func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {

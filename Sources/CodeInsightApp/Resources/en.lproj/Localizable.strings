@@ -155,7 +155,6 @@
 "main.focus.ended.no.enclosing.scope" = "Focus ended: no enclosing scope";
 "main.focus.ended.syntax.unavailable" = "Focus ended: syntax unavailable";
 "main.folder" = "Folder";
-"main.follow" = "Follow";
 "main.forward" = "Forward";
 "main.function" = "Function";
 "main.go.to" = "Go to %@";
@@ -198,10 +197,8 @@
 "main.open.in.new.tab" = "Open in New Tab";
 "main.open.in.right.reader.compare" = "Open in Right Reader (Compare)";
 "main.open.project" = "Open Project…";
-"main.open.symbol.search" = "Open Symbol Search";
 "main.outline" = "Outline";
 "main.pdf.preview" = "PDF preview";
-"main.pin" = "Pin";
 "main.plain.text.preview" = "Plain text preview";
 "main.code.text.preview" = "%@ preview";
 "main.preview.failure" = "%@ preview";
@@ -251,8 +248,6 @@
 "main.struct" = "Struct";
 "main.structure.folds.function.bodies.and.keeps.signatures.visible" = "Structure folds function bodies and keeps signatures visible";
 "main.switch.features.here.the.current.unit.is.detected" = "Switch features here; the current unit is detected";
-"main.symbols" = "Symbols";
-"main.symbols.t" = "Symbols  ⌘T";
 "main.seek" = "Seek";
 "main.seek.p" = "Seek  ⌘P";
 "main.open.seek" = "Open Seek";
@@ -336,13 +331,10 @@
 "panel.palette.symbolLine" = "%@ · line %lld";
 "panel.search.case" = "Case sensitive";
 "panel.search.input" = "Find in project";
-"panel.search.line" = "Line %lld: %@";
 "panel.search.placeholder" = "Find in project…";
 "panel.search.regex" = "Regular expression";
 "panel.search.results" = "Project search results";
-"panel.search.status" = "Project search status";
 "panel.search.summary" = "%@ in %@";
-"panel.search.title" = "Find in Project";
 "panel.search.truncated" = "Results truncated";
 "panel.symbol.kind.class" = "class";
 "panel.symbol.kind.const" = "const";
@@ -351,12 +343,14 @@
 "panel.symbol.kind.field" = "field";
 "panel.symbol.kind.fn" = "fn";
 "panel.symbol.kind.impl" = "impl";
+"panel.symbol.kind.macro" = "macro";
 "panel.symbol.kind.method" = "method";
 "panel.symbol.kind.mod" = "mod";
 "panel.symbol.kind.static" = "static";
 "panel.symbol.kind.struct" = "struct";
 "panel.symbol.kind.trait" = "trait";
 "panel.symbol.kind.typeAlias" = "typeAlias";
+"panel.symbol.kind.variable" = "variable";
 "readingSet.captured" = "captured";
 "readingSet.dependency" = "dependency · captured";
 "readingSet.empty" = "No excerpts could be frozen. Review the skipped reasons above.";
@@ -391,7 +385,6 @@
 "relation.former.open" = "Open former candidate";
 "relation.freeze" = "Freeze Results";
 "relation.freeze.help" = "Freeze the currently published source and evidence snapshots as a Reading Set tab";
-"relation.freeze.hint" = "Freeze up to 50 published locations as a Reading Set";
 "relation.freeze.title" = "Freeze Results as Reading Set";
 "relation.hint" = "Right-click a symbol → Show Callers / Calls / Implements / References";
 "relation.implements" = "Implements";
@@ -668,11 +661,7 @@
 "settings.blockEndAnnotations" = "Label the end of long blocks";
 "settings.blockEndAnnotations.help" = "Rust and TypeScript: after the closing brace of a block of 12 lines or more, show which block it ends. Click the label to go to the block's start.";
 "panel.search.word" = "Whole word";
-"panel.search.paths" = "Include / exclude paths";
-"panel.search.include.placeholder" = "Include, e.g. src/**, *.{rs,ts}";
-"panel.search.exclude.placeholder" = "Exclude, e.g. **/tests/**";
 "panel.search.scope" = "Searched %lld files";
-"panel.search.scope.excluded" = "Searched %1$lld files · %2$lld excluded by path";
 "main.match.word" = "Whole word";
 "app.menu.exclusion.rules" = "Project Exclusion Rules…";
 "main.rules.excluded" = "%lld paths excluded by project rules";

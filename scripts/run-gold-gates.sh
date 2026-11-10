@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
         --typescript-revision) typescript_revision="$2"; shift 2 ;;
         --persist)     persist_flag="--persist"; shift ;;
         --help|-h)
-            head -15 "$0" | tail -13 | sed 's/^# \?//'
+            head -13 "$0" | tail -12 | sed -E 's/^# ?//'
             exit 0 ;;
         *)
             echo "unknown option: $1" >&2

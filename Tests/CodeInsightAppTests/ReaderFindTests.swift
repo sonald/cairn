@@ -147,7 +147,10 @@ private func waitForFind(
 private func waitUntil(
     _ condition: @escaping @MainActor () -> Bool
 ) async -> Bool {
+    // A regression must fail the test, not hang the run.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
     while !condition() {
+        guard ContinuousClock.now < deadline else { return false }
         do {
             try await Task.sleep(for: .milliseconds(10))
         } catch {

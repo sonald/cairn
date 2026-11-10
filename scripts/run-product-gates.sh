@@ -334,7 +334,7 @@ if ! jq -e '
 fi
 echo "PASS real TypeScript coverage"
 
-new_provider_pids="$(comm -13 <(sort -u "$provider_baseline") <(collect_provider_pids))"
+new_provider_pids="$(comm -13 <(sort -u "$provider_baseline") <(collect_provider_pids | sort -u))"
 if [[ -n "$new_provider_pids" ]]; then
     echo "FAIL new provider processes remained after self-tests: $new_provider_pids" >&2
     exit 1

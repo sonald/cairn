@@ -42,7 +42,7 @@ def main() -> int:
         print("model key gate flags modelText()", file=sys.stderr)
         return 1
     hits = []
-    for path in sorted(pathlib.Path("Sources/CodeInsightApp").glob("*.swift")):
+    for path in sorted(pathlib.Path("Sources/CodeInsightApp").rglob("*.swift")):
         for line in offending_calls(path.read_text(encoding="utf-8")):
             hits.append(f"{path}:{line}")
     if hits:

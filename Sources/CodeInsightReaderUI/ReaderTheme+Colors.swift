@@ -98,22 +98,8 @@ public extension ReaderTheme {
         dynamicColor(verifiedRGB(isDark:))
     }
 
-    var verifiedBackgroundColor: NSColor {
-        dynamicColor(
-            verifiedRGB(isDark:),
-            alpha: { CGFloat(verifiedFillAlpha(isDark: $0)) }
-        )
-    }
-
     var inferredColor: NSColor {
         dynamicColor(inferredRGB(isDark:))
-    }
-
-    var inferredBackgroundColor: NSColor {
-        dynamicColor(
-            inferredRGB(isDark:),
-            alpha: { CGFloat(inferredFillAlpha(isDark: $0)) }
-        )
     }
 
     var unresolvedColor: NSColor {

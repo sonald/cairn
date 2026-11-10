@@ -155,7 +155,6 @@
 "main.focus.ended.no.enclosing.scope" = "聚焦已结束：没有外层作用域";
 "main.focus.ended.syntax.unavailable" = "聚焦已结束：语法信息不可用";
 "main.folder" = "文件夹";
-"main.follow" = "跟随";
 "main.forward" = "前进";
 "main.function" = "函数";
 "main.go.to" = "前往 %@";
@@ -198,10 +197,8 @@
 "main.open.in.new.tab" = "在新标签页打开";
 "main.open.in.right.reader.compare" = "在右侧阅读器打开（比较）";
 "main.open.project" = "打开项目…";
-"main.open.symbol.search" = "打开符号搜索";
 "main.outline" = "大纲";
 "main.pdf.preview" = "PDF 预览";
-"main.pin" = "固定";
 "main.plain.text.preview" = "纯文本预览";
 "main.code.text.preview" = "%@ 预览";
 "main.preview.failure" = "%@预览";
@@ -251,8 +248,6 @@
 "main.struct" = "结构体";
 "main.structure.folds.function.bodies.and.keeps.signatures.visible" = "结构视图折叠函数体，保留签名";
 "main.switch.features.here.the.current.unit.is.detected" = "在此切换特性；当前单元自动检测";
-"main.symbols" = "符号";
-"main.symbols.t" = "符号  ⌘T";
 "main.seek" = "跳转";
 "main.seek.p" = "跳转  ⌘P";
 "main.open.seek" = "打开跳转面板";
@@ -336,13 +331,10 @@
 "panel.palette.symbolLine" = "%@ · 第 %lld 行";
 "panel.search.case" = "区分大小写";
 "panel.search.input" = "在项目中查找";
-"panel.search.line" = "第 %lld 行：%@";
 "panel.search.placeholder" = "在项目中查找…";
 "panel.search.regex" = "正则表达式";
 "panel.search.results" = "项目搜索结果";
-"panel.search.status" = "项目搜索状态";
 "panel.search.summary" = "%2$@中有 %1$@";
-"panel.search.title" = "在项目中查找";
 "panel.search.truncated" = "结果已截断";
 "panel.symbol.kind.class" = "类";
 "panel.symbol.kind.const" = "常量";
@@ -351,12 +343,14 @@
 "panel.symbol.kind.field" = "字段";
 "panel.symbol.kind.fn" = "函数";
 "panel.symbol.kind.impl" = "实现";
+"panel.symbol.kind.macro" = "宏";
 "panel.symbol.kind.method" = "方法";
 "panel.symbol.kind.mod" = "模块";
 "panel.symbol.kind.static" = "静态项";
 "panel.symbol.kind.struct" = "结构体";
 "panel.symbol.kind.trait" = "特征";
 "panel.symbol.kind.typeAlias" = "类型别名";
+"panel.symbol.kind.variable" = "变量";
 "readingSet.captured" = "已捕获";
 "readingSet.dependency" = "依赖 · 已捕获";
 "readingSet.empty" = "无法保存任何代码摘录。请查看上方的跳过原因。";
@@ -391,7 +385,6 @@
 "relation.former.open" = "打开原候选项";
 "relation.freeze" = "冻结结果";
 "relation.freeze.help" = "将当前已发布的源码和证据快照冻结为阅读集标签页";
-"relation.freeze.hint" = "将最多 50 个已发布位置冻结为阅读集";
 "relation.freeze.title" = "将结果冻结为阅读集";
 "relation.hint" = "右键点击符号 → 显示调用方 / 调用 / 实现 / 引用";
 "relation.implements" = "实现";
@@ -668,11 +661,7 @@
 "settings.blockEndAnnotations" = "标注长代码块的结尾";
 "settings.blockEndAnnotations.help" = "Rust 和 TypeScript：块长 12 行以上时，在闭合的 } 后显示它属于哪个块。点击标注跳到块开头。";
 "panel.search.word" = "全词匹配";
-"panel.search.paths" = "包含 / 排除路径";
-"panel.search.include.placeholder" = "包含，例如 src/**、*.{rs,ts}";
-"panel.search.exclude.placeholder" = "排除，例如 **/tests/**";
 "panel.search.scope" = "在 %lld 个文件中搜索";
-"panel.search.scope.excluded" = "在 %1$lld 个文件中搜索 · 按路径排除 %2$lld 个";
 "main.match.word" = "全词匹配";
 "app.menu.exclusion.rules" = "项目排除规则…";
 "main.rules.excluded" = "按项目规则排除 %lld 个路径";

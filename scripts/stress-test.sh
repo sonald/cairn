@@ -239,7 +239,7 @@ overall_timeout=$(((runs + 1) * timeout_seconds + runs * 10 + 60))
 script_pid=$$
 /bin/zsh -c \
     'sleep "$1"; if [[ $PPID -eq $2 ]] && kill -0 "$2" 2>/dev/null; then print -u2 -- "overall HANG timeout=${1}s"; kill -TERM "$2"; fi' \
-    "$overall_timeout" "$script_pid" &
+    codeinsight-stress-watchdog "$overall_timeout" "$script_pid" &
 overall_watchdog_pid=$!
 
 preflight_log="$output_dir/preflight-build.log"

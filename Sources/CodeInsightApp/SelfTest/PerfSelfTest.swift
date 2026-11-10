@@ -1309,7 +1309,6 @@ func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         guard storage.length > 0 else { return nil }
         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
     }
-    let viewport = scrollView.contentView.bounds.size
     let windowSize = window.contentView?.bounds.size ?? .zero
     let wrapState = measuredWrapState ?? (
         widthTracking: reader.view.textContainer?.widthTracksTextView == true,

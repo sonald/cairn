@@ -64,7 +64,7 @@ def main():
         for key in en:
             assert en[key] and zh[key], f"Empty translation: {key}"
             assert arguments(en[key]) == arguments(zh[key]), f"Format mismatch: {key}"
-        for source in root.glob("*.swift"):
+        for source in root.rglob("*.swift"):
             for key in re.findall(r'localized(?:Format)?\("([^"\\]+)"\s*[,)]', source.read_text()):
                 assert key in en, f"Missing {key} in {source}"
         total += len(en)

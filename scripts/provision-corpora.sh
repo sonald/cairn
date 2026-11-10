@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
         --verify-fold-fixture) verify_fold_fixture="$2"; shift 2 ;;
         --manifest) fold_manifest="$2"; shift 2 ;;
         --help|-h)
-            head -14 "$0" | tail -12 | sed 's/^# \?//'
+            head -11 "$0" | tail -10 | sed -E 's/^# ?//'
             exit 0 ;;
         *)
             echo "unknown option: $1" >&2
@@ -164,6 +164,7 @@ generate_fold_fixture() {
 JSON
     mv "$fixture_tmp" "$fixture"
     mv "$manifest_tmp" "$manifest"
+    chmod 644 "$fixture" "$manifest"  # mktemp creates 0600
     trap - RETURN
     validate_fold_fixture "$fixture" "$manifest"
 }

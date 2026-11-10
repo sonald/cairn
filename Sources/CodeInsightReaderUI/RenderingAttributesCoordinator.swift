@@ -47,14 +47,6 @@ public final class RenderingAttributesCoordinator {
 
     public init() {}
 
-    public func update(document: ReaderDocument, theme: ReaderTheme) {
-        guard let map = DisplayMap(document: document, renderedFoldIDs: []) else {
-            clear()
-            return
-        }
-        update(document: document, map: map, theme: theme)
-    }
-
     func update(document: ReaderDocument, map: DisplayMap, theme: ReaderTheme) {
         clearRangeCache()
         if highlightContentID != document.contentID {

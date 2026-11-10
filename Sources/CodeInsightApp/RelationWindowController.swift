@@ -850,8 +850,6 @@ final class RelationWindowController: NSViewController,
         readingSetButton.imagePosition = .imageLeading
         readingSetButton.font = .systemFont(ofSize: 12, weight: .semibold)
         readingSetButton.bezelStyle = .accessoryBarAction
-        readingSetButton.toolTip =
-            localized("relation.freeze.hint")
         readingSetButton.setAccessibilityLabel(localized("relation.freeze.title"))
         readingSetButton.toolTip =
             localized("relation.freeze.help")

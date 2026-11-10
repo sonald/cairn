@@ -569,7 +569,7 @@ public struct KeyBindingTable: Sendable {
     public mutating func replace(
         _ binding: KeyBinding, for id: CommandID, takingFrom other: CommandID
     ) {
-        var otherBindings = bindings(for: other).filter { $0 != binding }
+        let otherBindings = bindings(for: other).filter { $0 != binding }
         setBindings(otherBindings, for: other)
         var ownBindings = bindings(for: id)
         ownBindings.append(binding)

@@ -47,11 +47,6 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         return lines
     }
 
-    /// The footer's current text (note lines), for acceptance tests.
-    public var footerText: String {
-        footer.stringValue
-    }
-
     /// Every link URL in the rendered body.
     public var links: [URL] {
         var urls: [URL] = []
