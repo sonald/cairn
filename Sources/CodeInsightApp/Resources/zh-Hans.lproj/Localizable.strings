@@ -435,6 +435,8 @@
 "settings.gutterOpacity" = "边栏标记不透明度";
 "settings.lineHeight" = "行高";
 "settings.lineNumbers" = "显示行号";
+"settings.relativeLineNumbers" = "相对行号";
+"settings.relativeLineNumbers.help" = "按与光标所在行的距离编号，光标行仍显示实际行号。";
 "settings.parameterOpacity" = "参数引用不透明度";
 "settings.preview" = "预览";
 "settings.preview.accessibility" = "阅读器设置预览";

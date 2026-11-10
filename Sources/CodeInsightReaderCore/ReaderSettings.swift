@@ -139,6 +139,8 @@ public struct ReaderSettings: Equatable, Sendable {
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
     public var lineNumbers: Bool
+    /// Gutter shows distance from the caret line; the caret line keeps its number.
+    public var relativeLineNumbers: Bool
     package var wrapLines: Bool
     /// Show the symbol documentation card when the pointer rests on a symbol.
     /// Keyboard and ⌥-click requests work either way.
@@ -190,6 +192,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.humanistComments = humanistComments
         self.lineNumbers = lineNumbers
         wrapLines = false
+        relativeLineNumbers = false
         hoverDocs = true
         blockEndAnnotations = true
         overviewRuler = true
@@ -250,6 +253,9 @@ public struct ReaderSettings: Equatable, Sendable {
         wrapLines = (defaults.object(forKey: Keys.wrapLines) as? NSNumber)?
             .boolValue
             ?? false
+        relativeLineNumbers = (defaults.object(forKey: Keys.relativeLineNumbers) as? NSNumber)?
+            .boolValue
+            ?? false
         hoverDocs = (defaults.object(forKey: Keys.hoverDocs) as? NSNumber)?
             .boolValue
             ?? true
@@ -298,6 +304,7 @@ public struct ReaderSettings: Equatable, Sendable {
             codeLigatures: codeLigatures
         )
         validated.wrapLines = wrapLines
+        validated.relativeLineNumbers = relativeLineNumbers
         validated.hoverDocs = hoverDocs
         validated.blockEndAnnotations = blockEndAnnotations
         validated.overviewRuler = overviewRuler
@@ -344,6 +351,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
         defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
         defaults.set(validated.wrapLines, forKey: Keys.wrapLines)
+        defaults.set(validated.relativeLineNumbers, forKey: Keys.relativeLineNumbers)
         defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
         defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
         defaults.set(validated.overviewRuler, forKey: Keys.overviewRuler)
@@ -388,6 +396,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let humanistComments = "reader.humanistComments"
         static let lineNumbers = "reader.lineNumbers"
         static let wrapLines = "reader.wrapLines"
+        static let relativeLineNumbers = "reader.relativeLineNumbers"
         static let hoverDocs = "reader.hoverDocs"
         static let blockEndAnnotations = "reader.blockEndAnnotations"
         static let overviewRuler = "reader.overviewRuler"

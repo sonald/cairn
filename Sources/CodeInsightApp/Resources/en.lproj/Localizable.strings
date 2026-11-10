@@ -435,6 +435,8 @@
 "settings.gutterOpacity" = "Gutter marker opacity";
 "settings.lineHeight" = "Line height";
 "settings.lineNumbers" = "Show line numbers";
+"settings.relativeLineNumbers" = "Relative line numbers";
+"settings.relativeLineNumbers.help" = "Number lines by distance from the caret line, which keeps its own number.";
 "settings.parameterOpacity" = "Parameter use opacity";
 "settings.preview" = "Preview";
 "settings.preview.accessibility" = "Reader settings preview";

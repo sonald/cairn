@@ -34,7 +34,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     changed.theme = .dark
     controller.update(settings: changed)
     #expect(await mainWindowWaitUntil(
-        controller.selfTestReaderToggleCount == 8
+        controller.selfTestReaderToggleCount == 9
             && (preview.textStorage?.length ?? 0) > 0
             && preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
                 as? NSFont == NSFont.monospacedSystemFont(ofSize: 17, weight: .regular)
@@ -42,7 +42,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     ))
 
     #expect(controller.currentSettings == changed)
-    #expect(controller.selfTestReaderToggleCount == 8)
+    #expect(controller.selfTestReaderToggleCount == 9)
     let originalText = preview.string
     #expect(originalText.contains("fn greet(name: &str"))
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)

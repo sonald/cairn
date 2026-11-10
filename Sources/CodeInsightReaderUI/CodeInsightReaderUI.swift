@@ -71,6 +71,7 @@ public final class ReaderTextView {
     private weak var scrollView: NSScrollView?
     private weak var ruler: NSRulerView?
     private var lineNumbers = true
+    private var relativeLineNumbers = false
     private var wrapLines: Bool
     private var isValidatingVisibleRenderingAttributes = false
     private let derivedDataStore: ReaderDerivedDataStore
@@ -229,6 +230,7 @@ public final class ReaderTextView {
         typographyKey = ReaderTypographyKey(settings: settings)
         fontEnvironmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
         lineNumbers = settings.lineNumbers
+        relativeLineNumbers = settings.relativeLineNumbers
         wrapLines = settings.wrapLines
         let textView = ClickTextView(usingTextLayoutManager: true)
         view = textView
@@ -2758,6 +2760,10 @@ public final class ReaderTextView {
         let typographyChanged = newTypographyKey != typographyKey
             || environmentRevision != fontEnvironmentRevision
         let wrapChanged = settings.wrapLines != wrapLines
+        if settings.relativeLineNumbers != relativeLineNumbers {
+            relativeLineNumbers = settings.relativeLineNumbers
+            ruler?.needsDisplay = true
+        }
         // Idempotent apply (D1.2/W06): equal settings perform no projection
         // and no layout work — unless the reader was mounted into a new
         // scroll view that still needs its gutter configured.
@@ -3704,6 +3710,7 @@ public final class ReaderTextView {
         currentLineNumber = line
         view.needsDisplay = true
         overviewRulerView?.needsDisplay = true
+        if relativeLineNumbers { ruler?.needsDisplay = true }
     }
 
     private func updateRulerThickness() {
@@ -3923,8 +3930,12 @@ public final class ReaderTextView {
                     width: max(0, lineNumberColumnWidth - 6),
                     height: labelHeight
                 )
+                // ponytail: no caret yet → absolute numbers, like Vim's `number relativenumber`.
+                let label = relativeLineNumbers
+                    ? currentLineNumber.map { $0 == line ? line : abs(line - $0) } ?? line
+                    : line
                 lineNumberLabels.draw(
-                    line, font: font, color: theme.lineNumberColor,
+                    label, font: font, color: theme.lineNumberColor,
                     rightAlignedIn: labelRect, flipped: ruler.isFlipped
                 )
                 lastRulerLabelDrawRectsForTesting[line] = ruler.convert(
