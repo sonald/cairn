@@ -119,7 +119,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     )
     private let truncatedLabel = NSTextField(labelWithString: localized("main.results.truncated"))
     private let highlightChips = HighlightChipsView()
-    private var focusNotice: String?
     // A unique identifier per controller keeps AppKit's toolbar-family
     // synchronization from mutating sibling toolbars (closed windows from
     // earlier tests/self-tests) during profile-item add/remove, which
@@ -520,7 +519,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         sidebarController.onOpenFileToSide = { [weak self] url in self?.openReference(url) }
         readerController.onOpenToSide = { [weak self] url in self?.openReference(url) }
-        readerController.onOpenScope = sidebarController.onOpenOutline
+        // Scope titles and block-end notes of the primary reader point into its own file.
+        readerController.onOpenScope = { [weak self] offset in
+            guard let self, let file = model.selectedFile else { return }
+            navigate(to: file, byteOffset: offset, cause: .outline)
+        }
         sidebarController.onEditExclusionRules = { [weak self] in self?.showExclusionRules() }
         readerController.onRevealPath = { [weak self] url in
             guard let self else { return }
@@ -635,9 +638,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.highlightsDidChange()
         }
         highlightChips.onClearAll = { [weak self] in self?.clearHighlights() }
+        // Timed like navigation failures: a notice raised while render()
+        // navigates must outlive that pass's own status-bar refresh.
         readerController.onFocusNotice = { [weak self] message in
-            self?.focusNotice = message
-            self?.renderStatusBar()
+            self?.showTransientStatus(message)
         }
         readerController.onSelectionChange = { [weak self] offset in
             guard let self else { return }
@@ -1640,6 +1644,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderController.selectedDiffLine ?? readerController.selectedDiffLine
     }
     var selfTestSecondaryReaderCollapsed: Bool { secondaryReaderItem.isCollapsed }
+    func selfTestFocusSecondaryReaderText() { secondaryReaderController.focusText() }
     var selfTestEmptyStateExists: Bool { readerController.selfTestEmptyStateExists }
     var selfTestEmptyStateTexts: [String] { readerController.selfTestEmptyStateTexts }
     var selfTestEmptyStateButtonTitles: [String] {
@@ -2734,11 +2739,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     @discardableResult
     func toggleFoldAtSelection() -> Bool {
-        readerController.toggleFoldAtSelection()
+        focusedPaneReader.toggleFoldAtSelection()
     }
 
     var canToggleFoldAtSelection: Bool {
-        readerController.canToggleFoldAtSelection
+        focusedPaneReader.canToggleFoldAtSelection
     }
 
     var selfTestReadingHeightHeader:
@@ -2768,13 +2773,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelPreset(.compare)
     }
 
-    /// Cheap validity check for the global relation commands: the primary
+    /// Cheap validity check for the global relation commands: the focused
     /// Reader shows a project source file with a selection or caret. No
     /// I/O, no Exact, safe during menu tracking.
     var canShowRelationsFromReaderSurface: Bool {
-        guard let file = model.selectedFile,
+        let reader = focusedPaneReader
+        guard let file = paneFile(for: reader),
               projectPath(for: file) != nil,
-              readerController.currentSelectionByteOffset != nil
+              reader.currentSelectionByteOffset != nil
         else { return false }
         return true
     }
@@ -2784,10 +2790,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // relation commands through the same file + offset → resolve →
         // relation root path as the context menu. The pinned Context
         // preview is not a silent fallback target.
-        guard let offset = readerController.currentSelectionByteOffset else {
+        let reader = focusedPaneReader
+        guard let offset = reader.currentSelectionByteOffset else {
             return
         }
-        handleReaderRelation(offset: offset, direction: direction)
+        handleReaderRelation(offset: offset, direction: direction, from: reader)
     }
 
     // MARK: - Toolbar
@@ -3599,7 +3606,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         let indexStatus = [
             transientStatusNotice,
-            focusNotice,
             model.isRestoringSession ? localized("main.restoring.reading.session") : nil,
             initialIndexStatus,
             model.isRefreshingIndex ? localized("main.refreshing.index") : nil,
@@ -3612,7 +3618,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         ]
             .compactMap { $0 }
             .joined(separator: " · ")
-        focusNotice = nil
         indexLabel.stringValue = indexStatus
         indexLabel.isHidden = indexStatus.isEmpty
         refreshIndexButton.isHidden = model.isRefreshingIndex
@@ -4103,6 +4108,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderController.hasFocusedText ? secondaryReaderController : readerController
     }
 
+    /// The reader that file + offset commands act on: the reference pane
+    /// while it has the focus. A Compare right side shows another revision
+    /// of the primary file, so those commands stay on the primary there.
+    private var focusedPaneReader: ReaderViewController {
+        isReferenceActive ? focusedReader : readerController
+    }
+
     private func escapeSymbolDocumentation() -> Bool {
         guard model.symbolHover.phase != .idle else { return false }
         model.symbolHover.dismiss()
@@ -4128,8 +4140,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             return
         }
         if url.scheme == symbolLinkScheme {
-            focusNotice = localizedFormat("main.hover.symbolNotFound", name ?? url.absoluteString)
-            renderStatusBar()
+            showTransientStatus(localizedFormat("main.hover.symbolNotFound", name ?? url.absoluteString))
             return
         }
         guard url.scheme == "http" || url.scheme == "https" || url.scheme == "dash-plugin" else { return }
@@ -4198,7 +4209,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func enclosingSlice(
         for scope: ContextWindowModel.EnclosingScope
     ) -> ReaderDocument? {
-        guard let document = readerController.caretDocument else { return nil }
+        // The lens follows either pane; slice the one that shows the scope's file.
+        guard let document = [readerController, secondaryReaderController].first(where: {
+            paneFile(for: $0).flatMap(projectPath(for:)) == scope.path
+        })?.caretDocument else { return nil }
         let table = document.lineTable
         guard let firstLine = table.lineColumn(
             at: scope.displayRange.lowerBound
@@ -4230,7 +4244,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func replayCaretForLensTracking() {
         guard model.contextWindow.tracking == .enclosing,
               let caret = lastLensCaret,
-              let file = model.selectedFile,
+              let file = paneFile(for: caret.reader),
               let path = projectPath(for: file),
               let document = caret.reader.caretDocument
         else { return }
@@ -4278,8 +4292,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     /// P1.6: ⌘⇧+click / ⌃⌘J / context menu — jump to the type definition of
     /// the binding under the position; failures surface as a brief status.
-    private func handleReaderTypeDefinition(offset: UInt32, from reader: ReaderViewController? = nil) {
-        let reader = reader ?? focusedReader
+    private func handleReaderTypeDefinition(offset: UInt32, from reader: ReaderViewController) {
         let inReference = reader === secondaryReaderController && isReferenceActive
         guard let file = paneFile(for: reader),
               let path = projectPath(for: file)
@@ -4552,11 +4565,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func jumpToTypeDefinitionAtCaret() {
-        guard let offset = model.tabStrip.activeTab?.selectionByteOffset else {
+        let reader = focusedPaneReader
+        let offset = reader === readerController
+            ? model.tabStrip.activeTab?.selectionByteOffset
+            : reader.currentSelectionByteOffset
+        guard let offset else {
             showTransientStatus(modelText("model.typehop.noType"))
             return
         }
-        handleReaderTypeDefinition(offset: offset)
+        handleReaderTypeDefinition(offset: offset, from: reader)
     }
 
     /// Brief status-line notice for navigation failures (R3.4).
