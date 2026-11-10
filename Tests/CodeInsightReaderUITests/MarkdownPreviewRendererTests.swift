@@ -63,4 +63,56 @@ struct MarkdownPreviewRendererTests {
         #expect(first.location < second.location)
         #expect(anchored("missing") == nil)
     }
+
+    @Test func hiddenFoldedHeadingLendsNoChevronToTheNextHeading() throws {
+        let renderer = MarkdownPreviewRenderer(theme: ReaderTheme(settings: ReaderSettings()), baseURL: nil)
+        let output = try #require(renderer.render("""
+        # Alpha
+
+        ## Beta
+
+        beta text
+
+        # Gamma
+
+        gamma text
+        """))
+        let view = MarkdownPreviewTextView()
+        view.frame = NSRect(x: 0, y: 0, width: 600, height: 800)
+        view.show(output)
+        let text = output.string as NSString
+        func start(_ word: String) -> Int {
+            text.paragraphRange(for: NSRange(location: text.range(of: word).location, length: 0)).location
+        }
+        let alpha = start("Alpha"), beta = start("Beta"), gamma = start("Gamma")
+        #expect(view.toggleHeadingFold(at: beta))
+        #expect(view.toggleHeadingFold(at: alpha))
+        #expect(view.foldedHeadings == [alpha, beta])
+
+        // Beta is hidden inside Alpha's fold: it has no line to draw a chevron on.
+        #expect(view.firstLineRect(ofHeadingAt: beta) == nil)
+        // Gamma's line holds Gamma's chevron, so a click there folds Gamma.
+        let gammaLine = try #require(view.firstLineRect(ofHeadingAt: gamma))
+        #expect(view.headingLine(atY: gammaLine.midY)?.start == gamma)
+    }
+
+    @Test func keyboardFoldToggleAtAFoldPointReachesTheShownHeading() throws {
+        let renderer = MarkdownPreviewRenderer(theme: ReaderTheme(settings: ReaderSettings()), baseURL: nil)
+        for source in ["# Alpha\n\nintro\n\n## Beta\n\nbeta text\n\n# Gamma\n\ngamma text",
+                       "# Alpha\n\n## Beta\n\nbeta text\n\n# Gamma\n\ngamma text"] {
+            let output = try #require(renderer.render(source))
+            let view = MarkdownPreviewTextView()
+            view.frame = NSRect(x: 0, y: 0, width: 600, height: 800)
+            view.show(output)
+            let text = output.string as NSString
+            let alpha = text.paragraphRange(for: NSRange(location: text.range(of: "Alpha").location, length: 0)).location
+            // The caret sits in Alpha's section; folding collapses it to the fold point.
+            view.setSelectedRange(NSRange(location: text.range(of: "beta text").location + 2, length: 0))
+            #expect(view.toggleHeadingFold(at: alpha))
+            let heading = try #require(view.heading(containing: view.selectedRange().location))
+            #expect(heading == alpha, "\(source)")
+            #expect(view.toggleHeadingFold(at: heading))
+            #expect(view.foldedHeadings.isEmpty, "\(source)")
+        }
+    }
 }

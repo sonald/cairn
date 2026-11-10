@@ -871,6 +871,56 @@ func rustHighlighterProducesOutlineSnapshot() throws {
 }
 
 @Test
+func structFoldNestedInFunctionCountsItsFields() throws {
+    let source = """
+        struct Top {
+            a: u8,
+            b: u8,
+        }
+
+        fn host() {
+            struct Inner {
+                a: u8,
+                b: u8,
+            }
+            enum Shape {
+                Point { x: u8, y: u8 },
+            }
+        }
+        """
+    let folds = try RustHighlighter().highlightWithFolds(bytes: Array(source.utf8)).folds
+    func container(_ name: String) throws -> FoldRegion {
+        try #require(folds.first {
+            $0.kind == .container && text(in: source, range: $0.headerRange).contains(name)
+        })
+    }
+    let top = try container("struct Top"), inner = try container("struct Inner")
+    let shape = try container("enum Shape")
+    #expect(top.summary.memberCounts == [.field: 2])
+    #expect(inner.summary.memberCounts == [.field: 2])
+    #expect(shape.summary.memberCounts == [.enumMember: 1])
+}
+
+@Test
+func typeScriptExpressionArrowBodyReferencesItsParameters() throws {
+    let source = """
+        const id = p => p;
+        const inc = (q) => q + 1;
+        const add = m => n => m + n;
+        """
+    let document = try typeScriptDocumentWithLocalReferences(
+        source: source, mode: LanguageMode(language: .typescript))
+    for name in ["p", "q", "m", "n"] {
+        let words = try NSRegularExpression(pattern: "\\b\(name)\\b")
+            .matches(in: source, range: NSRange(location: 0, length: (source as NSString).length))
+            .map { ByteRange(lowerBound: UInt32($0.range.location), upperBound: UInt32(NSMaxRange($0.range))) }
+        let binding = try #require(document.localBinding(at: words[0].lowerBound), "\(name)")
+        #expect(binding.binding.declarationRange == words[0], "\(name)")
+        #expect(binding.references == Array(words.dropFirst()), "\(name)")
+    }
+}
+
+@Test
 func foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() throws {
     let source = """
         mod regular {

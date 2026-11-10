@@ -533,8 +533,12 @@ private func typeScriptLocalReferences(
                 for parameter in typeScriptParameterNames(of: node, bytes: bytes) {
                     declare(parameter.name, kind: .param, range: parameter.range)
                 }
-                for child in body.namedChildren {
-                    visit(child)
+                if body.kind == "statement_block" {
+                    for child in body.namedChildren {
+                        visit(child)
+                    }
+                } else {
+                    visit(body) // expression body: `x => x`, `a => b => a + b`
                 }
                 leaveScope()
                 return

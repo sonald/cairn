@@ -94,7 +94,10 @@ package final class MarkdownPreviewTextView: NSTextView {
         var found: Int?
         document.enumerateAttribute(.markdownHeadingLevel, in: NSRange(location: 0, length: location + 1),
                                     options: .reverse) { value, range, stop in
-            guard value != nil else { return }
+            // A caret at a fold point belongs to the folded heading, not to
+            // a heading hidden inside its section.
+            guard value != nil, !foldedSections.contains(where: { NSLocationInRange(range.location, $0) })
+            else { return }
             found = paragraphStart(range.location)
             stop.pointee = true
         }
@@ -215,12 +218,12 @@ package final class MarkdownPreviewTextView: NSTextView {
     // MARK: Fold chevrons in the left margin
 
     /// The heading whose first line holds `y`, with that line's rect.
-    private func headingLine(atY y: CGFloat) -> (start: Int, rect: NSRect)? {
+    func headingLine(atY y: CGFloat) -> (start: Int, rect: NSRect)? {
         guard let layoutManager, let textContainer, layoutManager.numberOfGlyphs > 0 else { return nil }
         let point = NSPoint(x: 0, y: y - textContainerOrigin.y)
         let glyph = layoutManager.glyphIndex(for: point, in: textContainer)
         let line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
-        let index = documentIndex(of: layoutManager.characterIndexForGlyph(at: glyph), afterFold: false)
+        let index = documentIndex(of: layoutManager.characterIndexForGlyph(at: glyph), afterFold: true)
         guard line.minY <= point.y, point.y < line.maxY, index < document.length,
               document.attribute(.markdownHeadingLevel, at: index, effectiveRange: nil) != nil
         else { return nil }
@@ -230,8 +233,9 @@ package final class MarkdownPreviewTextView: NSTextView {
         return (start, rect)
     }
 
-    private func firstLineRect(ofHeadingAt start: Int) -> NSRect? {
-        guard let layoutManager, let storage = textStorage else { return nil }
+    func firstLineRect(ofHeadingAt start: Int) -> NSRect? {
+        guard let layoutManager, let storage = textStorage,
+              !foldedSections.contains(where: { NSLocationInRange(start, $0) }) else { return nil }
         let shown = shownIndex(of: start)
         guard shown < storage.length else { return nil }
         return layoutManager.lineFragmentUsedRect(

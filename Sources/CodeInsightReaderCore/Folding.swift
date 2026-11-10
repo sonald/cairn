@@ -113,12 +113,15 @@ internal struct FoldCandidateAccumulator {
             guard candidate.kind == .container || candidate.kind == .cfgTest else {
                 return candidate
             }
+            // Members are the shallowest facets in the body: fold depth also
+            // counts enclosing functions, which outline depth does not.
+            let inside = outlineFacets.filter {
+                candidate.bodyRange.lowerBound <= $0.range.lowerBound
+                    && $0.range.upperBound <= candidate.bodyRange.upperBound
+            }
+            let memberDepth = inside.map(\.depth).min()
             var counts: [OutlineKind: Int] = [:]
-            for facet in outlineFacets where
-                facet.depth == candidate.outlineDepth + 1
-                    && candidate.bodyRange.lowerBound <= facet.range.lowerBound
-                    && facet.range.upperBound <= candidate.bodyRange.upperBound
-            {
+            for facet in inside where facet.depth == memberDepth {
                 counts[facet.kind, default: 0] += 1
             }
             return FoldCandidate(
