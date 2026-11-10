@@ -1041,8 +1041,12 @@ public final class RelationTreeModel {
                     break
                 }
             }
+            // A caller's call site resolves to the callee, so an unmatched
+            // definition answer says nothing about who calls the root; real
+            // callers come from exact incoming calls.
             for targetIndex in providerTargets.indices
-                where !matchedTargets.contains(targetIndex)
+                where direction != .callers
+                    && !matchedTargets.contains(targetIndex)
             {
                 let exemplar = edges[candidatePairs.first?.0 ?? indexes[0]]
                 additions.append(verificationEdge(

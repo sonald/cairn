@@ -3733,6 +3733,55 @@ func relationTreeVerifiedCallersKeepTheirOwnRowAndLocation() async throws {
 
 @MainActor
 @Test
+func relationTreeProviderOnlyDefinitionsAddRowsForCalleesButNotCallers()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    // The call site `b()` at 9 resolves to `b` (19) and, extra, to `a` (3),
+    // which matches no fuzzy row.
+    let edge = RelationTreeModel.LoadedEdge(
+        title: "row", certainty: .possible, dispatch: .direct,
+        symbol: fixture.b, path: "main.rs", byteOffset: 9, line: 1,
+        evidence: [],
+        candidate: CandidateObservation(
+            target: .occurrence(fixture.b), certainty: .possible,
+            dispatch: .direct, provenance: .fuzzyResolver,
+            completeness: .complete, evidence: []
+        ),
+        exactQuery: ("main.rs", 9, 1),
+        fuzzyTarget: ("main.rs", 19)
+    )
+    for (direction, expected) in [
+        (RelationTreeModel.Direction.callers, [UInt32(9)]),
+        (.calls, [19, 3]),
+    ] {
+        let model = RelationTreeModel(
+            loader: { _, _, _, _ in .init(edges: [edge], isTruncated: false) },
+            exactResolver: { _, _, _, _ in
+                .completed([
+                    relationExactEntry(file: "main.rs", byteOffset: 19),
+                    relationExactEntry(file: "main.rs", byteOffset: 3),
+                ])
+            }
+        )
+        model.updateProjectState(.ready(fixture.session, fixture.context))
+        await model.setRoot(target: .engine(fixture.a), direction: direction)?.value
+        var published = false
+        model.onNodeChange = { _ in published = true }
+        model.validatePossible(try relationPossibleRows(in: model.root))
+        try #require(await testWaitUntil("validation published") { published })
+        let verified = relationVisibleEdgeRows(model.root)
+            .filter { $0.certainty == .exact }
+        #expect(
+            verified.map { $0.target?.byteOffset } == expected,
+            "\(direction)"
+        )
+    }
+}
+
+@MainActor
+@Test
 func relationTreeRetriesPossibleRowsWhoseDefinitionFailed() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
