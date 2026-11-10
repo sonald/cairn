@@ -517,6 +517,23 @@ func snapshotSearchCentersLongLineExcerptOnMatch() async throws {
 }
 
 @Test
+func longLineExcerptKeepsWholeUTF8CharactersSoTheHitStaysMapped() async throws {
+    // A 5-byte needle centres the 240-byte window off the 3-byte grid.
+    let line = String(repeating: "中", count: 200) + "hello" + String(repeating: "文", count: 200)
+    let source = FakeSnapshotSource([("main.rs", Array(line.utf8))])
+    let result = try await search(
+        ContentSearchQuery(pattern: "hello", caseSensitive: true),
+        source: source
+    )
+    let match = try #require(result.matches.first)
+
+    #expect(match.lineText.utf8.count == Int(match.lineTextRange.length))
+    #expect(!match.lineText.contains("\u{FFFD}"))
+    #expect(match.lineTextRange.length <= 240)
+    #expect(match.lineText.contains("hello"))
+}
+
+@Test
 func snapshotContentSearchCLIAlignsWithGrepSample() throws {
     let fixture = snapshotSearchRepositoryRoot.appendingPathComponent(
         "Tests/RustExtractorTests/Fixtures/use_alias"

@@ -49,9 +49,10 @@ public struct ProjectPathRules: Equatable, Sendable {
     /// snapshots, whose tracked files are never hidden by built-in skips.
     public func verdict(for path: String, isDirectory: Bool, appliesDefaults: Bool = true) -> Verdict {
         let components = path.split(separator: "/").map(String.init)
-        // A file's own name never counts as a skipped directory.
+        // A linked worktree or submodule keeps a `.git` file, never project content.
+        if components.contains(where: Self.alwaysSkippedDirectories.contains) { return .alwaysSkipped }
+        // A file's own name never counts as a default-skipped directory.
         let directories = isDirectory ? components : Array(components.dropLast())
-        if directories.contains(where: Self.alwaysSkippedDirectories.contains) { return .alwaysSkipped }
         var verdict = Verdict.included
         if appliesDefaults, let skipped = directories.first(where: Self.defaultSkippedDirectories.contains) {
             verdict = .skippedByDefault(directory: skipped)

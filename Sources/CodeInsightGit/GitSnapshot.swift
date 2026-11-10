@@ -268,8 +268,23 @@ public final class CommitSnapshot: Snapshot, Sendable {
                 var blobs: [GitOID: CapturedBlob] = [:]
                 var reused = 0
                 var excluded: [String] = []
+                // As in the worktree walk, a file under an excluded directory
+                // stays out even if a `!` rule matches the file itself.
+                var excludedDirectory: [String: Bool] = [:]
+                func isExcluded(_ path: String) -> Bool {
+                    var directory = ""
+                    for component in path.split(separator: "/").dropLast() {
+                        directory += directory.isEmpty ? String(component) : "/" + component
+                        let verdict = excludedDirectory[directory] ?? pathRules.verdict(
+                            for: directory, isDirectory: true, appliesDefaults: false
+                        ).isExcluded
+                        excludedDirectory[directory] = verdict
+                        if verdict { return true }
+                    }
+                    return pathRules.verdict(for: path, isDirectory: false, appliesDefaults: false).isExcluded
+                }
                 for entry in collector.entries {
-                    if pathRules.verdict(for: entry.path, isDirectory: false, appliesDefaults: false).isExcluded {
+                    if isExcluded(entry.path) {
                         excluded.append(entry.path)
                         continue
                     }

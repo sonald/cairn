@@ -770,6 +770,10 @@ public struct SnapshotSearchService: Sendable {
                 lineEnd - maximumBytes
             )
             excerptEnd = excerptStart + maximumBytes
+            // Cut on character boundaries: a split UTF-8 sequence decodes to
+            // U+FFFD and the excerpt's bytes no longer line up with its range.
+            while excerptStart < excerptEnd, bytes[excerptStart] & 0xC0 == 0x80 { excerptStart += 1 }
+            while excerptEnd > excerptStart, excerptEnd < lineEnd, bytes[excerptEnd] & 0xC0 == 0x80 { excerptEnd -= 1 }
         }
         return (
             String(decoding: bytes[excerptStart..<excerptEnd], as: UTF8.self),

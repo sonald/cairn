@@ -10,7 +10,7 @@ import TreeSitterKit
 @main
 struct CodeInsight: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Inspect Rust source with CodeInsight.",
+        abstract: "Inspect Rust, Python and TypeScript source with CodeInsight.",
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
@@ -43,15 +43,21 @@ struct ProjectOptions: ParsableArguments {
     /// The language to index as: the explicit option, else the one the
     /// given source file implies, else the project's most common language.
     func languageID(inferringFrom file: String? = nil) throws -> LanguageID {
-        if language == nil {
-            switch URL(fileURLWithPath: file ?? "").pathExtension.lowercased() {
-            case "rs": return .rust
-            case "py", "pyi": return .python
-            case "ts", "tsx", "mts", "cts": return .typescript
-            default: break
-            }
+        // Only a file the index reads implies its language.
+        if language == nil, let file, let mode = LanguageMode.classify(path: file) {
+            return mode.language
         }
         return try resolvedLanguage(language, project: project)
+    }
+}
+
+/// A `--language` value: a full name or its file extension, any case.
+private func parsedLanguage(_ option: String) -> LanguageID? {
+    switch option.lowercased() {
+    case "rust", "rs": .rust
+    case "python", "py": .python
+    case "typescript", "ts": .typescript
+    default: nil
     }
 }
 
@@ -60,12 +66,10 @@ struct ProjectOptions: ParsableArguments {
 /// TypeScript), announced on stderr. The CLI analyzes one language at a time.
 private func resolvedLanguage(_ option: String?, project: String) throws -> LanguageID {
     if let option {
-        switch option.lowercased() {
-        case "rust", "rs": return .rust
-        case "python", "py": return .python
-        case "typescript", "ts": return .typescript
-        default: throw ValidationError("Unknown --language \(option); use rust, python, or typescript.")
+        guard let language = parsedLanguage(option) else {
+            throw ValidationError("Unknown --language \(option); use rust, python, or typescript.")
         }
+        return language
     }
     let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
     var counts: [LanguageID: Int] = [:]
@@ -308,11 +312,8 @@ extension CodeInsight {
 
         func run() throws {
             let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
-            let languageID: LanguageID = switch language {
-            case "rust": .rust
-            case "python": .python
-            case "typescript": .typescript
-            default: throw ValidationError("--language must be rust, python or typescript.")
+            guard let languageID = parsedLanguage(language) else {
+                throw ValidationError("--language must be rust, python or typescript.")
             }
             let prefix = unit.split(separator: "/").joined(separator: "/")
             let unitFile = prefix.isEmpty ? file : String(file.dropFirst(prefix.count + 1))
@@ -1384,12 +1385,8 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
 
         func run() throws {
             let corpusURL = URL(fileURLWithPath: corpus, isDirectory: true)
-            let languageID: LanguageID
-            switch language {
-            case "rust": languageID = .rust
-            case "python": languageID = .python
-            case "typescript": languageID = .typescript
-            default: throw ValidationError("unsupported language: \(language)")
+            guard let languageID = parsedLanguage(language) else {
+                throw ValidationError("unsupported language: \(language)")
             }
             try Self.validateCorpus(corpusURL, language: languageID)
             let report = try evaluateGoldSet(

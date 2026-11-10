@@ -834,6 +834,26 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
 }
 
 @Test
+func commitLikeWorktreeCannotReincludeFilesUnderAnExcludedDirectory() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    for path in ["src/lib.rs", "vendor/v.rs", "vendor/keep/k.rs"] {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("x\n".utf8).write(to: url)
+    }
+    try fixture.git("add", "-A")
+    try fixture.commit("fixture")
+    let rules = ProjectPathRules(lines: ["vendor/", "!vendor/keep/"])
+
+    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, pathRules: rules)
+    let commit = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD", pathRules: rules)
+    #expect(worktree.listFiles().map(\.path) == ["src/lib.rs"])
+    #expect(commit.listFiles().map(\.path) == worktree.listFiles().map(\.path))
+    #expect(commit.ruleExcludedPaths == worktree.ruleExcludedPaths)
+}
+
+@Test
 func worktreeAndCommitDetectTheSameLanguagesFromSourcesOnly() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }

@@ -102,12 +102,16 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
         _ candidateURL: URL,
         projectURL: URL
     ) throws {
+        // The directory resolves even when the file is missing; the file
+        // itself then resolves too, since an outside link into the project
+        // would still run project code.
         let candidate = candidateURL
             .deletingLastPathComponent()
             .resolvingSymlinksInPath()
             .appendingPathComponent(
                 candidateURL.lastPathComponent
             )
+            .resolvingSymlinksInPath()
             .standardizedFileURL.path
         let project = projectURL.resolvingSymlinksInPath()
             .standardizedFileURL.path

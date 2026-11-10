@@ -31,5 +31,8 @@ func gitDirectoryStaysSkippedWhateverTheRulesSay() {
     let rules = ProjectPathRules(lines: ["!**", "!.git/"])
     #expect(rules.verdict(for: ".git", isDirectory: true) == .alwaysSkipped)
     #expect(rules.verdict(for: "sub/.git/config", isDirectory: false) == .alwaysSkipped)
+    // A linked worktree or submodule has a `.git` file instead of a directory.
+    #expect(rules.verdict(for: ".git", isDirectory: false) == .alwaysSkipped)
+    #expect(rules.verdict(for: "sub/.git", isDirectory: false) == .alwaysSkipped)
     #expect(rules.verdict(for: "node_modules/x.ts", isDirectory: false) == .included)
 }

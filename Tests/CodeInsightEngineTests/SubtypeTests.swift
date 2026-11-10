@@ -61,3 +61,32 @@ func subtypesListDirectSubtypesAndDropOtherBases(
     #expect(found == expected)
     #expect(subtypes.first?.certainty == .strong)
 }
+
+/// `h.Base` resolves to a class attribute binding in another file; reading
+/// that index from the subclass's own (shorter) binding list trapped.
+@Test
+func subtypesJudgeAnAttributeBaseByItsOwnFileBinding() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "subtypes-attr-\(UUID().uuidString)"
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let files = [
+        "base.py": "class Base:\n    pass\n",
+        "holder.py": "class Holder:\n    Other: int\n    Base: type\n",
+        "sub.py": "from holder import Holder\nh: Holder = Holder()\n\nclass Child(h.Base):\n    pass\n",
+    ]
+    for (path, contents) in files {
+        try contents.write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
+    }
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let base = try #require(session.definitions(of: "Base", context: context).first {
+        session.paths.resolve($0.2) == "base.py"
+    }?.0)
+    #expect(try session.subtypes(of: base, context: context).isEmpty)
+}

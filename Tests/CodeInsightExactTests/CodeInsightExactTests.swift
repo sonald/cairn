@@ -1500,6 +1500,25 @@ func pyrightRequireOutsideProjectRejectsCanonicalProjectAndAlias() throws {
 }
 
 @Test
+func pyrightFinderRejectsAnOutsideSymlinkToAProjectExecutable() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let bin = root.appendingPathComponent("bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let planted = project.appendingPathComponent("planted")
+    try Data("#!/bin/sh\nexit 0\n".utf8).write(to: planted)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: planted.path)
+    try FileManager.default.createSymbolicLink(
+        atPath: bin.appendingPathComponent("pyright-langserver").path,
+        withDestinationPath: planted.path
+    )
+
+    #expect(PyrightProvider.findExecutable(projectURL: project, environment: ["PATH": bin.path]) == nil)
+}
+
+@Test
 func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

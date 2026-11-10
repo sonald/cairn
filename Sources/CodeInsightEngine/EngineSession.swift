@@ -431,8 +431,11 @@ public final class EngineSession: Sendable {
                         offset: relation.nameRange.lowerBound,
                         context: context
                     )
+                    // A member base (`h.Base`) can resolve to a binding in
+                    // another file; only this file's own import is followed.
                     if resolved.contains(where: {
                         $0.target.localKind == .binding
+                            && $0.target.pathID == file.pathID
                             && contentIndexes[key]?.bindings[Int($0.target.localIndex)].kind == .importBinding
                     }) {
                         resolved = resolver.importTargets(named: relation.nameID, in: file.pathID, context: context)
