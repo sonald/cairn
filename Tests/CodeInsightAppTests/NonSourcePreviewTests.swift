@@ -68,7 +68,8 @@ func nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() throws {
     #expect(state.sourceVisible == false)
     #expect(controller.canFindInFile == false)
     #expect(controller.canFocusCurrentScope == false)
-    #expect(controller.canToggleFoldAtSelection == false)
+    // The caret sits in `# Title`, whose section folds.
+    #expect(controller.canToggleFoldAtSelection == true)
     #expect(controller.currentReadingPosition() == nil)
     #expect(outlines.last == [])
     #expect(sawPreviewDocumentClear)
@@ -407,4 +408,35 @@ func plainTextPreviewResizePreservesVisibleCharacterAndSelection() throws {
         #expect(text.selectedRanges == selected)
         #expect(text.selectionAffinity == .upstream)
     }
+}
+
+@MainActor
+@Test
+func markdownHeadingFoldHidesOnlyItsSectionAndCopiesTheWholeText() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = "# One\n\nalpha\n\n## Inner\n\nbeta\n\n```sh\ncode\n```\n\n# Two\n\ngamma\n"
+    let file = try nonSourcePreviewFile(root: root, name: "doc.md", bytes: Array(source.utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
+    controller.display(file, languageMode: nil)
+    controller.view.layoutSubtreeIfNeeded()
+    let text = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview"))
+    let full = text.string
+
+    text.setSelectedRange(NSRange(location: 0, length: 0))
+    #expect(controller.toggleFoldAtSelection())
+    #expect(text.string.contains("One") && text.string.contains("Two") && text.string.contains("gamma"))
+    #expect(!text.string.contains("alpha") && !text.string.contains("Inner") && !text.string.contains("code"))
+
+    text.selectAll(nil)
+    NSPasteboard.general.clearContents()
+    text.copy(nil)
+    #expect(NSPasteboard.general.string(forType: .string) == full)
+
+    // Jumping to a heading inside the fold opens it.
+    #expect(controller.scrollPreview(toAnchor: "inner"))
+    #expect(text.string == full)
 }

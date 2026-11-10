@@ -1,32 +1,9 @@
 @preconcurrency import AppKit
 import CodeInsightReaderCore
 
-/// Styles code-like text previews (configuration, templates, scripts) with
-/// the reader's code font, line height and syntax palette.
+/// Colors code-like excerpts with the reader's syntax palette.
 @MainActor
 package enum CodeTextPreviewStyler {
-    package static func attributedString(
-        _ text: String,
-        format: TextFormat?,
-        theme: ReaderTheme
-    ) -> NSAttributedString {
-        let resolver = ReaderFontResolver.shared
-        let regular = resolver.resolve(theme: theme)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = theme.lineHeightMultiple
-        let space = (" " as NSString).size(withAttributes: [.font: regular.font]).width
-        paragraph.defaultTabInterval = space * 4
-        paragraph.tabStops = []
-        var base = regular.attributes
-        base[.foregroundColor] = theme.foregroundColor
-        base[.paragraphStyle] = paragraph
-        let result = NSMutableAttributedString(string: text, attributes: base)
-        guard let format else { return result }
-        let emphasis = resolver.resolve(theme: theme, weight: .semibold).font
-        apply(format.highlight(text), to: result, theme: theme, emphasisFont: emphasis)
-        return result
-    }
-
     /// Colors spans over an attributed string whose UTF-16 offsets start at
     /// `offset`; `emphasisFont` marks section headers.
     package static func apply(
@@ -68,10 +45,25 @@ package enum CodeTextPreviewStyler {
 
 /// A TextKit 1 view (text blocks and tables need it) that centers a
 /// readable column instead of stretching prose across wide windows.
+///
+/// Headings fold their section, up to the next heading of the same or a
+/// higher level. The view keeps the whole rendered document and shows it
+/// without folded sections; selection, copy and anchors map back to it.
+/// (Hiding glyphs instead breaks text blocks: hidden line breaks no longer
+/// break lines, so the next heading lands inside the folded block.)
 @MainActor
 package final class MarkdownPreviewTextView: NSTextView {
     package static let readableWidth: CGFloat = 780
     package static let minimumInset: CGFloat = 28
+
+    /// The whole rendered document; the storage shows it minus `foldedSections`.
+    package private(set) var document = NSAttributedString()
+    /// Folded headings, by where their paragraph starts in `document`.
+    package private(set) var foldedHeadings: Set<Int> = []
+    /// Folded sections in `document`, sorted and disjoint.
+    private var foldedSections: [NSRange] = []
+    private var hoveredHeading: Int?
+    private var hoverArea: NSTrackingArea?
 
     package convenience init() {
         self.init(usingTextLayoutManager: false)
@@ -84,11 +76,242 @@ package final class MarkdownPreviewTextView: NSTextView {
         }
         super.setFrameSize(newSize)
     }
+
+    /// Shows a rendered document; a restyle of the same text keeps folds
+    /// and selection.
+    package func show(_ attributed: NSAttributedString) {
+        let restyle = attributed.string == document.string
+        let selection = restyle ? selectedRanges.map { documentRange(of: $0.rangeValue) } : []
+        if !restyle { foldedHeadings = [] }
+        document = attributed
+        refold(selecting: selection)
+    }
+
+    /// The heading whose section holds the shown character `index`.
+    package func heading(containing index: Int) -> Int? {
+        let location = min(documentIndex(of: index, afterFold: false), document.length - 1)
+        guard location >= 0 else { return nil }
+        var found: Int?
+        document.enumerateAttribute(.markdownHeadingLevel, in: NSRange(location: 0, length: location + 1),
+                                    options: .reverse) { value, range, stop in
+            guard value != nil else { return }
+            found = paragraphStart(range.location)
+            stop.pointee = true
+        }
+        return found
+    }
+
+    @discardableResult
+    package func toggleHeadingFold(at start: Int) -> Bool {
+        guard let section = sectionRange(ofHeadingAt: start), section.length > 0 else { return false }
+        if foldedHeadings.remove(start) == nil { foldedHeadings.insert(start) }
+        refold(selecting: selectedRanges.map { documentRange(of: $0.rangeValue) })
+        return true
+    }
+
+    /// Unfolds what hides the heading `fragment` names and returns its shown
+    /// range.
+    package func revealAnchor(_ fragment: String) -> NSRange? {
+        guard let range = MarkdownPreviewRenderer.anchorRange(for: fragment, in: document) else { return nil }
+        let hiding = foldedHeadings.filter { sectionRange(ofHeadingAt: $0).map { NSLocationInRange(range.location, $0) } ?? false }
+        if !hiding.isEmpty {
+            foldedHeadings.subtract(hiding)
+            refold(selecting: selectedRanges.map { documentRange(of: $0.rangeValue) })
+        }
+        return shownRange(of: range)
+    }
+
+    /// Copy takes folded sections inside the selection from the document.
+    override package func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard !foldedSections.isEmpty else { return super.writeSelection(to: pboard, types: types) }
+        let text = NSMutableAttributedString()
+        for value in selectedRanges where value.rangeValue.length > 0 {
+            if text.length > 0 { text.append(NSAttributedString(string: "\n")) }
+            text.append(document.attributedSubstring(from: documentRange(of: value.rangeValue)))
+        }
+        guard text.length > 0 else { return false }
+        pboard.clearContents()
+        if let rtf = text.rtf(from: NSRange(location: 0, length: text.length)) {
+            pboard.setData(rtf, forType: .rtf)
+        }
+        return pboard.setString(text.string, forType: .string)
+    }
+
+    private func refold(selecting selection: [NSRange]) {
+        var merged: [NSRange] = []
+        for range in foldedHeadings.compactMap(sectionRange(ofHeadingAt:)).sorted(by: { $0.location < $1.location }) {
+            if let last = merged.last, range.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, range)
+            } else {
+                merged.append(range)
+            }
+        }
+        foldedSections = merged
+        let shown = NSMutableAttributedString(attributedString: document)
+        for range in foldedSections.reversed() { shown.deleteCharacters(in: range) }
+        textStorage?.setAttributedString(shown)
+        let ranges = selection.map { NSValue(range: shownRange(of: $0)) }
+        if !ranges.isEmpty { setSelectedRanges(ranges, affinity: .downstream, stillSelecting: false) }
+        needsDisplay = true
+    }
+
+    /// Text after the heading's paragraph, up to the next heading of the
+    /// same or a higher level.
+    private func sectionRange(ofHeadingAt start: Int) -> NSRange? {
+        guard start < document.length,
+              let level = document.attribute(.markdownHeadingLevel, at: start, effectiveRange: nil) as? Int
+        else { return nil }
+        let body = NSMaxRange((document.string as NSString).paragraphRange(for: NSRange(location: start, length: 0)))
+        var end = document.length
+        document.enumerateAttribute(.markdownHeadingLevel,
+                                    in: NSRange(location: body, length: document.length - body)) { value, range, stop in
+            guard let next = value as? Int, next <= level else { return }
+            end = paragraphStart(range.location)
+            stop.pointee = true
+        }
+        return NSRange(location: body, length: end - body)
+    }
+
+    private func paragraphStart(_ index: Int) -> Int {
+        (document.string as NSString).paragraphRange(for: NSRange(location: index, length: 0)).location
+    }
+
+    /// A document index shown at `index`; at a fold point, `afterFold`
+    /// picks the end of the folded section rather than its start.
+    private func documentIndex(of index: Int, afterFold: Bool) -> Int {
+        var result = index
+        for range in foldedSections {
+            guard range.location < result || (afterFold && range.location == result) else { break }
+            result += range.length
+        }
+        return result
+    }
+
+    private func documentRange(of range: NSRange) -> NSRange {
+        let lower = documentIndex(of: range.location, afterFold: false)
+        let upper = range.length == 0 ? lower : documentIndex(of: NSMaxRange(range), afterFold: true)
+        return NSRange(location: lower, length: upper - lower)
+    }
+
+    /// Where a document index shows; folded text collapses to its fold point.
+    private func shownIndex(of index: Int) -> Int {
+        var removed = 0
+        for range in foldedSections {
+            if NSMaxRange(range) <= index {
+                removed += range.length
+            } else {
+                if range.location < index { removed += index - range.location }
+                break
+            }
+        }
+        return index - removed
+    }
+
+    private func shownRange(of range: NSRange) -> NSRange {
+        let lower = shownIndex(of: range.location)
+        return NSRange(location: lower, length: shownIndex(of: NSMaxRange(range)) - lower)
+    }
+
+    // MARK: Fold chevrons in the left margin
+
+    /// The heading whose first line holds `y`, with that line's rect.
+    private func headingLine(atY y: CGFloat) -> (start: Int, rect: NSRect)? {
+        guard let layoutManager, let textContainer, layoutManager.numberOfGlyphs > 0 else { return nil }
+        let point = NSPoint(x: 0, y: y - textContainerOrigin.y)
+        let glyph = layoutManager.glyphIndex(for: point, in: textContainer)
+        let line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        let index = documentIndex(of: layoutManager.characterIndexForGlyph(at: glyph), afterFold: false)
+        guard line.minY <= point.y, point.y < line.maxY, index < document.length,
+              document.attribute(.markdownHeadingLevel, at: index, effectiveRange: nil) != nil
+        else { return nil }
+        let start = paragraphStart(index)
+        guard let rect = firstLineRect(ofHeadingAt: start), rect.minY == line.minY + textContainerOrigin.y
+        else { return nil }
+        return (start, rect)
+    }
+
+    private func firstLineRect(ofHeadingAt start: Int) -> NSRect? {
+        guard let layoutManager, let storage = textStorage else { return nil }
+        let shown = shownIndex(of: start)
+        guard shown < storage.length else { return nil }
+        return layoutManager.lineFragmentUsedRect(
+            forGlyphAt: layoutManager.glyphIndexForCharacter(at: shown), effectiveRange: nil
+        ).offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+    }
+
+    private func chevronRect(for line: NSRect) -> NSRect {
+        NSRect(x: textContainerOrigin.x - 20, y: line.midY - 7, width: 14, height: 14)
+    }
+
+    /// Chevrons sit in the margin, under no text, so the background pass
+    /// draws them.
+    override package func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        var starts = foldedHeadings
+        if let hoveredHeading { starts.insert(hoveredHeading) }
+        for start in starts {
+            guard let line = firstLineRect(ofHeadingAt: start) else { continue }
+            let rect = chevronRect(for: line)
+            guard rect.intersects(dirtyRect) else { continue }
+            let collapsed = foldedHeadings.contains(start)
+            let path = NSBezierPath()
+            path.lineWidth = 1.4
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            if collapsed {
+                path.move(to: NSPoint(x: rect.midX - 2, y: rect.midY - 3))
+                path.line(to: NSPoint(x: rect.midX + 2, y: rect.midY))
+                path.line(to: NSPoint(x: rect.midX - 2, y: rect.midY + 3))
+            } else {
+                path.move(to: NSPoint(x: rect.midX - 3, y: rect.midY - 2))
+                path.line(to: NSPoint(x: rect.midX, y: rect.midY + 2))
+                path.line(to: NSPoint(x: rect.midX + 3, y: rect.midY - 2))
+            }
+            (collapsed ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor).setStroke()
+            path.stroke()
+        }
+    }
+
+    override package func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override package func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        let next = headingLine(atY: convert(event.locationInWindow, from: nil).y)?.start
+        guard next != hoveredHeading else { return }
+        hoveredHeading = next
+        needsDisplay = true
+    }
+
+    override package func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        guard hoveredHeading != nil else { return }
+        hoveredHeading = nil
+        needsDisplay = true
+    }
+
+    override package func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if point.x < textContainerOrigin.x, let heading = headingLine(atY: point.y),
+           chevronRect(for: heading.rect).insetBy(dx: -6, dy: -4).contains(point) {
+            toggleHeadingFold(at: heading.start)
+            return
+        }
+        super.mouseDown(with: event)
+    }
 }
 
 package extension NSAttributedString.Key {
     /// A heading's GitHub-style id, for `#fragment` links.
     static let markdownAnchor = NSAttributedString.Key("CairnMarkdownAnchor")
+    /// A heading's level, 1–6, over its text; folding reads sections from it.
+    static let markdownHeadingLevel = NSAttributedString.Key("CairnMarkdownHeadingLevel")
 }
 
 /// Renders CommonMark/GFM (via Foundation's parser) into a native reading
@@ -442,7 +665,8 @@ package struct MarkdownPreviewRenderer {
                                    range: NSRange(location: 2, length: max(0, paragraph.length - 2)))
         }
         paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
-        if case .header = leaf {
+        if case .header(let level) = leaf {
+            paragraph.addAttribute(.markdownHeadingLevel, value: level, range: NSRange(location: 0, length: paragraph.length))
             var slug = Self.headingSlug(paragraph.string)
             let count = state.anchorCounts[slug, default: 0]
             state.anchorCounts[slug] = count + 1
@@ -701,6 +925,10 @@ package struct MarkdownPreviewRenderer {
             paragraph.deleteCharacters(in: NSRange(location: paragraph.length - 1, length: 1))
         }
         guard paragraph.length > 0 else { return }
+        if let headingLevel {
+            paragraph.addAttribute(.markdownHeadingLevel, value: headingLevel,
+                                   range: NSRange(location: 0, length: paragraph.length))
+        }
         paragraph.append(NSAttributedString(string: "\n", attributes: [.font: font]))
         paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
         output.append(paragraph)

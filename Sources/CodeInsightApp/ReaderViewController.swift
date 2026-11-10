@@ -448,6 +448,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// itself never changes, so selection and scroll survive a restyle.
     private var previewRestyle: ((ReaderTheme) -> NSAttributedString?)?
     private var previewWrapLines = ReaderSettings().wrapLines
+    /// Code-like previews: a reader of their own that folds like source.
+    private var previewReader: ReaderTextView?
+    private var previewSettings = ReaderSettings()
+    private let previewDerivedDataStore: ReaderDerivedDataStore
     private var previewUnwrappedX: CGFloat = 0
     private var previewRenderedText: String?
     private var previewLinkCount = 0
@@ -490,6 +494,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     init(showsCompareControls: Bool = false, derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore()) {
         textView = ReaderTextView(derivedDataStore: derivedDataStore)
+        previewDerivedDataStore = derivedDataStore
         self.showsCompareControls = showsCompareControls
         super.init(nibName: nil, bundle: nil)
         findBar.isHidden = true
@@ -1239,7 +1244,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         guard let scrollView = previewView as? NSScrollView,
               let textView = scrollView.documentView as? NSTextView,
               let storage = textView.textStorage,
-              let range = MarkdownPreviewRenderer.anchorRange(for: fragment, in: storage),
+              let range = (textView as? MarkdownPreviewTextView)?.revealAnchor(fragment)
+                  ?? MarkdownPreviewRenderer.anchorRange(for: fragment, in: storage),
               let layout = textView.layoutManager,
               let container = textView.textContainer
         else { return false }
@@ -1607,6 +1613,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         loadViewIfNeeded()
         let previewWrapChanged = previewWrapLines != settings.wrapLines
         previewWrapLines = settings.wrapLines
+        previewSettings = settings
+        previewReader?.apply(settings: settings)
         let previousTheme = readerTheme
         readerTheme = ReaderTheme(settings: settings)
         snapshotBadge.update(style: .commit, text: localized("main.snapshot.readonly"), theme: readerTheme)
@@ -1618,7 +1626,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readingSetView.apply(settings: settings)
         emptyStateView?.apply(theme: readerTheme)
         previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
-        if let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
+        if previewReader == nil,
+           let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
             previewTextView.backgroundColor = readerTheme.backgroundColor
             previewTextView.linkTextAttributes?[.foregroundColor] = readerTheme.accentColor
             let restyled = previousTheme != readerTheme
@@ -2107,22 +2116,29 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
     @discardableResult
     func toggleFoldAtSelection() -> Bool {
-        guard let document = displayedDocument,
-            let byteOffset = textView.byteOffset(
-                forCharacterIndex: textView.view.selectedRange().location
-            ),
-            let line = document.lineTable.lineColumn(at: byteOffset)?.line
-        else { return false }
-        return textView.toggleFold(atLine: Int(line))
+        if let (markdown, heading) = markdownHeadingAtSelection { return markdown.toggleHeadingFold(at: heading) }
+        guard let (reader, line) = foldTargetAtSelection else { return false }
+        return reader.toggleFold(atLine: line)
     }
     var canToggleFoldAtSelection: Bool {
-        guard let document = displayedDocument,
-            let byteOffset = textView.byteOffset(
-                forCharacterIndex: textView.view.selectedRange().location
+        if markdownHeadingAtSelection != nil { return true }
+        guard let (reader, line) = foldTargetAtSelection else { return false }
+        return reader.canToggleFold(atLine: line)
+    }
+    private var markdownHeadingAtSelection: (MarkdownPreviewTextView, Int)? {
+        guard let markdown = (previewView as? NSScrollView)?.documentView as? MarkdownPreviewTextView,
+              let heading = markdown.heading(containing: markdown.selectedRange().location)
+        else { return nil }
+        return (markdown, heading)
+    }
+    private var foldTargetAtSelection: (ReaderTextView, Int)? {
+        let reader = previewReader ?? textView
+        guard let byteOffset = reader.byteOffset(
+                forCharacterIndex: reader.view.selectedRange().location
             ),
-            let line = document.lineTable.lineColumn(at: byteOffset)?.line
-        else { return false }
-        return textView.canToggleFold(atLine: Int(line))
+            let line = reader.displayedLineTable?.lineColumn(at: byteOffset)?.line
+        else { return nil }
+        return (reader, Int(line))
     }
     var selfTestReadingHeightHeader:
         (
@@ -2572,6 +2588,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
         previewView?.removeFromSuperview()
         previewView = nil
+        previewReader?.clear()
+        previewReader = nil
         previewKind = nil
         textPreviewKind = nil
         previewRestyle = nil
@@ -2722,19 +2740,25 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             return
         }
         // Configuration, templates, scripts and unsupported source read as
-        // code: the reader's font, line height and syntax palette.
-        let render = { (theme: ReaderTheme) -> NSAttributedString? in
-            CodeTextPreviewStyler.attributedString(string, format: format, theme: theme)
-        }
-        displayPreviewText(
-            render(readerTheme) ?? NSAttributedString(string: string),
-            kind: .plainText,
-            kindName: format?.displayName,
-            accessibilityLabel: format.map {
-                localizedFormat("main.code.text.preview", $0.displayName)
-            } ?? localized("main.plain.text.preview")
-        )
-        previewRestyle = render
+        // code in a reader of their own: font, palette and folding, without
+        // the source reader's navigation, outline or Exact.
+        let reader = ReaderTextView(settings: previewSettings, derivedDataStore: previewDerivedDataStore)
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.documentView = reader.view
+        reader.configureGutter(in: scrollView, lineNumbers: previewSettings.lineNumbers)
+        reader.view.setAccessibilityLabel(format.map {
+            localizedFormat("main.code.text.preview", $0.displayName)
+        } ?? localized("main.plain.text.preview"))
+        previewReader = reader
+        previewKind = format?.displayName ?? "Plain text"
+        previewAccessibilityLabel = reader.view.accessibilityLabel()
+        installPreview(scrollView)
+        view.layoutSubtreeIfNeeded()
+        reader.display(document: TextFormat.previewDocument(bytes: bytes, format: format), fileURL: file)
+        previewRenderedText = reader.view.string
     }
 
     /// Prose documents keep the proportional reading font.
@@ -2787,7 +2811,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         if kind == .plainText {
             textView.textContainerInset = NSSize(width: 24, height: 24)
         }
-        textView.textStorage?.setAttributedString(styled)
+        if let markdown = textView as? MarkdownPreviewTextView {
+            markdown.show(styled)
+        } else {
+            textView.textStorage?.setAttributedString(styled)
+        }
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -2829,12 +2857,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         guard let restyle = previewRestyle,
               let storage = textView.textStorage,
               let styled = restyle(readerTheme),
-              styled.string == storage.string
+              styled.string == ((textView as? MarkdownPreviewTextView)?.document.string ?? storage.string)
         else { return false }
         let selection = textView.selectedRanges
         let origin = textView.enclosingScrollView?.contentView.bounds.origin
-        storage.setAttributedString(styled)
-        textView.setSelectedRanges(selection, affinity: textView.selectionAffinity, stillSelecting: false)
+        if let markdown = textView as? MarkdownPreviewTextView {
+            markdown.show(styled)
+        } else {
+            storage.setAttributedString(styled)
+            textView.setSelectedRanges(selection, affinity: textView.selectionAffinity, stillSelecting: false)
+        }
         if let origin, let scrollView = textView.enclosingScrollView {
             scrollView.contentView.scroll(to: origin)
             scrollView.reflectScrolledClipView(scrollView.contentView)

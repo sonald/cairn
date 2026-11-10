@@ -1219,6 +1219,8 @@ public final class ReaderTextView {
         }
     }
 
+    package var displayedLineTable: LineTable? { displayedDocument?.lineTable }
+
     package func canToggleFold(atLine line: Int) -> Bool {
         guard !isFocusMode, let document = displayedDocument else { return false }
         return visibleFoldRegions(in: document).contains {

@@ -112,11 +112,12 @@ extension AppDelegate {
                     == file.standardizedFileURL
             }
         }
-        func sourceControlsAreLocked() -> Bool {
+        // Markdown previews fold by heading, so they skip the fold check.
+        func sourceControlsAreLocked(foldable: Bool = false) -> Bool {
             let height = controller.selfTestReadingHeightHeader
             return !controller.canFindInFile
                 && !controller.canFocusCurrentScope
-                && !controller.canToggleFoldAtSelection
+                && (foldable || !controller.canToggleFoldAtSelection)
                 && !controller.readerHasReadingPosition
                 && height.hidden
                 && !height.enabled
@@ -326,7 +327,7 @@ extension AppDelegate {
             && markdownState
             && visible(markdownView)
             && controller.selfTestReaderPreviewText?.contains("guide") == true
-            && sourceControlsAreLocked()
+            && sourceControlsAreLocked(foldable: true)
             && previewContentSizeIsStable()
         files.append([
             "path": "README.md",
