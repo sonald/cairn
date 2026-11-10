@@ -233,3 +233,51 @@ func menuRoutingResolvesProjectWindowsPanelsAndGlobalWindows() throws {
 
     controllerA.closeBookmarks()
 }
+
+/// §6.3: same-named projects keep their parent-directory titles across
+/// render passes, and a closing sibling stops disambiguating.
+@MainActor
+@Test
+func sameNamedProjectTitlesSurviveRenderAndSiblingClose() throws {
+    let delegate = AppDelegate(startedAt: .now)
+    let root = routingTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let projectA = root.appendingPathComponent("a/proj", isDirectory: true)
+    let projectB = root.appendingPathComponent("b/proj", isDirectory: true)
+    for project in [projectA, projectB] {
+        try FileManager.default.createDirectory(
+            at: project,
+            withIntermediateDirectories: true
+        )
+    }
+    let controllerA = MainWindowController(
+        model: AppModel(), settings: ReaderSettings(), offscreen: true
+    )
+    let controllerB = MainWindowController(
+        model: AppModel(), settings: ReaderSettings(), offscreen: true
+    )
+    defer {
+        controllerA.close()
+        controllerB.close()
+    }
+    delegate.registerProjectWindow(controllerA)
+    delegate.registerProjectWindow(controllerB)
+    controllerA.claimProject(projectA)
+    controllerB.claimProject(projectB)
+    let identities = [controllerA, controllerB].compactMap(\.projectURL)
+    controllerA.updateWindowTitle(among: identities)
+    controllerB.updateWindowTitle(among: identities)
+
+    controllerA.renderForSelfTest()
+    controllerB.renderForSelfTest()
+    #expect(controllerA.window?.title == "proj (a) — Cairn")
+    #expect(controllerB.window?.title == "proj (b) — Cairn")
+
+    // Closing B refreshes the remaining window's title.
+    #expect(controllerB.windowShouldClose(controllerB.window!) == true)
+    controllerB.windowWillClose(
+        Notification(name: NSWindow.willCloseNotification, object: controllerB.window!)
+    )
+    controllerA.renderForSelfTest()
+    #expect(controllerA.window?.title == "proj — Cairn")
+}

@@ -71,7 +71,8 @@ final class DependencySetupView: NSView {
         actionButton.controlSize = .small
         actionButton.target = self
         actionButton.action = #selector(performAction(_:))
-        actionButton.keyEquivalent = "\r"
+        // Fixed ⏎ default action, applied through the adapter (CI gate K0a).
+        actionButton.applyKeyChord(KeyChord(modifiers: [], key: .special(.return)))
         cancelButton.title = localized("main.deps.cancel")
         cancelButton.bezelStyle = .rounded
         cancelButton.controlSize = .small

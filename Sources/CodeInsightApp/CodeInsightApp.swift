@@ -544,7 +544,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     /// Window titles distinguish sibling projects sharing a name (§6.3).
     private func refreshWindowTitles() {
-        let identities = projectWindows.compactMap(\.projectURL)
+        // Closing windows still claim their project until teardown ends;
+        // they no longer count as siblings.
+        let identities = projectWindows.filter { !$0.isClosing }
+            .compactMap(\.projectURL)
         for controller in projectWindows {
             controller.updateWindowTitle(among: identities)
         }
@@ -877,7 +880,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     @objc private func clearRecentProjects(_ sender: Any?) {
         recentProjectsStore.clear()
-        windowController?.refreshRecentProjects()
+        projectWindows.forEach { $0.refreshRecentProjects() }
     }
 
     @objc private func showAbout(_ sender: Any?) {

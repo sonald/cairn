@@ -153,6 +153,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private(set) var projectURL: URL?
     /// True once window closing was approved; rejects new project work.
     private(set) var isClosing = false
+    /// Other windows' project identities, as last supplied by the app
+    /// delegate (window-title disambiguation, §6.3).
+    private var titleSiblings: [URL] = []
     /// Waiters for the completion of an approved close (a repeated open of
     /// the same project must wait for the previous session writer to end).
     private var closeWaiters: [CheckedContinuation<Void, Never>] = []
@@ -2129,6 +2132,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         popover.contentViewController = controller
         popover.behavior = .transient
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+        // A shown popover is not key, and its selectable detail text would
+        // swallow Return; make it key with no first responder so Return
+        // reaches the highlighted "download" default button.
+        if missingDependencies != nil, let popoverWindow = controller.view.window {
+            popoverWindow.makeKey()
+            popoverWindow.makeFirstResponder(nil)
+        }
     }
 
     /// The install for the active unit while analysis reports its
@@ -3359,18 +3369,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// apart by their parent directory (§6.3). The title bar itself stays
     /// hidden (toolbar style) — the title serves the Window menu, Mission
     /// Control, and AppKit switcher surfaces.
-    func updateWindowTitle(among siblings: [URL] = []) {
+    /// `nil` reuses the sibling list the app delegate last supplied, so
+    /// render passes keep the disambiguated title.
+    func updateWindowTitle(among siblings: [URL]? = nil) {
+        if let siblings { titleSiblings = siblings }
         guard let window else { return }
         guard let identity = projectURL ?? model.fileTree?.root else {
             window.title = "Cairn"
             return
         }
         let name = identity.lastPathComponent
-        let disambiguation = siblings.first { other in
+        let sharesName = titleSiblings.contains { other in
             other != identity && other.lastPathComponent == name
         }
-        if let disambiguation {
-            let parent = disambiguation.deletingLastPathComponent()
+        if sharesName {
+            let parent = identity.deletingLastPathComponent()
                 .lastPathComponent
             window.title = "\(name) (\(parent)) — Cairn"
         } else {
@@ -3389,7 +3402,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let retry = { [weak self] in
             _ = self?.retryLastOpenedProject()
         }
-        let openDropped = { [weak self] (root: URL) in
+        let openThroughApp = { [weak self] (root: URL) in
             guard let self else { return }
             self.onOpenProject(root, self)
         }
@@ -3400,8 +3413,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 recentStatus: recentProjectStatus(),
                 failed: false,
                 onChooseProject: onChooseProject,
-                onOpenRecent: { [weak self] in self?.openProject(root: $0) },
-                onOpenDropped: openDropped,
+                onOpenRecent: openThroughApp,
+                onOpenDropped: openThroughApp,
                 onRetry: retry
             )
         case .failed:
@@ -3411,8 +3424,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 failed: true,
                 failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
-                onOpenRecent: { [weak self] in self?.openProject(root: $0) },
-                onOpenDropped: openDropped,
+                onOpenRecent: openThroughApp,
+                onOpenDropped: openThroughApp,
                 onRetry: retry
             )
         case .indexing:
