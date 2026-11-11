@@ -759,10 +759,17 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 
     private func installProjectSymbolRows() {
+        var built = 0
         let candidates: [Row] = symbolModel.rows.compactMap { row in
             guard case let .result(name, hit) = row,
                   let root = appModel.fileTree?.root
             else { return nil }
+            built += 1
+            // `install` keeps only the first `resultLimit` rows and counts
+            // the rest, so only those pay for the manifest scan.
+            let expectedContentID = built <= Self.resultLimit
+                ? appModel.indexedContentID(forPath: hit.path)
+                : nil
             return Row(
                 title: name,
                 detail: "\(hit.path):\(hit.line):\(hit.column)",
@@ -771,7 +778,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 payload: .location(
                     root.appendingPathComponent(hit.path),
                     hit.facet.nameRange.lowerBound,
-                    expectedContentID: appModel.indexedContentID(forPath: hit.path)
+                    expectedContentID: expectedContentID
                 ),
                 kind: KindTag(hit.facet.kind)
             )
@@ -953,45 +960,63 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         tabs: [URL]
     ) -> [Row] {
         guard let tree else { return [] }
-        let files = flatten(tree.children)
-        let relative = Dictionary(uniqueKeysWithValues: files.map {
-            ($0.standardizedFileURL, relativePath($0, root: tree.root))
+        // Runs per keystroke: resolve, standardize and split each path once,
+        // not inside the sort comparator.
+        struct Entry {
+            let file: URL
+            let standardized: URL
+            let path: String
+            let sortKey: (Int, String)
+        }
+        let root = tree.root.resolvingSymlinksInPath()
+        let entries = flatten(tree.children).map { file in
+            let path = relativePath(file, resolvedRoot: root)
+            return Entry(
+                file: file,
+                standardized: file.standardizedFileURL,
+                path: path,
+                sortKey: fileSortKey(path)
+            )
+        }
+        let relative = Dictionary(uniqueKeysWithValues: entries.map {
+            ($0.standardized, $0.path)
         })
-        let ordered: [URL]
+        let ordered: [Entry]
         if query.isEmpty {
+            let byURL = Dictionary(uniqueKeysWithValues: entries.map { ($0.standardized, $0) })
             var seen: Set<URL> = []
-            let open = tabs.map(\.standardizedFileURL).filter {
-                relative[$0] != nil && seen.insert($0).inserted
+            let open = tabs.map(\.standardizedFileURL).compactMap { url -> Entry? in
+                guard let entry = byURL[url], seen.insert(url).inserted else { return nil }
+                // Rows built from tabs carry the standardized URL.
+                return Entry(file: url, standardized: url, path: entry.path, sortKey: entry.sortKey)
             }
-            let remaining = files.map(\.standardizedFileURL).filter {
-                seen.insert($0).inserted
-            }.sorted { fileSortKey(relative[$0]!) < fileSortKey(relative[$1]!) }
+            let remaining = entries.filter {
+                seen.insert($0.standardized).inserted
+            }.map {
+                Entry(file: $0.standardized, standardized: $0.standardized, path: $0.path, sortKey: $0.sortKey)
+            }.sorted { $0.sortKey < $1.sortKey }
             ordered = open + remaining
         } else {
-            ordered = files.filter {
-                contains(relative[$0.standardizedFileURL]!, query: query)
-            }.sorted {
-                let lhs = relative[$0.standardizedFileURL]!
-                let rhs = relative[$1.standardizedFileURL]!
-                let lhsPrefix = hasPrefix($0.lastPathComponent, query: query)
-                let rhsPrefix = hasPrefix($1.lastPathComponent, query: query)
-                if lhsPrefix != rhsPrefix { return lhsPrefix }
-                return fileSortKey(lhs) < fileSortKey(rhs)
-            }
+            ordered = entries.filter { contains($0.path, query: query) }
+                .map { ($0, hasPrefix($0.file.lastPathComponent, query: query)) }
+                .sorted {
+                    if $0.1 != $1.1 { return $0.1 }
+                    return $0.0.sortKey < $1.0.sortKey
+                }
+                .map(\.0)
         }
         let disambiguation = parentDisambiguation(
-            ordered,
+            ordered.map(\.standardized),
             relativePaths: relative
         )
-        return ordered.map { file in
-            let path = relative[file.standardizedFileURL]!
-            return Row(
-                title: file.lastPathComponent,
-                detail: disambiguation[file.standardizedFileURL]
-                    ?? parentPath(path),
+        return ordered.map { entry in
+            Row(
+                title: entry.file.lastPathComponent,
+                detail: disambiguation[entry.standardized]
+                    ?? parentPath(entry.path),
                 shortcut: "",
-                identity: "file:\(file.standardizedFileURL.path)",
-                payload: .file(file)
+                identity: "file:\(entry.standardized.path)",
+                payload: .file(entry.file)
             )
         }
     }
@@ -1146,9 +1171,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         nodes.flatMap { $0.isDirectory ? flatten($0.children) : [$0.url] }
     }
 
-    private static func relativePath(_ file: URL, root: URL) -> String {
+    private static func relativePath(_ file: URL, resolvedRoot root: URL) -> String {
         let file = file.resolvingSymlinksInPath()
-        let root = root.resolvingSymlinksInPath()
         return file.pathComponents.dropFirst(root.pathComponents.count)
             .joined(separator: "/")
     }

@@ -301,7 +301,11 @@ private struct SettingsView: View {
     /// The checkout directories' current size; a clear's outcome message
     /// replaces it until the window is rebuilt.
     private var cacheDescription: String {
-        cacheMessage ?? localizedFormat(
+        if let cacheMessage { return cacheMessage }
+        // Measuring walks every checkout file, and each Reader-tab slider
+        // tick rebuilds this view; switching tabs re-renders it.
+        guard keyBindingsModel.selectedTab == .exact else { return "" }
+        return localizedFormat(
             "settings.cache.description",
             ByteCountFormatter.string(fromByteCount: Int64(checkoutSize()), countStyle: .file)
         )

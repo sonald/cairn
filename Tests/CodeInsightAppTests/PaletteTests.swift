@@ -418,3 +418,30 @@ func seekPreviewShowsLinesAroundALocationAndHidesOtherwise() throws {
     table.selectRowIndexes([2], byExtendingSelection: false)
     #expect(!panel.selfTestPreview.visible)
 }
+
+@MainActor
+@Test
+func fileRowsOrderOpenTabsPrefixMatchesAndDisambiguateDuplicateNames() throws {
+    // The temporary directory sits behind the /var -> /private/var symlink.
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("FileRows-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    for path in ["lib.rs", "src/sync.rs", "src/net/mod.rs", "src/io/mod.rs", "tests/sync_test.rs"] {
+        let file = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "\n".write(to: file, atomically: true, encoding: .utf8)
+    }
+    let tree = try FileTreeModel(root: root)
+    func rows(_ query: String, tabs: [URL] = []) -> [String] {
+        PalettePanel.fileRows(query: query, tree: tree, tabs: tabs)
+            .map { "\($0.title) \($0.detail)" }
+    }
+    #expect(rows("", tabs: [root.appendingPathComponent("src/io/mod.rs")]) == [
+        "mod.rs io/", "lib.rs ./", "sync.rs src/", "sync_test.rs tests/", "mod.rs net/",
+    ])
+    #expect(rows("S") == [
+        "sync.rs src/", "sync_test.rs tests/", "lib.rs ./", "mod.rs io/", "mod.rs net/",
+    ])
+    #expect(rows("net/m") == ["mod.rs src/net/"])
+}

@@ -1201,6 +1201,7 @@ public final class RelationTreeModel {
                 exactState: .notApplicable
             )
         case let .relations(relations, origin, attribution):
+            let filesByPath = Self.filesByNormalizedPath(in: session)
             var exactEdges = relations.compactMap { relation -> LoadedEdge? in
                 guard let byteOffset = UInt32(exactly: relation.location.byteOffset),
                       let line = UInt32(exactly: relation.location.line),
@@ -1208,7 +1209,8 @@ public final class RelationTreeModel {
                 else { return nil }
                 let symbol = Self.symbol(
                     at: relation.location,
-                    in: session
+                    in: session,
+                    filesByPath: filesByPath
                 )
                 // tsserver lists a class among its own implementations.
                 if direction == .implementations, let root, symbol == root { return nil }
@@ -1855,15 +1857,34 @@ public final class RelationTreeModel {
         "\(URL(fileURLWithPath: location.file).lastPathComponent):\(location.line)"
     }
 
+    /// The first manifest file per normalized path, built once for a list of
+    /// Exact relations instead of one manifest scan per relation.
+    private nonisolated static func filesByNormalizedPath(
+        in session: EngineSession
+    ) -> [String: FileOccurrence] {
+        Dictionary(
+            session.manifest.files.map {
+                (normalizedPath(session.paths.resolve($0.pathID)), $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
     private nonisolated static func symbol(
         at location: ExactLocation,
-        in session: EngineSession
+        in session: EngineSession,
+        filesByPath: [String: FileOccurrence]? = nil
     ) -> SymbolOccurrenceID? {
+        let wanted = normalizedPath(location.file)
+        let file = if let filesByPath {
+            filesByPath[wanted]
+        } else {
+            session.manifest.files.first {
+                normalizedPath(session.paths.resolve($0.pathID)) == wanted
+            }
+        }
         guard let offset = UInt32(exactly: location.byteOffset),
-              let file = session.manifest.files.first(where: {
-                  normalizedPath(session.paths.resolve($0.pathID))
-                      == normalizedPath(location.file)
-              }),
+              let file,
               let index = contentIndex(at: file.pathID, in: session),
               let facetIndex = index.symbols.firstIndex(where: {
                   $0.nameRange.lowerBound == offset
