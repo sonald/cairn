@@ -33,6 +33,16 @@ func goModuleResolvesPackagesImportsAndReceiversThroughGoldSet() async throws {
     let variants = try session.resolve(file: math.pathID, offset: osName.nameRange.lowerBound, context: context)
     #expect(variants.map(\.certainty) == [.probable, .probable])
 
+    // Callers of the package's `pi` come from its own package, not from the
+    // external test package that declares another `pi`.
+    let pi = try #require(session.definitions(of: "pi", context: context).first {
+        session.paths.resolve($0.2) == "math.go"
+    }?.0)
+    let piCallers = try session.callers(of: pi, context: context)
+    let piCallerPaths = piCallers.map { session.paths.resolve($0.callSite.pathID) }
+    #expect(piCallers.first { session.paths.resolve($0.callSite.pathID) == "shape.go" }?.certainty == .strong)
+    #expect(!piCallerPaths.contains("shape_ext_test.go"))
+
     let listing = try session.projectSymbols(context: context)
     let area = try #require(listing.symbols.first { $0.name == "Area" && $0.kind == .goMethod && $0.parentFacetIndex == nil })
     #expect(area.receiverTypeName == "Circle")
@@ -52,7 +62,7 @@ func goModuleResolvesPackagesImportsAndReceiversThroughGoldSet() async throws {
 func goWorkspaceIsOneUnitAndSeparateModulesAreUnitsOfTheirOwn() throws {
     let hello = Array("package a\n\nfunc Hello() {}\n".utf8)
     let caller = Array("package main\n\nimport \"example.com/a\"\n\nfunc main() { a.Hello() }\n".utf8)
-    func snapshot(workspace: Bool) -> GoTestSnapshot {
+    func snapshot(workspace: Bool, markers: Bool = true) -> GoTestSnapshot {
         var files: [String: [UInt8]] = [
             "a/go.mod": Array("module example.com/a // the library\n".utf8),
             "a/hello.go": hello,
@@ -60,7 +70,7 @@ func goWorkspaceIsOneUnitAndSeparateModulesAreUnitsOfTheirOwn() throws {
             "b/main.go": caller,
         ]
         if workspace { files["go.work"] = Array("go 1.22\n\nuse (\n\t./a\n\t./b\n)\n".utf8) }
-        return GoTestSnapshot(files: files)
+        return GoTestSnapshot(files: files, reportsMarkers: markers)
     }
 
     let store = ProjectIndexStore()
@@ -86,6 +96,19 @@ func goWorkspaceIsOneUnitAndSeparateModulesAreUnitsOfTheirOwn() throws {
     let separateContext = QueryContext(snapshotID: separate.snapshotID, analysisProfileID: separate.analysisProfile.id, generation: 1)
     #expect(try separate.resolve(file: separateMain.pathID, offset: callOffset, context: separateContext)
         .allSatisfy { $0.certainty == .unresolved })
+
+    // GitSnapshot does not report Go markers yet: the whole snapshot is one
+    // unit, and go.mod files are still read to map import paths.
+    let unmarked = try ProjectIndexer().completeSnapshot(
+        ProjectIndexer().prepareSnapshot(snapshot(workspace: false, markers: false), into: ProjectIndexStore(), language: .go)
+    )
+    #expect(unmarked.count == 1)
+    let single = try #require(unmarked.first)
+    let singleMain = try #require(single.manifest.files.first { single.paths.resolve($0.pathID) == "b/main.go" })
+    let singleContext = QueryContext(snapshotID: single.snapshotID, analysisProfileID: single.analysisProfile.id, generation: 1)
+    let singleTargets = try single.resolve(file: singleMain.pathID, offset: callOffset, context: singleContext)
+    #expect(singleTargets.map { single.paths.resolve($0.target.pathID) } == ["a/hello.go"])
+    #expect(singleTargets.first?.certainty == .strong)
 }
 
 private struct GoTestSnapshot: Snapshot {
@@ -94,10 +117,11 @@ private struct GoTestSnapshot: Snapshot {
     let sourceKind: SourceKind = .untracked
     let projectRootName = "workspace"
     let files: [String: [UInt8]]
+    let reportsMarkers: Bool
 
-    /// What GitSnapshot reports once it knows the Go markers.
+    /// What GitSnapshot reports once it knows the Go markers; today it reports none.
     var configurationPaths: [String] {
-        files.keys.filter { $0.hasSuffix("go.mod") || $0 == "go.work" }.sorted()
+        reportsMarkers ? files.keys.filter { $0.hasSuffix("go.mod") || $0 == "go.work" }.sorted() : []
     }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {

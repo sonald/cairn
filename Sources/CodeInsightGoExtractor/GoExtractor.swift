@@ -660,7 +660,7 @@ private final class GoIndexBuilder {
         // `F[int](x)` names `F`.
         if function.kind == "index_expression", let operand = function.child(namedField: "operand") {
             function = operand
-        } else if function.kind == "type_instantiation_expression" || function.kind == "generic_type",
+        } else if function.kind == "generic_type",
                   let type = function.child(namedField: "type")
         {
             function = type

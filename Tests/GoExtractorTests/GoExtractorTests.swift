@@ -130,6 +130,8 @@ func goCallsSeparateDirectMethodAndPackageQualifiedForms() throws {
         fmt.Println("x")
         c.Flags().Bool("v")
         Map[int](nil)
+        Pair[int](1, 2)
+        fmt.Wrap[int](nil)
         defer func() { cleanup() }()
     }
     """)
@@ -144,6 +146,11 @@ func goCallsSeparateDirectMethodAndPackageQualifiedForms() throws {
     #expect(try call("Println").qualifierRange.map(result.text) == "fmt")
     #expect(try call("Bool").receiverRange.map(result.text) == "c.Flags()")
     #expect(try call("Map").syntacticKind == .directCall)
+    // Explicit type arguments parse as an index or a generic type conversion.
+    #expect(try call("Pair").syntacticKind == .directCall)
+    #expect(try call("Pair").argumentCount == 2)
+    #expect(try call("Wrap").syntacticKind == .qualifiedCall)
+    #expect(try call("Wrap").qualifierRange.map(result.text) == "fmt")
     #expect(try call("Sprintf").syntacticKind == .qualifiedCall)
     // A package variable's initializer runs at package level.
     let sprintfRegion = try call("Sprintf").regionID
