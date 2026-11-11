@@ -5,7 +5,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
 </p>
 
-<p align="center">English · <a href="README.zh-CN.md">简体中文</a></p>
+<p align="center">English · <a href="README.zh-CN.md">简体中文</a> · <a href="https://cairn.sonald.me/">Cairn website</a></p>
 
 **Cairn** is a native, read-only macOS code reader for understanding unfamiliar projects. CodeInsight remains the Swift package and module name. Browse source, follow symbols and relations, and compare Git snapshots without editing files or changing your working tree or repository.
 

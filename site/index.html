@@ -3,12 +3,36 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cairn is a native, read-only code reader for macOS. Follow symbols and callers, read any Git commit without checkout, and keep your reading trail — in Rust, Python, TypeScript and TSX.">
+  <meta name="description" content="Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, and TypeScript, and browse Git commits without checkout.">
   <meta name="theme-color" content="#ece6da">
-  <title>Cairn — Find your way through code</title>
-  <meta property="og:title" content="Cairn — Unfamiliar code is terrain. Leave cairns.">
+  <title>Cairn — Open-source code reader for macOS</title>
+  <link rel="canonical" href="https://cairn.sonald.me/">
+  <meta property="og:title" content="Cairn — Open-source code reader for macOS">
+  <meta property="og:url" content="https://cairn.sonald.me/">
   <meta property="og:description" content="A native, read-only code reader for macOS. Every jump shows its evidence; every path can be walked again.">
   <meta property="og:type" content="website">
+  <meta property="og:image" content="https://cairn.sonald.me/assets/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Cairn’s macOS reader showing Rust source with files, outline and verified callers.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Cairn",
+    "description": "Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, and TypeScript, and browse Git commits without checkout.",
+    "url": "https://cairn.sonald.me/",
+    "image": "https://cairn.sonald.me/assets/og.png",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "macOS 14 or later",
+    "license": "https://github.com/sonald/cairn/blob/main/LICENSE",
+    "codeRepository": "https://github.com/sonald/cairn",
+    "downloadUrl": "https://github.com/sonald/cairn/releases",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <link rel="stylesheet" href="./style.css">
   <script src="./script.js" defer></script>
 </head>
@@ -46,8 +70,8 @@
       <main id="main">
         <section class="hero-grid" aria-labelledby="headline">
           <div>
-            <p class="eyebrow">A native, read-only code reader for macOS</p>
-            <h1 id="headline">Unfamiliar code<br>is <em>terrain.</em><br>Leave cairns.</h1>
+            <p class="eyebrow">Unfamiliar code is terrain. Leave cairns.</p>
+            <h1 id="headline">A read-only<br>code <em>reader</em><br>for macOS</h1>
             <p class="lede">Cairn marks the way through a codebase you didn’t write — symbols, callers, any commit in its history — shows the evidence for every step, and remembers the path so you can walk it again. It never edits a line.</p>
             <div class="cta">
               <a class="btn dark" href="https://github.com/sonald/cairn/releases/tag/v0.3.0">Download 0.3.0 preview <span aria-hidden="true">→</span></a>
@@ -84,7 +108,7 @@
 
         <figure class="shot">
           <a href="./assets/reader.png" aria-label="View full-size Cairn application screenshot">
-            <img src="./assets/reader.png" width="2710" height="2156" fetchpriority="high" alt="Cairn’s native macOS reader showing Rust source from knuth-rs, with Files, Outline and three Verified callers of after_tool_use.">
+            <img src="./assets/reader.webp" width="1800" height="1433" fetchpriority="high" alt="Cairn’s native macOS reader showing Rust source from knuth-rs, with Files, Outline and three Verified callers of after_tool_use.">
           </a>
           <figcaption><span>Fig. 1 — Reading <code>harness.rs</code> in knuth-rs: every caller of <code>after_tool_use</code>, verified.</span><span>Native AppKit · Swift 6</span></figcaption>
         </figure>
@@ -94,7 +118,7 @@
 
   <section class="section wrap" id="evidence" aria-labelledby="evidence-title">
     <div class="section-head">
-      <div><p class="eyebrow">01 · Follow</p><h2 id="evidence-title">Every jump shows its work.</h2></div>
+      <div><p class="eyebrow">01 · Follow</p><h2 id="evidence-title">Find callers and jump to definitions.</h2></div>
       <p>Most tools jump to <em>a</em> definition and hope. Cairn tells you who resolved it, whether the file changed since indexing — and says so plainly when it can’t know. Try it on real Rust code — pick a symbol.</p>
     </div>
 
@@ -126,7 +150,7 @@
   <section class="section time" id="time" aria-labelledby="time-title">
     <div class="wrap">
       <div class="section-head">
-        <div><p class="eyebrow">02 · Look back</p><h2 id="time-title">Read any commit.<br>Change nothing.</h2></div>
+        <div><p class="eyebrow">02 · Look back</p><h2 id="time-title">Browse Git commits<br>without checkout.</h2></div>
         <p>Every commit is a virtual snapshot. Open one and compare it side by side with the working tree — no checkout, no stash, no detached HEAD.</p>
       </div>
 
@@ -146,7 +170,7 @@
 
   <section class="section wrap" id="route" aria-labelledby="route-title">
     <div class="section-head">
-      <div><p class="eyebrow">03 · Keep your bearings</p><h2 id="route-title">Detours never cost you the way back.</h2></div>
+      <div><p class="eyebrow">03 · Keep your bearings</p><h2 id="route-title">Save and resume reading trails.</h2></div>
       <p>Reading code isn’t linear. Cairn keeps every branch of your exploration and brings it all back when the project reopens.</p>
     </div>
     <ol class="route">

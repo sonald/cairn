@@ -14,7 +14,7 @@ Open http://127.0.0.1:8765.
 
 ## Publish
 
-In the repository's **Settings → Pages**, select **GitHub Actions** as the source. After this change is merged into `main`, `pages.yml` publishes only `site/`. The expected project URL is https://sonald.github.io/cairn/ (not published by local preview).
+In the repository's **Settings → Pages**, select **GitHub Actions** as the source. The `pages.yml` workflow publishes `site/` to the configured custom domain, [cairn.sonald.me](https://cairn.sonald.me/), when changes to the site reach `main`.
 
 Workflow configuration follows [GitHub's Pages documentation](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages).
 
