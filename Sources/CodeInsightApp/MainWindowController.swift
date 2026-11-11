@@ -2434,11 +2434,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         if readingSetLayoutActive {
             if visible { readingSetRevealed.insert(id) } else { readingSetRevealed.remove(id) }
+            applyPanelLayout()
         } else {
             panelLayout.setVisible(id, visible)
+            applyPanelLayout()
+            savePanelLayout()
         }
-        applyPanelLayout()
-        savePanelLayout()
     }
 
     /// Appends the panel to another zone (title-bar menu).
