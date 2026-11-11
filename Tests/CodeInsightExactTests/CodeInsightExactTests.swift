@@ -4242,7 +4242,7 @@ private func copiedFixture(into destination: URL) throws -> URL {
     return destination
 }
 
-private func temporaryTestDirectory() throws -> URL {
+func temporaryTestDirectory() throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightExactTests-\(UUID().uuidString)",
         isDirectory: true
@@ -4364,7 +4364,7 @@ private func availableSandbox(
     }
 }
 
-private struct ProcessResult {
+struct ProcessResult {
     let status: Int32
     let output: String
 }
@@ -4378,7 +4378,7 @@ private func run(_ sandbox: Sandbox) throws -> ProcessResult {
     )
 }
 
-private func run(
+func run(
     executable: URL,
     arguments: [String],
     environment: [String: String]? = nil,
@@ -4530,7 +4530,7 @@ private func switchCheckoutSession(
     )
 }
 
-private func onlyDefinitionLocation(
+func onlyDefinitionLocation(
     _ result: ExactDefinitionQueryResult
 ) throws -> ExactLocation {
     guard case .completed(let targets) = result else {
@@ -4541,12 +4541,12 @@ private func onlyDefinitionLocation(
     return first.location
 }
 
-private enum DefinitionTestError: Error {
+enum DefinitionTestError: Error {
     case notCompleted
     case noTarget
 }
 
-private final class ExactGitFixture {
+final class ExactGitFixture {
     let root: URL
 
     init() throws {
@@ -4641,7 +4641,7 @@ private func waitUntil(
     return false
 }
 
-private enum PipeFakeRequestResponse {
+enum PipeFakeRequestResponse {
     case useDefault
     case result(Any)
     case error(code: Int, message: String)
@@ -4745,7 +4745,7 @@ private final class BatchConcurrencyProbe: @unchecked Sendable {
     }
 }
 
-private final class PipeFakeLSPServer: @unchecked Sendable {
+final class PipeFakeLSPServer: @unchecked Sendable {
     private let input: FileHandle
     private let output: FileHandle
     private let done: () -> Void
@@ -5691,7 +5691,7 @@ private func guardedSignalResult(
     }
 }
 
-private struct DirectorySnapshot: Snapshot {
+struct DirectorySnapshot: Snapshot {
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat: GitObjectFormat = .sha1
     let sourceKind: SourceKind = .untracked
@@ -5900,7 +5900,7 @@ private func switchChanges(
 }
 
 /// Polls `condition` for up to five seconds.
-private func eventually(_ condition: () -> Bool) -> Bool {
+func eventually(_ condition: () -> Bool) -> Bool {
     let deadline = Date().addingTimeInterval(5)
     while Date() < deadline {
         if condition() { return true }
