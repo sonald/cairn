@@ -43,7 +43,7 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 | --- | --- |
 | `core` | Core、Git、TreeSitterKit |
 | `reader` | ReaderCore、ReaderUI；包括部分真实 AppKit/TextKit 集成 |
-| `engine` | Engine 和 Rust/Python/TypeScript extractor |
+| `engine` | Engine 和 Rust/Python/TypeScript/Go extractor |
 | `exact` | LSP 编解码、进程、取消、版本边界 |
 | `app` | AppModel、App；包括会话、持久化、窗口和菜单集成 |
 | `full` | 所有域、静态检查、应用内部 self-test、折叠性能门禁 |

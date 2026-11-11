@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, and TypeScript, and browse Git commits without checkout.">
+  <meta name="description" content="Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, and browse Git commits without checkout.">
   <meta name="theme-color" content="#ece6da">
   <title>Cairn — Open-source code reader for macOS</title>
   <link rel="canonical" href="https://cairn.sonald.me/">
@@ -22,7 +22,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Cairn",
-    "description": "Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, and TypeScript, and browse Git commits without checkout.",
+    "description": "Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, and browse Git commits without checkout.",
     "url": "https://cairn.sonald.me/",
     "image": "https://cairn.sonald.me/assets/og.png",
     "applicationCategory": "DeveloperApplication",
@@ -77,7 +77,7 @@
               <a class="btn dark" href="https://github.com/sonald/cairn/releases/tag/v0.3.0">Download 0.3.0 preview <span aria-hidden="true">→</span></a>
               <a class="btn ghost" href="https://github.com/sonald/cairn">Read the source</a>
             </div>
-            <p class="meta">macOS 14+ · Apple silicon · Rust · Python · TypeScript · TSX · MIT</p>
+            <p class="meta">macOS 14+ · Apple silicon · Rust · Python · TypeScript · TSX · Go · MIT</p>
           </div>
 
           <button class="map" type="button" id="trail" aria-label="Replay the reading trail in knuth-rs: AgentActor::handle, handle_tool_finished, hook_context, HookRegistry::after_tool_use">
@@ -141,7 +141,7 @@
     <p class="fineprint">Real results from Cairn’s CLI and rust-analyzer on <a href="https://github.com/sonald/knuth-rs/blob/fac975a/crates/knuth-agent/src/harness.rs#L1060-L1112">sonald/knuth-rs @ fac975a</a>, Safe mode.</p>
 
     <div class="ledger">
-      <div><span class="state ok">✓ Verified · Exact</span><h3>Resolved by a language server</h3><p>Optional rust-analyzer, Pyright and typescript-language-server results carry the provider and environment that produced them.</p></div>
+      <div><span class="state ok">✓ Verified · Exact</span><h3>Resolved by a language server</h3><p>Optional rust-analyzer, Pyright, typescript-language-server and gopls results carry the provider and environment that produced them.</p></div>
       <div><span class="state warn">△ File changed since indexing</span><h3>Drift is caught before the jump</h3><p>Index-derived jumps check the target’s content identity first. If the file moved on, Cairn says so and offers Refresh Index.</p></div>
       <div><span class="state no">○ deps unavailable (offline)</span><h3>Gaps are shown, not smoothed over</h3><p>When Safe Reading Mode blocks the network, that limitation is part of the result — not a silent miss.</p></div>
     </div>
@@ -219,7 +219,7 @@
       <p class="eyebrow">Base camp</p>
       <h2 id="start-title">Start with a codebase.<br>Leave with a mental model.</h2>
       <p>Download the <a href="https://github.com/sonald/cairn/releases/tag/v0.3.0">0.3.0 preview</a> (macOS 14+, Apple silicon). It is ad‑hoc signed and not notarized, so on first launch right‑click Cairn.app and choose Open. Or build it yourself with a Swift 6 toolchain and Homebrew’s libgit2.</p>
-      <p class="langs"><span>Rust</span><span>Python</span><span>TypeScript</span><span>TSX</span></p>
+      <p class="langs"><span>Rust</span><span>Python</span><span>TypeScript</span><span>TSX</span><span>Go</span></p>
       <a class="guide" href="https://github.com/sonald/cairn#build-and-run">Read the build guide <span aria-hidden="true">↗</span></a>
     </div>
     <pre class="term" aria-label="Commands to clone, build and open Cairn"><span class="c"># clone, build, open</span>
