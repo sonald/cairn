@@ -10,7 +10,7 @@
 | CodeInsightGit | Git 对象读取、工作区捕获与不可变快照。见 [GitSnapshot](../Sources/CodeInsightGit/GitSnapshot.swift)。 |
 | TreeSitterKit、各语言 Extractor | 语法树访问和语言事实提取；抽取器输出纯模型，不操作 UI。 |
 | CodeInsightEngine | 内容索引、SQLite 缓存、语言路由、候选解析、搜索与类型直达。见 [EngineSession](../Sources/CodeInsightEngine/EngineSession.swift)、[Resolver](../Sources/CodeInsightEngine/Resolver.swift)。每门语言的分析单元根与 profile 由 [ProfileDetector](../Sources/CodeInsightEngine/ProfileDetector.swift) 从 marker 文件推出。 |
-| CodeInsightExact | 子进程/LSP、provider、沙箱与信任。见 [ExactProvider](../Sources/CodeInsightExact/ExactProvider.swift)、[Sandbox](../Sources/CodeInsightExact/Sandbox.swift)；历史 commit 的检出目录是 CodeInsightGit 的 [CheckoutRoot](../Sources/CodeInsightGit/CheckoutRoot.swift)。三种语言服务器共用 [LSPLanguageSession](../Sources/CodeInsightExact/LSPLanguageSession.swift)；语言差异（请求前等待与重试、诊断驱动的环境、能力推导、启动条件、`languageId`）是 `LSPLanguageSpec` 的策略点，可执行文件约束与启动配置留在各 provider。新增 LSP 行为改共享会话，不在 provider 里复制会话代码。 |
+| CodeInsightExact | 子进程/LSP、provider、沙箱与信任。见 [ExactProvider](../Sources/CodeInsightExact/ExactProvider.swift)、[Sandbox](../Sources/CodeInsightExact/Sandbox.swift)；历史 commit 的检出目录是 CodeInsightGit 的 [CheckoutRoot](../Sources/CodeInsightGit/CheckoutRoot.swift)。各语言服务器共用 [LSPLanguageSession](../Sources/CodeInsightExact/LSPLanguageSession.swift)；语言差异（请求前等待与重试、诊断驱动的环境、能力推导、启动条件、`languageId`）是 `LSPLanguageSpec` 的策略点，可执行文件约束与启动配置留在各 provider。新增 LSP 行为改共享会话，不在 provider 里复制会话代码。 |
 | CodeInsightReaderCore | Reader 源文档、UTF-8/UTF-16 转换、投影、折叠、阅读规划、字体偏好和派生数据；不导入 AppKit/SwiftUI。 |
 | CodeInsightAppModel | 项目与阅读状态、异步 Exact 协调、Context/Relations、轨迹、书签和会话保存；不导入 AppKit/SwiftUI。 |
 | CodeInsightReaderUI | AppKit/TextKit 2 渲染、原生选择/复制、重排、坐标命中与装饰。`ReaderTextView` 本体在 [CodeInsightReaderUI.swift](../Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift)；其五个区域（概览标尺、同名高亮、括号匹配、块尾注释、重排视口）共享私有状态，留在同一文件。折叠附件、标尺、点击视图与渲染属性协调器各自一个文件。 |
@@ -25,7 +25,7 @@
 
 语言集合是快照的输出：`Snapshot.languages` 由捕获路径按后缀计算（符号链接与 gitlink 不计），只有工作区捕获会写入 `AppModel.projectLanguages`，commit 沿用当前集合。其余分类（session 路由、manifest 的 `detectedLanguage`、首帧覆盖计数）都按当前集合进行，所以 commit 中多出的语言是非源码预览，而不是没有 session 的源码。`ProjectIndexer.prepareSnapshots` 每个快照只读一遍文件、建一份 manifest，每门语言一个 `PreparedSnapshot`（提取单位），其中每个分析单元一个 session，共享同一 store 和同一次提取。`completeSnapshot` 在没有待提取或待装入的内容、且共享 store 自首帧会话建成后没有增长时直接返回首帧会话，否则为每个单元重建。单元划分见 [product.md](product.md)“项目、快照与窗口”：有 marker 目录包含该语言全部源码时取最浅的那个，否则每个源码归入最深的 marker 祖先或项目根。`ProjectIndexer.unitSessions` 每门语言把 manifest 走一遍，每个源码沿自身祖先目录查单元根表，交给最深的那个单元的 `SnapshotView`（代价与单元数无关），所以同一语言内每个文件恰好属于一个单元，各单元合起来就是全部源码；manifest 仍是整个快照，但项目文本搜索只扫 session 自己的活动文件（`SnapshotContentSource.searchIncludes`），所以多单元不会把同一命中列两次。Exact 的 profile 前缀等于所在单元根。`AnalysisProfileID` 不含单元路径，同一语言两个单元身份相同时整门语言回退为一个项目根单元。
 
-`DeclarationFacet.visibility`（`public`/`restricted`/`private`，`nil` 为不适用）记录声明处的句法修饰，由三个抽取器写入、随缓存行持久化，不判断外部可达性。`EngineSession.projectSymbols` 按 `SnapshotView` 活动文件把以内容为键的索引展开成每文件一行，附 `ModuleMap.modulePath`/`crateRoot`；项目符号面板（`ProjectSymbolsPanelModel`，CLI `symbols`）只读这份列表，不重新解析、不发 Exact 请求，多 session 结果中任一个抛错即整次作废。
+`DeclarationFacet.visibility`（`public`/`restricted`/`private`，`nil` 为不适用）记录声明处的句法修饰，由各语言抽取器写入、随缓存行持久化，不判断外部可达性。`EngineSession.projectSymbols` 按 `SnapshotView` 活动文件把以内容为键的索引展开成每文件一行，附 `ModuleMap.modulePath`/`crateRoot`；项目符号面板（`ProjectSymbolsPanelModel`，CLI `symbols`）只读这份列表，不重新解析、不发 Exact 请求，多 session 结果中任一个抛错即整次作废。
 
 `CommitSnapshot` 捕获时，同一仓库（按 `.git` 目录与对象格式区分）最近一次仍存活的 commit 快照里已有的 blob（按对象 ID）直接取其字节与 content ID，不再读取和哈希；登记只持弱引用，不延长任何快照的生命周期；gitlink 不走复用，文件模式总取当前树条目的。`SnapshotManifest` 将路径与捕获内容关联；worktree 的 dirty/untracked 字节在捕获时固化，读不出来的文件被跳过并以 `unreadablePathCount` 计数（未知为 nil，不伪造为零）。历史读取与搜索应使用快照内容，不能一边展示 commit、一边从实时磁盘解析。持久化缓存损坏或版本不匹配时重建，不把旧结构解码成新事实。
 
@@ -40,6 +40,8 @@
 提取事实区分 declaration facet、scope、binding、调用位置及执行区域。函数之外的类体/模块体也可能有调用；相同名字不证明是同一目标。当前解析策略与范围以 [Resolver](../Sources/CodeInsightEngine/Resolver.swift) 和语言抽取器为准，不复制早期编译器级 resolver 路线图。
 
 Rust 枚举变体、`macro_rules!` 和 Python 模块级变量也是 declaration facet，但全局按名称兜底只在各自的语法位置收它们：宏只回答宏调用（不展开）；变体只回答限定名恰为所属枚举（或 `Self`）的 `Enum::Variant`，此时只给变体，所以标准库 `Some` 不会落到项目里同名的变体；Python 模块变量只经同文件作用域或 import 到达，不从别的文件按名字兜底。
+
+Go 按“目录即包”解析：[ModuleMap](../Sources/CodeInsightEngine/ModuleMap.swift) 把同一目录、同一 `package` 名的文件当作一个包（外部测试包 `x_test` 另算一个），包的导入路径是最近 `go.mod` 的 module 路径加相对目录；`go.work` 让整个工作区成为一个单元，其中每个 `go.mod` 各自给出 module 路径。`Resolver` 让同包文件不经 import 互相可见；`pkg.F` 在导入包的全部文件里找 `F`；导入路径不在本单元任何模块内（标准库、第三方）时不解析，交给 Exact。接收者方法没有父 facet，所属类型记在方法自己的 `ImplRelation` 上（`implFacetIndex` 指向方法本身，`typeNameID` 是接收者的基础类型名）：`x.M()` 在 `x` 的类型可知时按接收者找方法，否则按方法名回退；项目符号的 `receiverTypeName` 与 DiffCore 的函数键都从这条关系读所属类型。
 
 解析候选的确定性、分派方式、来源、完整性独立。正向 provider 结果、不可用环境、未开始/进行中/空结果也是不同事实；取消和 stale 是控制流，不作为语义观察。
 

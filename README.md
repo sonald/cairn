@@ -9,16 +9,16 @@
 
 **Cairn** is a native, read-only macOS code reader for understanding unfamiliar projects. CodeInsight remains the Swift package and module name. Browse source, follow symbols and relations, and compare Git snapshots without editing files or changing your working tree or repository.
 
-- Rust, Python, and TypeScript/TSX syntax indexing, symbol search, and composable project queries.
+- Rust, Python, TypeScript/TSX, and Go syntax indexing, symbol search, and composable project queries.
 - A Context window that follows symbols or the enclosing function, previews binding types, and can be pinned.
-- Optional rust-analyzer, Pyright, and typescript-language-server analysis, with explicit sources and limitations.
+- Optional rust-analyzer, Pyright, typescript-language-server, and gopls analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
 - Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes plus bundled and user-supplied base16 themes, and English/Simplified Chinese UI.
 - Read-only Markdown, Jupyter notebook, restricted HTML, image, PDF, and UTF-8 text previews; configuration, scripts, and unanalyzed languages such as C/C++, Java, Go, and JS are syntax-colored.
 
 Exact analysis of a past commit runs in a checkout directory Cairn owns (one per window, deleted when the window closes) and borrows the workspace's `node_modules` and virtual environment; language servers follow commit switches without restarting when nothing but the commit and configuration content changed.
 
-Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally. When dependencies are missing, clicking the Exact status shows the install command for the unit; for a Rust project with a `Cargo.lock`, Download Dependencies runs `cargo fetch --locked` — the only network access Cairn makes, and only on that click. TypeScript and Python installs run package scripts, so Cairn copies the command and opens Terminal instead of running them.
+Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally. When dependencies are missing, clicking the Exact status shows the install command for the unit; for a Rust project with a `Cargo.lock`, Download Dependencies runs `cargo fetch --locked`, and for a Go module with a `go.sum` and no `vendor/` it runs `go mod download` against a copy of the manifests outside the repository — the only network access Cairn makes, and only on that click. TypeScript and Python installs run package scripts, so Cairn copies the command and opens Terminal instead of running them.
 
 ## Build and run
 
@@ -41,7 +41,7 @@ Packaging defaults to ad-hoc signing. Developer ID signing, notarization, and st
 
 ## Start reading
 
-1. Open a project; Cairn detects its Rust, Python, and TypeScript sources (a project with none, such as a pure C repository, opens browse-only: file tree and colored previews, no analysis). `⌘P` finds files; prefix with `>` for commands, `@` for file symbols, `#` for project symbols, or `:` for a line. Click a name in the file outline to jump to it, including Python module-level constants and variables. `⌃⌘S` lists every declaration in the project by kind or module without typing a name.
+1. Open a project; Cairn detects its Rust, Python, TypeScript, and Go sources (a project with none, such as a pure C repository, opens browse-only: file tree and colored previews, no analysis). `⌘P` finds files; prefix with `>` for commands, `@` for file symbols, `#` for project symbols, or `:` for a line. Click a name in the file outline to jump to it, including Python module-level constants and variables. `⌃⌘S` lists every declaration in the project by kind or module without typing a name.
 2. Click a symbol to update Context. For a binding, Context can show its type; `⌘`-click still opens the binding declaration, while `⇧⌘`-click or `⌃⌘J` opens its type. When the index has no declaration, stops at the import of the clicked name, or does not know the identifier at all, `⌘`-click opens the language server's definition, including dependency files, once Exact analysis is ready. Clicking the receiver in `ps.get()` selects `ps`; clicking `get` selects the method.
 3. Follow Relations and inspect the evidence behind a result. Freeze a result or trail as a Reading Set to preserve source and explanations.
 4. Reopen the project to restore its reading session. A new project gets its own window; reopening an already-open project activates that window.

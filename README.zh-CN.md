@@ -9,16 +9,16 @@
 
 **Cairn** 是 macOS 原生只读代码阅读器，用来理解陌生项目。CodeInsight 保留为 Swift package 和模块名。可以阅读源码、追踪符号与关系、比较 Git 快照，不编辑文件，也不改动你的工作区与仓库。
 
-- Rust、Python、TypeScript/TSX 语法索引、符号与可组合项目查询。
+- Rust、Python、TypeScript/TSX、Go 语法索引、符号与可组合项目查询。
 - 跟随符号或所在函数的 Context 窗口，支持值绑定的类型预览与固定。
-- 可选 rust-analyzer、Pyright、typescript-language-server 分析，明确显示来源和限制。
+- 可选 rust-analyzer、Pyright、typescript-language-server、gopls 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
 - 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题及随附与自选的 base16 主题、中英文界面。
 - 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览；配置、脚本，以及 C/C++、Java、Go、JS 等未分析语言按语法着色。
 
 历史 commit 的精确分析在 Cairn 自有的检出目录中进行（每个窗口一份，关窗即删），并借用工作区的 `node_modules` 与虚拟环境；切换 commit 时若只有 commit 与配置内容变化，语言服务器原地跟随而不重启。
 
-默认 Safe 模式禁止网络，关闭 Rust 构建脚本与 proc macros。用户明确信任项目后可以开启这些分析步骤，并允许向项目 `target` 目录写入，网络仍关闭。语言服务和依赖需已存在于本机。缺少依赖时，点状态栏的精确分析会给出当前分析单元的安装命令；有 `Cargo.lock` 的 Rust 项目可点“下载依赖”运行 `cargo fetch --locked`，这是 Cairn 唯一的联网，且只在这一点击时发生。TypeScript 与 Python 的安装会运行包脚本，Cairn 只复制命令并打开终端，不代为执行。
+默认 Safe 模式禁止网络，关闭 Rust 构建脚本与 proc macros。用户明确信任项目后可以开启这些分析步骤，并允许向项目 `target` 目录写入，网络仍关闭。语言服务和依赖需已存在于本机。缺少依赖时，点状态栏的精确分析会给出当前分析单元的安装命令；有 `Cargo.lock` 的 Rust 项目可点“下载依赖”运行 `cargo fetch --locked`；有 `go.sum`、没有 `vendor/` 的 Go 模块则对仓库外的清单副本运行 `go mod download`。这是 Cairn 唯一的联网，且只在这一点击时发生。TypeScript 与 Python 的安装会运行包脚本，Cairn 只复制命令并打开终端，不代为执行。
 
 ## 构建与运行
 
@@ -41,7 +41,7 @@ bash scripts/make-app.sh
 
 ## 开始阅读
 
-1. 打开项目，Cairn 自动识别其中的 Rust、Python、TypeScript 源码（一个都没有的项目，如纯 C 仓库，以只浏览方式打开：文件树和着色预览，不做分析）。`⌘P` 查找文件；前缀 `>`、`@`、`#`、`:` 分别查询命令、文件符号、项目符号和行号。单击文件大纲中的符号即可跳转，Python 的模块级常量和变量也可这样定位。`⌃⌘S` 不输入名字即可按种类或模块浏览整个项目的声明。
+1. 打开项目，Cairn 自动识别其中的 Rust、Python、TypeScript、Go 源码（一个都没有的项目，如纯 C 仓库，以只浏览方式打开：文件树和着色预览，不做分析）。`⌘P` 查找文件；前缀 `>`、`@`、`#`、`:` 分别查询命令、文件符号、项目符号和行号。单击文件大纲中的符号即可跳转，Python 的模块级常量和变量也可这样定位。`⌃⌘S` 不输入名字即可按种类或模块浏览整个项目的声明。
 2. 单击符号更新 Context。值绑定可以预览其类型；`⌘` 单击仍打开绑定声明，`⇧⌘` 单击或 `⌃⌘J` 打开类型。索引里没有声明、只解析到被点名字的导入、或根本不认识该标识符时，精确分析就绪后 `⌘` 单击打开语言服务器给出的定义，包括依赖文件。`ps.get()` 中点 `ps` 解析接收者，点 `get` 才解析方法。
 3. 从 Relations 继续阅读，并查看结果的来源与验证证据。冻结结果或轨迹为阅读集，保存源码与解释。
 4. 重新打开项目恢复阅读现场。新项目拥有自己的窗口；再次打开已打开的项目会激活其窗口。
