@@ -188,7 +188,7 @@ func goReaderRolesOutlineAndLocalScopesFollowGoSemantics() throws {
         	case "a":
         		s.Count = len(local)
         	}
-        	cfg := Config{Name: local, Count: n}
+        	cfg := Config{value: local, Count: n}
         	return str.Count(cfg.Name, "x"), nil
         }
         """#
@@ -214,9 +214,9 @@ func goReaderRolesOutlineAndLocalScopesFollowGoSemantics() throws {
     #expect(role("local", within: "Sscan(local)", source: source, spans: result.spans) == .localBinding)
     #expect(role("err", within: "n, err = fmt", source: source, spans: result.spans) == .parameter)
     #expect(role("err", within: "err != nil", source: source, spans: result.spans) == .localBinding)
-    #expect(role("Name", within: "Config{Name", source: source, spans: result.spans) == nil,
-            "a struct literal key names a field, not a local")
-    #expect(role("local", within: "Name: local", source: source, spans: result.spans) == .localBinding)
+    #expect(role("value", within: "Config{value", source: source, spans: result.spans) == nil,
+            "a struct literal key names a field, not the `value` parameter")
+    #expect(role("local", within: "value: local", source: source, spans: result.spans) == .localBinding)
     let ifScoped = try #require(result.bindings.indices.first { index in
         result.bindings[index].kind == .letBinding
             && result.bindings[index].declarationRange.lowerBound
