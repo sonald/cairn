@@ -806,7 +806,7 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
     let files = [
         "src/lib.rs": "fn lib() {}\n",
         "src/api.pb.rs": "fn generated() {}\n",
-        "vendor/dep/lib.rs": "fn dep() {}\n",
+        "third_party/dep/lib.rs": "fn dep() {}\n",
         "build/gen/schema.rs": "fn schema() {}\n",
         "target/debug/out.rs": "fn out() {}\n",
     ]
@@ -817,22 +817,22 @@ func projectRulesPruneWorktreeAndFilterCommitWithoutHidingTrackedBuiltInDirector
     }
     try fixture.git("add", "-A", "-f")
     try fixture.commit("fixture")
-    let rules = ProjectPathRules(lines: ["vendor/", "*.pb.rs", "!build/"])
+    let rules = ProjectPathRules(lines: ["third_party/", "*.pb.rs", "!build/"])
 
     let worktree = try WorktreeSnapshot(repositoryURL: fixture.root, pathRules: rules)
     #expect(Set(worktree.listFiles().map(\.path)) == ["src/lib.rs", "build/gen/schema.rs"])
-    #expect(worktree.ruleExcludedPaths == ["src/api.pb.rs", "vendor"],
+    #expect(worktree.ruleExcludedPaths == ["src/api.pb.rs", "third_party"],
             "a pruned directory is reported once; built-in skips are not listed")
 
     let commit = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD", pathRules: rules)
     #expect(Set(commit.listFiles().map(\.path))
         == ["src/lib.rs", "build/gen/schema.rs", "target/debug/out.rs"],
         "tracked files under built-in skipped directories stay visible in commits")
-    #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "vendor"], "counted like the worktree walk")
+    #expect(commit.ruleExcludedPaths == ["src/api.pb.rs", "third_party"], "counted like the worktree walk")
 
     let unruled = try WorktreeSnapshot(repositoryURL: fixture.root)
     #expect(Set(unruled.listFiles().map(\.path))
-        == ["src/lib.rs", "src/api.pb.rs", "vendor/dep/lib.rs"], "no rules keeps the built-in behavior")
+        == ["src/lib.rs", "src/api.pb.rs", "third_party/dep/lib.rs"], "no rules keeps the built-in behavior")
 }
 
 @Test
