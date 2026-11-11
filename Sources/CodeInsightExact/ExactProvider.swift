@@ -195,7 +195,18 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .javascript, .go:
+        case .go:
+            let fingerprints = goConfigIdentity { path in
+                try? [UInt8](Data(
+                    contentsOf: root.appendingPathComponent(path),
+                    options: .mappedIfSafe
+                ))
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -254,7 +265,15 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .javascript, .go:
+        case .go:
+            let fingerprints = goConfigIdentity { path in
+                try? snapshot.readBytes(path: prefixed(path))
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -288,9 +307,9 @@ public struct ExactProfileKey: Hashable, Sendable {
         _ language: LanguageID
     ) throws {
         switch language {
-        case .rust, .python, .typescript:
+        case .rust, .python, .typescript, .go:
             return
-        case .javascript, .go:
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
