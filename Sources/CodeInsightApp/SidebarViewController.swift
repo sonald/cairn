@@ -809,7 +809,7 @@ final class SidebarViewController: NSViewController,
         let symbol: String
         if node.isDirectory {
             symbol = "folder"
-        } else if LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript]) != nil {
+        } else if LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript, .go]) != nil {
             symbol = "curlybraces"
         } else {
             symbol = switch node.url.pathExtension.lowercased() {
@@ -828,10 +828,11 @@ final class SidebarViewController: NSViewController,
 
     private func fileIconColor(for node: FileTreeNode) -> NSColor {
         guard !node.isDirectory else { return theme.chromeSecondaryColor }
-        return switch LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript])?.language {
+        return switch LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript, .go])?.language {
         case .rust: theme.color(for: .string)
         case .python: theme.color(for: .number)
         case .typescript: theme.color(for: .functionName)
+        case .go: theme.color(for: .typeName)
         default: theme.chromeSecondaryColor
         }
     }

@@ -115,6 +115,7 @@
 "model.exact.sandboxMissing" = "安全精确分析已禁用：sandbox-exec 不可用";
 "model.exact.terminating" = "应用正在退出";
 "model.exact.typescriptMissing" = "未安装 typescript-language-server";
+"model.exact.goplsMissing" = "未安装 gopls";
 "model.exact.unsupportedLanguage" = "精确分析不支持 %@";
 "model.inspector.capturedAt" = "捕获时间";
 "model.inspector.conflict" = "验证冲突";

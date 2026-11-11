@@ -555,6 +555,8 @@ private func configurationLanguage(for name: String) -> LanguageID? {
         return .python
     case "tsconfig.json", "package.json", "bun.lockb":
         return .typescript
+    case "go.mod", "go.sum", "go.work", "go.work.sum":
+        return .go
     default:
         return nil
     }

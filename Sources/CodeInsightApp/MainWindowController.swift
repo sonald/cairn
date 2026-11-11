@@ -3460,7 +3460,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 localizedFormat("main.trust", trust ?? localized("main.unknown")),
                 localizedFormat("main.limitations", limitationMeaning),
             ]
-            if model.activeAnalysisProfileDisplay?.language != .python {
+            // Only Rust and TypeScript sessions carry a feature selection.
+            if ![.python, .go].contains(model.activeAnalysisProfileDisplay?.language) {
                 lines.append(
                     localizedFormat("main.features", Self.displayName(for: attribution.featureSelection))
                 )
@@ -3989,9 +3990,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// JavaScript and others open no card.
     private func hoverToken(for request: ReaderHoverRequest) -> SymbolHoverModel.Token? {
         switch request.document.languageMode.language {
-        case .rust, .python, .typescript:
+        case .rust, .python, .typescript, .go:
             break
-        case .javascript, .go:
+        case .javascript:
             return nil
         }
         guard let path = projectPath(for: request.file)

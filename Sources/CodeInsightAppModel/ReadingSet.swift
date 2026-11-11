@@ -629,6 +629,7 @@ private func frozenReadinessReason(_ reason: String, language: String?) -> Strin
     // Only application-owned fixed reasons are translated; tool diagnostics stay verbatim.
     let keys = [
         "model.exact.noProject", "model.exact.pyrightMissing", "model.exact.typescriptMissing",
+        "model.exact.goplsMissing",
         "model.exact.rustMissing", "model.exact.terminating", "model.exact.revoking",
         "model.exact.maintenance", "model.exact.sandboxMissing", "model.exact.closed",
         "model.exact.revoked", "model.exact.cacheCleared",

@@ -77,11 +77,12 @@ public struct ExactOverlay: Sendable {
         /// Cargo.lock hash, which rust-analyzer reloads like Cargo.toml (S0
         /// item 4), so it does not count. `analysisProfileID` is derived
         /// from the configuration fingerprint, so the unit is compared by
-        /// the caller.
+        /// the caller. Go's is the checksum files, which gopls reloads with
+        /// `go.mod` (measured in docs/evidence/go-feasibility-2026-11).
         func allowsWarmSwitch(to next: ReuseKey) -> Bool {
             language == next.language
                 && featureSelection == next.featureSelection
-                && (language == .rust
+                && (language == .rust || language == .go
                     || environmentFingerprint == next.environmentFingerprint)
                 && trustMode == next.trustMode
                 && toolVersion == next.toolVersion
@@ -333,14 +334,15 @@ public final class ExactCoordinator {
         coldStartNextPrepare = true
     }
 
-    /// How to install the active unit's missing dependencies. Rust fetches
-    /// against the analyzed directory (a commit's checkout carries its own
-    /// `Cargo.lock`); TypeScript and Python install into the workspace unit,
-    /// which a commit borrows from.
+    /// How to install the active unit's missing dependencies. Rust and Go
+    /// fetch against the analyzed directory (a commit's checkout carries its
+    /// own `Cargo.lock`/`go.sum`); TypeScript and Python install into the
+    /// workspace unit, which a commit borrows from.
     public var dependencySetup: DependencySetup? {
         guard let active else { return nil }
         let language = active.key.language
-        let root = language == .rust ? active.serverDirectory : active.workspaceRoot
+        let root = language == .rust || language == .go
+            ? active.serverDirectory : active.workspaceRoot
         return DependencySetup.suggestion(
             language: language,
             unitRoot: profileRootURL(workspaceRoot: root, prefix: active.profilePrefix)
@@ -2006,9 +2008,9 @@ private func isSandboxUnavailable(_ error: any Error) -> Bool {
 
 private func validateExactLanguage(_ language: LanguageID) throws {
     switch language {
-    case .rust, .python, .typescript:
+    case .rust, .python, .typescript, .go:
         return
-    case .javascript, .go:
+    case .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
@@ -2100,12 +2102,12 @@ private func validateProfile(
             && profile.featureSelection == analysisProfile.featureSelection
     case .rust:
         matches = profile.featureSelection == analysisProfile.featureSelection
-    case .typescript:
+    case .typescript, .go:
         matches = profile.configFingerprint == analysisProfile.configFingerprint
             && profile.environmentFingerprint
                 == analysisProfile.environmentFingerprint
             && profile.featureSelection == analysisProfile.featureSelection
-    case .javascript, .go:
+    case .javascript:
         matches = false
     }
     guard matches else {

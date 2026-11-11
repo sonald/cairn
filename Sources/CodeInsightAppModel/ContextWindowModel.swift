@@ -2096,6 +2096,7 @@ private func dependencyCrateName(_ path: String) -> String? {
     let ancestors = Array(
         URL(fileURLWithPath: path).pathComponents.dropLast()
     )
+    if let module = goModuleCachePath(ancestors) { return module }
     let isCargoRegistry = ancestors.indices.contains { index in
         index + 1 < ancestors.count
             && ancestors[index] == "registry"
@@ -2114,6 +2115,26 @@ private func dependencyCrateName(_ path: String) -> String? {
         return String(component[..<version.lowerBound])
     }
     return nil
+}
+
+/// `…/pkg/mod/github.com/spf13/pflag@v1.0.9/…` → `github.com/spf13/pflag`.
+/// The cache spells an upper-case letter as `!` plus its lower case.
+private func goModuleCachePath(_ ancestors: [String]) -> String? {
+    guard let versioned = ancestors.lastIndex(where: { $0.contains("@v") }),
+          let mod = ancestors[..<versioned].lastIndex(of: "mod"),
+          mod > 0, ancestors[mod - 1] == "pkg"
+    else { return nil }
+    let last = ancestors[versioned]
+    let name = last[..<last.range(of: "@v")!.lowerBound]
+    let escaped = (ancestors[(mod + 1)..<versioned] + [String(name)]).joined(separator: "/")
+    var module = ""
+    var upper = false
+    for character in escaped {
+        if character == "!" { upper = true; continue }
+        module.append(upper ? Character(character.uppercased()) : character)
+        upper = false
+    }
+    return module
 }
 
 private func loadReaderDocument(
@@ -2144,7 +2165,7 @@ private func exactProvenanceBadge(
     case .materialized(let commitOID):
         localizedFormat("model.context.materialized", String(commitOID.prefix(7)))
     }
-    let featureDetail: String? = if language == .python {
+    let featureDetail: String? = if language == .python || language == .go {
         nil
     } else {
         switch attribution.featureSelection {

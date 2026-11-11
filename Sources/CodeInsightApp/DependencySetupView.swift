@@ -114,14 +114,15 @@ final class DependencySetupView: NSView {
         let fetchedHere = fetch == .finished(setup.directory)
         failure.stringValue = if case let .failed(reason) = fetch { reason } else { "" }
         failure.isHidden = failure.stringValue.isEmpty
+        let go = setup.command.hasPrefix("go ")
         if !setup.runsInApp {
-            note.stringValue = localized(setup.command.hasPrefix("cargo")
-                ? "main.deps.note.unlocked" : "main.deps.note.terminal")
+            note.stringValue = localized(setup.command.hasPrefix("cargo") ? "main.deps.note.unlocked"
+                : go ? "main.deps.note.unlocked.go" : "main.deps.note.terminal")
             actionButton.title = localized("main.deps.open.terminal")
         } else if fetchedHere {
-            note.stringValue = localized("main.deps.note.remaining")
+            note.stringValue = localized(go ? "main.deps.note.remaining.go" : "main.deps.note.remaining")
         } else {
-            note.stringValue = localized("main.deps.note.fetch")
+            note.stringValue = localized(go ? "main.deps.note.fetch.go" : "main.deps.note.fetch")
             actionButton.title = localized(running ? "main.deps.fetching"
                 : fetch == nil ? "main.deps.fetch" : "main.deps.retry")
         }

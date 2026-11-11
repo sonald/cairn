@@ -870,4 +870,7 @@
 "main.deps.note.fetch" = "Download Dependencies is the one time Cairn uses the network: it downloads the crates in Cargo.lock into ~/.cargo, runs no project code and leaves the repository untouched. Analysis restarts when it finishes.";
 "main.deps.note.unlocked" = "The repository has no Cargo.lock and this command would create one, so Cairn does not run it. Run it yourself in Terminal.";
 "main.deps.note.terminal" = "Installing runs the packages' own scripts and writes into the repository, so run it yourself in Terminal. Cairn checks again when you come back.";
+"main.deps.note.fetch.go" = "Download Dependencies is the one time Cairn uses the network: it downloads the modules in go.sum into the Go module cache, runs no project code and leaves the repository untouched (it works on a copy of go.mod and go.sum). Analysis restarts when it finishes.";
+"main.deps.note.unlocked.go" = "The repository has no go.sum and this command would create one, so Cairn does not run it. Run it yourself in Terminal.";
+"main.deps.note.remaining.go" = "The modules are downloaded, but analysis still reports a gap. The repository's go.sum may be incomplete or go.mod may require a newer Go; the status details show go's own message.";
 "main.deps.note.remaining" = "The project's dependencies are downloaded, but analysis still reports a gap, most likely in the Rust standard library's own dependencies; your project's code is unaffected.";

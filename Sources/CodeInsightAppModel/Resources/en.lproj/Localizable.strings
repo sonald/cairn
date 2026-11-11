@@ -115,6 +115,7 @@
 "model.exact.sandboxMissing" = "Safe exact disabled: sandbox-exec unavailable";
 "model.exact.terminating" = "application terminating";
 "model.exact.typescriptMissing" = "typescript-language-server is not installed";
+"model.exact.goplsMissing" = "gopls is not installed";
 "model.exact.unsupportedLanguage" = "Exact analysis does not support %@";
 "model.inspector.capturedAt" = "Captured at";
 "model.inspector.conflict" = "VERIFICATION CONFLICT";
