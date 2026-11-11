@@ -534,7 +534,16 @@ func launchSelfTestIfRequested(
         } else if let nonSourceSelfTestRoot {
             delegate.runNonSourceSelfTest(root: nonSourceSelfTestRoot)
         } else {
-            app.run()
+            // A self-test argument no channel accepted (unknown name or a
+            // missing value) must not fall through to a normal launch.
+            let requested = arguments.filter {
+                $0.hasPrefix("--self-test") || $0.hasPrefix("--fold-perf")
+            }
+            FileHandle.standardError.write(Data((
+                "codeinsight-app: unrecognised self-test arguments: "
+                    + requested.joined(separator: " ") + "\n"
+            ).utf8))
+            Darwin.exit(2)
         }
     }
     return true
@@ -817,12 +826,13 @@ extension AppDelegate {
         enlargedWindowGeometry: [String: Double]
     ) {
         do {
+            var checks = checks
+            checks["idleFootprintUnderBudget"] =
+                idleFootprintMB < SelfTestBudgets.idleFootprintMB
             let passed = checks.values.allSatisfy { $0 }
             var object: [String: Any] = checks
             object["coldStartMS"] = coldStartMS
             object["idleFootprintMB"] = idleFootprintMB
-            object["idleFootprintUnderBudget"] =
-                idleFootprintMB < SelfTestBudgets.idleFootprintMB
             object["idleFootprintWindowStyle"] = "borderless"
             object["toolbarAssertionsWindowStyle"] = "titled"
             object["enlargedWindowGeometry"] = enlargedWindowGeometry

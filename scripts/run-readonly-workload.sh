@@ -83,8 +83,10 @@ for entry in manifest['fixtures']:
     reports.append({'fixture': entry['path'], 'result': value})
 statuses = {report['result']['status'] for report in reports}
 status = 'pass' if statuses == {'pass'} and sys.argv[3] == '0' else 'blocked' if statuses == {'blocked'} else 'fail'
-result = dict(schemaVersion=1, status=status, reports=reports)
+# NOT_RUN scenarios are not passes: count them beside the status.
+not_run = sum(report['result'].get('notRunCount', 0) for report in reports)
+result = dict(schemaVersion=1, status=status, notRunCount=not_run, reports=reports)
 (root / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
-print(f'readonly workload: {status}; {root / "result.json"}')
+print(f'readonly workload: {status}; NOT_RUN scenarios: {not_run}; {root / "result.json"}')
 sys.exit(0 if status == 'pass' else 2 if status == 'blocked' else 1)
 PY

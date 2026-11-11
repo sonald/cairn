@@ -228,6 +228,11 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
             reader.setFoldGutterHoverForTesting(nil)
         }
         if (suite == "all" || suite == "gutter"), hoverHits == 0 {
+            // A hover pass that hit no handle measured nothing: not a PASS.
+            if let index = events.lastIndex(where: { $0["scenario"] as? String == "hover" }) {
+                events[index]["status"] = "not_run"
+                events[index]["reason"] = "No visible fold handle was hit"
+            }
             events.append(["scenario": "hover-hit", "status": "not_run", "reason": "No visible fold handle was hit"])
         }
         if let fold = document.foldRegions.first(where: { $0.summary.hiddenLineCount >= 2 }),
@@ -323,8 +328,26 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                             "maximumLineByteLengthIncludingTerminator": cost.maximumLineByteLength,
                             "highlightSpanCount": cost.highlightSpanCount, "foldRegionCount": cost.foldRegionCount]
         } else { documentCost = ["status": "unavailable"] }
+        // NOT_RUN scenarios never count as PASS: they are listed, and a
+        // selected suite that passed none of its own scenarios says so. The
+        // top-level status keeps its pass/blocked meaning for the runner.
+        let notRun = events.filter { ($0["status"] as? String) == "not_run" }.map {
+            ["scenario": $0["scenario"] ?? "", "reason": $0["reason"] ?? ""]
+        }
+        for item in notRun {
+            FileHandle.standardError.write(Data("readonly workload NOT_RUN: \(item["scenario"] ?? "") — \(item["reason"] ?? "")\n".utf8))
+        }
+        let blocked = events.contains { ($0["status"] as? String) == "blocked" }
+        let suitePassed = suite == "all" || events.contains {
+            ($0["status"] as? String) == "pass"
+                && suites[suite]?.contains($0["scenario"] as? String ?? "") == true
+        }
+        if !suitePassed {
+            FileHandle.standardError.write(Data("readonly workload NOT_RUN: suite \(suite) passed none of its own scenarios\n".utf8))
+        }
         finish([
-            "schemaVersion": 1, "status": events.contains { ($0["status"] as? String) == "blocked" } ? "blocked" : "pass",
+            "schemaVersion": 1, "status": blocked ? "blocked" : "pass",
+            "notRunScenarios": notRun, "notRunCount": notRun.count, "selectedSuiteRan": suitePassed,
             "captureOnly": true, "suite": option("--suite") ?? "all", "fixture": path,
             "preparationMs": preparationMs, "hoverHitCount": hoverHits,
             "sourceLineCount": document.lineTable.lineStarts.count, "documentCost": documentCost,

@@ -1857,7 +1857,7 @@ extension AppDelegate {
         let provenance = controller.selfTestContextProvenance
         let provenanceAttributed = provenance?.contains(
             String(snapshot.commitOID.hex.prefix(7))
-        ) == true && provenance?.contains("materialized") == true
+        ) == true && provenance?.contains("(checkout)") == true
         emitExactStep(
             "historicalExact",
             variant: "historical-fake",
