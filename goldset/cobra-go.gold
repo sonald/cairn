@@ -1,0 +1,30 @@
+# spf13/cobra adbc8813901bba65827259daa8e22ff94ec1f30e. Targets were checked
+# against `gopls definition` (gopls on a local clone, GOPROXY=off) on
+# 2026-11-12, except where a line says it was read from the source.
+
+# Same package, another file, no import.
+def args.go:60:8 -> cobra.go:225:6
+strong args.go:60:8
+def doc/md_docs.go:83:5 -> doc/util.go:26:6
+# A build-tag variant pair: gopls answers the host's file (command_notwin.go);
+# the syntax layer offers both.
+def5 command.go:1096:3 -> command_notwin.go:20:5
+def5 command.go:1096:3 -> command_win.go:28:5
+# `pkg.F` from the doc package into cobra through go.mod's module path.
+def doc/man_docs.go:153:8 -> cobra.go:243:6
+strong doc/man_docs.go:153:8
+# The standard library is left to the Exact layer.
+unresolved doc/man_docs.go:152:37
+# Method calls through a parameter typed `*cobra.Command`.
+def doc/util.go:27:9 -> command.go:1677:19
+strong doc/util.go:27:9
+def doc/util.go:30:24 -> command.go:1332:19
+# A range variable has no spelled type: the method name answers, weakly.
+def5 doc/util.go:31:9 -> command.go:1607:19
+nostrong doc/util.go:31:9
+# An interface named in a type assertion (read from the source; gopls reports
+# no definition at this position).
+def completions.go:448:39 -> completions.go:311:6
+# The receiver of a call is the parameter.
+bind doc/util.go:27:5 -> doc/util.go:26:17
+type doc/util.go:27:5 -> command.go:54:6

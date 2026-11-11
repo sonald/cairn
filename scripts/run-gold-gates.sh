@@ -8,6 +8,7 @@
 #   bash scripts/run-gold-gates.sh --corpus-root DIR  # override root
 #   bash scripts/run-gold-gates.sh --python-corpus DIR --python-revision SHA
 #   bash scripts/run-gold-gates.sh --typescript-corpus DIR --typescript-revision SHA
+#   bash scripts/run-gold-gates.sh --go-corpus DIR --go-revision SHA
 #
 # Reads corpus root from: --corpus-root, $CAIRN_CORPUS_ROOT, or ~/.cache/cairn-corpora
 # Exits non-zero with a specific diagnostic when a corpus is missing or degraded.
@@ -18,16 +19,20 @@ cd "$(dirname "$0")/.."
 
 fixed_python_revision="f55831ee798cd4d7bafab4d50d6dba46e6fce387"
 fixed_typescript_revision="f31fe4a9ce2d355c3a44203fcb6add9296cc9b61"
+fixed_go_revision="adbc8813901bba65827259daa8e22ff94ec1f30e"
 root="${CAIRN_CORPUS_ROOT:-$HOME/.cache/cairn-corpora}"
 run_tokio=true
 run_ripgrep=true
 run_python=false
 run_typescript=false
+run_go=false
 persist_flag=""
 python_corpus=""
 python_revision=""
 typescript_corpus=""
 typescript_revision=""
+go_corpus=""
+go_revision=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -38,9 +43,11 @@ while [[ $# -gt 0 ]]; do
         --python-revision) python_revision="$2"; shift 2 ;;
         --typescript-corpus) typescript_corpus="$2"; run_typescript=true; shift 2 ;;
         --typescript-revision) typescript_revision="$2"; shift 2 ;;
+        --go-corpus) go_corpus="$2"; run_go=true; shift 2 ;;
+        --go-revision) go_revision="$2"; shift 2 ;;
         --persist)     persist_flag="--persist"; shift ;;
         --help|-h)
-            head -13 "$0" | tail -12 | sed -E 's/^# ?//'
+            head -14 "$0" | tail -13 | sed -E 's/^# ?//'
             exit 0 ;;
         *)
             echo "unknown option: $1" >&2
@@ -53,6 +60,7 @@ done
 preflight_ok=true
 python_snapshot_before=""
 typescript_snapshot_before=""
+go_snapshot_before=""
 
 check_python_corpus_snapshot() {
     check_python_corpus_state | shasum -a 256 | awk '{ print $1 }'
@@ -233,6 +241,62 @@ assert_typescript_corpus_unchanged() {
     fi
 }
 
+check_go_corpus_snapshot() {
+    {
+        git -C "$go_corpus" rev-parse HEAD
+        git -C "$go_corpus" status --porcelain=v1 --untracked-files=all
+        git -C "$go_corpus" ls-files -s
+    } | shasum -a 256 | awk '{ print $1 }'
+}
+
+check_go_corpus() {
+    if ! $run_go; then
+        return 0
+    fi
+    if [[ "$go_corpus" != /* ]]; then
+        echo "ERROR: --go-corpus must be an absolute path: $go_corpus" >&2
+        preflight_ok=false
+        return 1
+    fi
+    if [[ "$go_revision" != "$fixed_go_revision" ]]; then
+        echo "ERROR: --go-corpus requires --go-revision $fixed_go_revision" >&2
+        preflight_ok=false
+        return 1
+    fi
+    if [[ ! -d "$go_corpus/.git" ]]; then
+        echo "ERROR: go corpus has no .git directory: $go_corpus" >&2
+        preflight_ok=false
+        return 1
+    fi
+    local head status go_count
+    head="$(git -C "$go_corpus" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$head" != "$go_revision" ]]; then
+        echo "ERROR: go corpus HEAD mismatch: want $go_revision got $head" >&2
+        preflight_ok=false
+        return 1
+    fi
+    status="$(git -C "$go_corpus" status --porcelain)"
+    if [[ -n "$status" ]]; then
+        echo "ERROR: go corpus is not clean:" >&2
+        echo "$status" >&2
+        preflight_ok=false
+        return 1
+    fi
+    go_count="$(git -C "$go_corpus" ls-files '*.go' | wc -l | tr -d ' ')"
+    if [[ "$go_count" -ne 36 ]]; then
+        echo "ERROR: go corpus tracked .go count: want 36 got $go_count" >&2
+        preflight_ok=false
+        return 1
+    fi
+    if [[ ! -f "$go_corpus/go.mod" ]]; then
+        echo "ERROR: go corpus missing go.mod" >&2
+        preflight_ok=false
+        return 1
+    fi
+    go_snapshot_before="$(check_go_corpus_snapshot)"
+    echo "  ok  go corpus frozen: $head"
+}
+
 check_corpus() {
     local dir="$1" label="$2"
 
@@ -290,6 +354,7 @@ $run_tokio   && check_corpus "$root/tokio-tokio-1.47.1" "tokio"   || true
 $run_ripgrep && check_corpus "$root/ripgrep-14.1.1"     "ripgrep" || true
 $run_python  && check_python_corpus || true
 $run_typescript && check_typescript_corpus || true
+$run_go && check_go_corpus || true
 
 if ! $preflight_ok; then
     echo "" >&2
@@ -394,6 +459,13 @@ fi
 if $run_typescript; then
     run_gold goldset/morphic-typescript.gold "$typescript_corpus" "morphic-typescript gold" "typescript"
     assert_typescript_corpus_unchanged || failures=$((failures + 1))
+fi
+if $run_go; then
+    run_gold goldset/cobra-go.gold "$go_corpus" "cobra-go gold" "go"
+    if [[ "$(check_go_corpus_snapshot)" != "$go_snapshot_before" ]]; then
+        echo "ERROR: go corpus changed during gold gate" >&2
+        failures=$((failures + 1))
+    fi
 fi
 
 echo ""
