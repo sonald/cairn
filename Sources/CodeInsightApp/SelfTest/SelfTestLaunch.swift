@@ -702,7 +702,6 @@ extension AppDelegate {
                 readingHeightInputsStaySynchronized,
             "readingHeightHeaderMatchesPrototypeGeometry":
                 heightHeader.labels == ["Full", "Structure", "Overview"]
-                && heightHeader.shortcut == "⌥⌘0/1/2"
                 && heightHeader.accessibilityLabel == "Reading height"
                 && abs(heightHeader.frame.height - 32) <= 1
                 && abs(heightHeader.controlFrame.width - 196) <= 1

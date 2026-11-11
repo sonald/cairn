@@ -146,17 +146,6 @@ final class KeyBindingSettingsModel {
 
     // MARK: Read points (self-test / tests)
 
-    var visibleCommandCount: Int {
-        visibleCommands.values.reduce(0) { $0 + $1.count }
-    }
-
-    func keycapTexts(commandID: String) -> [String] {
-        guard let id = table.commands.first(where: { $0.id.rawValue == commandID })?.id else {
-            return []
-        }
-        return table.bindings(for: id).map { table.displayString($0) }
-    }
-
     func isModified(_ id: CommandID) -> Bool {
         table.modifiedCommands.contains(id)
     }

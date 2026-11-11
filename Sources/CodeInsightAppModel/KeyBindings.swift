@@ -518,8 +518,6 @@ public struct KeyBindingTable: Sendable {
         self.displayString = Self.defaultDisplayString
     }
 
-    public var schemeID: String { scheme.id }
-
     public var commands: [CommandDefinition] { scheme.commands }
 
     public func definition(for id: CommandID) -> CommandDefinition? {

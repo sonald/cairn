@@ -177,7 +177,6 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     var detailValue: String { detailText.stringValue }
     var selectedTrailNodeID: TrailNodeID? { selectedID }
     var isPopoverShown: Bool { popover.isShown }
-    var snapshotBoundaryCount: Int { rows.count(where: \.crossesSnapshot) }
     var popoverContentView: NSView? { popover.contentViewController?.view }
 
     func showPopover() {
@@ -599,18 +598,6 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         return result
     }
 
-    var selfTestDetailTitleFont: NSFont? {
-        guard detailText.attributedStringValue.length > 0 else { return nil }
-        return detailText.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
-    }
-
-    func selfTestDetailColor(of text: String) -> NSColor? {
-        let value = detailText.attributedStringValue
-        let range = (value.string as NSString).range(of: text)
-        guard range.location != NSNotFound else { return nil }
-        return value.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
-    }
-
     /// Bar frames in this view's coordinates, plus whether any bar item's
     /// horizontal position is left to the solver.
     var selfTestBarLayout: (breadcrumb: NSRect, badge: NSRect, ambiguous: Bool) {
@@ -637,14 +624,6 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
                 ($0.jump.path, row.depth, row.isBranchStart, row.lanesAbove, row.lanesBelow)
             }
         }
-    }
-
-    func selfTestRowStyle(path: String) -> (gutter: NSColor?, snapshotFill: CGColor?, current: Bool)? {
-        guard let row = rows.firstIndex(where: { trail?.nodes[$0.id]?.jump.path == path }),
-              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
-                as? ReadingTrailCellView
-        else { return nil }
-        return cell.selfTestStyle
     }
 
     private func flattenedRows(_ trail: ReadingTrail) -> [Row] {
@@ -848,11 +827,6 @@ private final class ReadingTrailCellView: NSTableCellView {
     private let causeChip = RelationChipView()
     private let snapshotChip = RelationChipView()
     private let badge = RelationChipView()
-    private var isCurrentRow = false
-
-    var selfTestStyle: (gutter: NSColor?, snapshotFill: CGColor?, current: Bool) {
-        (gutter.nodeColor, snapshotChip.layer?.backgroundColor, isCurrentRow)
-    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -938,7 +912,6 @@ private final class ReadingTrailCellView: NSTableCellView {
             background: historical ? theme.histSoftColor : .clear,
             border: historical ? theme.histSoftColor : theme.chromeDividerColor
         )
-        isCurrentRow = isCurrent
         let badgeColors: (NSColor, NSColor, NSColor, Bool) = switch badgeText {
         case "Verified": (
             theme.verifiedColor,

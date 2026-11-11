@@ -73,29 +73,6 @@ public struct SymbolOccurrenceID: Hashable, Sendable {
     }
 }
 
-public struct PackageID: Hashable, Sendable {
-    public let rawValue: UInt32
-
-    public init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
-}
-
-public struct GeneratedDocumentID: Hashable, Sendable {
-    public let rawValue: UInt32
-
-    public init(rawValue: UInt32) {
-        self.rawValue = rawValue
-    }
-}
-
-public enum DocumentID: Sendable {
-    case snapshotFile(SnapshotID, PathID, ContentID)
-    case externalPackage(PackageID, PathID)
-    case generated(AnalysisProfileID, GeneratedDocumentID)
-    case builtin(LanguageID, StringID)
-}
-
 public struct ResolutionCandidate: Sendable {
     public let target: SymbolOccurrenceID
     public let certainty: Certainty

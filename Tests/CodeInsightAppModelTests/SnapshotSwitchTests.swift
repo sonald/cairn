@@ -45,7 +45,6 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     await service.releaseFull("C")
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.coverage.filesIndexed == 1)
-    #expect(model.coverage.importsResolved == nil)
     // The commit keeps the worktree's set: its Python file is not analyzed.
     #expect(await service.preparedLanguages() == [.rust, .rust])
 }

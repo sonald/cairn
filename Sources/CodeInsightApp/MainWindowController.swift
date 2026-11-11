@@ -1283,12 +1283,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestFilesLoadingIndicatorVisible: Bool {
         sidebarController.selfTestFilesLoadingIndicatorVisible
     }
-    var selfTestFilesOpenProjectButtonTitle: String {
-        sidebarController.selfTestFilesOpenProjectButtonTitle
-    }
-    var selfTestFilesOpenProjectButtonVisible: Bool {
-        sidebarController.selfTestFilesOpenProjectButtonVisible
-    }
     var selfTestFilesContentVisible: Bool {
         sidebarController.selfTestFilesContentVisible
     }
@@ -1321,15 +1315,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestContextReaderVisible: Bool {
         contextController.selfTestReaderVisible
-    }
-    var selfTestContextCandidateVisibleWithGeometry: Bool {
-        contextController.selfTestCandidateVisibleWithGeometry
-    }
-    var selfTestContextHasDoubleClickOpen: Bool {
-        contextController.selfTestHasDoubleClickOpen
-    }
-    var selfTestRelationsPlaceholderText: String? {
-        relationController.selfTestPlaceholderText
     }
     var selfTestRelationsPlaceholderVisible: Bool {
         relationController.selfTestPlaceholderVisible
@@ -1415,9 +1400,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestTrailPopoverVisible: Bool { trailView.isPopoverShown }
     var selfTestTrailPopoverPaths: [String] { trailView.popoverPaths }
     var selfTestTrailDetailText: String { trailView.detailValue }
-    var selfTestTrailSnapshotBoundaryCount: Int {
-        trailView.snapshotBoundaryCount
-    }
     var selfTestTrailPopoverContentView: NSView? {
         trailView.popoverContentView
     }
@@ -1453,9 +1435,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard let contentView = window?.contentView else { return .zero }
         return statusBar.convert(statusBar.bounds, to: contentView)
     }
-    var selfTestStatusBarBackgroundColor: NSColor? {
-        statusBar.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
-    }
     var selfTestStatusBarVisible: Bool {
         guard selfTestViewIsVisibleInWindow(statusBar) else { return false }
         let statusFrame = statusBar.convert(statusBar.bounds, to: nil)
@@ -1476,14 +1455,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         selfTestStatusBarVisible
             && exactLabel.isDescendant(of: statusBar)
             && selfTestViewIsVisibleInWindow(exactLabel)
-    }
-    var selfTestExactStatusAllowsHorizontalCompression: Bool {
-        exactLabel.contentCompressionResistancePriority(for: .horizontal)
-            < .defaultHigh
-            && exactLabel.lineBreakMode != .byClipping
-    }
-    var selfTestSidebarRowGeometry: (height: CGFloat, spacing: NSSize) {
-        sidebarController.selfTestRowGeometry
     }
     var selfTestExactGroupTitle: String? {
         relationController.selfTestExactGroupTitle
@@ -1561,20 +1532,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestPossibleRelationDisclosureTitle: String? {
         relationController.selfTestPossibleDisclosureTitle
     }
-    var selfTestPossibleRelationDisclosureFrame: NSRect {
-        relationController.selfTestPossibleDisclosureFrame
-    }
     func selfTestExpandPossibleRelations() -> Bool {
         relationController.selfTestExpandPossibleMatches()
     }
     var selfTestVisibleRelationText: [String] {
         relationController.selfTestVisibleText()
-    }
-    func selfTestRelationBadgeFrame(titled title: String) -> NSRect {
-        relationController.selfTestBadgeFrame(titled: title)
-    }
-    func selfTestRelationBadgeToolTip(titled title: String) -> String? {
-        relationController.selfTestBadgeToolTip(titled: title)
     }
     var selfTestExactAndReferenceGroupsDoNotOverlap: Bool {
         relationController.selfTestExactAndReferenceGroupsDoNotOverlap
@@ -1597,9 +1559,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestRelationOpenCount: Int {
         relationController.selfTestOpenCount
     }
-    var selfTestRelationWholeTreeReloads: Int {
-        relationController.selfTestWholeTreeReloads
-    }
     var selfTestRelationNodeReloads: Int {
         relationController.selfTestNodeReloads
     }
@@ -1608,9 +1567,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     func selfTestExpandRelationEdge(titled title: String) -> Bool {
         relationController.selfTestExpandEdge(titled: title)
-    }
-    func selfTestVisibleRelationChildEdgeTitles(ofEdge title: String) -> [String] {
-        relationController.selfTestVisibleChildEdgeTitles(ofEdge: title)
     }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestBookmarkMarkerLines: [Int] { readerController.bookmarkMarkerLines }
@@ -1624,7 +1580,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.selfTestFontSize(at: byteOffset)
     }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
-    var selfTestLeftReaderIsEditable: Bool { readerController.isEditable }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
         let left = readerController.diffMarkerCounts
         let right = secondaryReaderController.diffMarkerCounts
@@ -1640,24 +1595,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             && (!rightHasDiff
                 || secondaryReaderController.gutterShowsLineNumbersAndDiff)
     }
-    var selfTestSelectedDiffLine: Int? {
-        secondaryReaderController.selectedDiffLine ?? readerController.selectedDiffLine
-    }
     var selfTestSecondaryReaderCollapsed: Bool { secondaryReaderItem.isCollapsed }
     func selfTestFocusSecondaryReaderText() { secondaryReaderController.focusText() }
     var selfTestEmptyStateExists: Bool { readerController.selfTestEmptyStateExists }
     var selfTestEmptyStateTexts: [String] { readerController.selfTestEmptyStateTexts }
     var selfTestEmptyStateButtonTitles: [String] {
         readerController.selfTestEmptyStateButtonTitles
-    }
-    var selfTestEmptyStateFailureReason: String? {
-        readerController.selfTestEmptyStateFailureReason
-    }
-    var selfTestEmptyStateReasonIsSelectable: Bool {
-        readerController.selfTestEmptyStateReasonIsSelectable
-    }
-    var selfTestEmptyStateChooseFolderActionAvailable: Bool {
-        readerController.selfTestEmptyStateChooseFolderActionAvailable
     }
     var selfTestEmptyStateAttachedToWindow: Bool {
         readerController.selfTestEmptyStateAttachedToWindow
@@ -1690,13 +1633,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.selfTestEmptyStateOpenButtonIsVisibleDefaultAction
     }
     var selfTestCommitButtonTitle: String { commitButton.title }
-    var selfTestCommitButtonBezel: NSColor? { commitButton.bezelColor }
-    var selfTestReaderHistorical: (flag: Bool, background: NSColor?) {
-        readerController.selfTestHistoricalSnapshot
-    }
-    var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {
-        readerController.selfTestSnapshotBadge
-    }
     var selfTestCommitToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.commitItemIdentifier)
     }
@@ -1812,10 +1748,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.selfTestSetPinned(pinned)
     }
 
-    func selfTestOpenContextSelection() {
-        contextController.selfTestOpenSelection()
-    }
-
     /// Feeds a user caret move from the primary reader, as `onCaretFollow` does.
     func selfTestFollowCaret(offset: UInt32) {
         handleReaderCaret(offset: offset, from: readerController)
@@ -1881,7 +1813,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         showPalette(prefill: "#")
     }
 
-    func showPalette(prefill: String = "", lockMode: Bool = false) {
+    func showPalette(prefill: String = "") {
         if palettePanel == nil {
             palettePanel = PalettePanel(
                 appModel: model,
@@ -1897,7 +1829,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         palettePanel?.show(
             prefill: prefill,
-            lockMode: lockMode,
             relativeTo: window
         )
     }
@@ -2758,7 +2689,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             labels: [String],
             frame: NSRect,
             controlFrame: NSRect,
-            shortcut: String,
             accessibilityLabel: String,
             hidden: Bool,
             enabled: Bool
@@ -3275,12 +3205,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             NSImage.SymbolConfiguration(paletteColors: [trusted ? theme.warningColor : theme.verifiedColor])
         )
         profileButton.imagePosition = .imageLeading
-        trustSealColor = trusted ? theme.warningColor : theme.verifiedColor
-    }
-
-    private var trustSealColor: NSColor?
-    var selfTestTrustSeal: (description: String?, color: NSColor?) {
-        (profileButton.image?.accessibilityDescription, profileButton.image == nil ? nil : trustSealColor)
     }
 
     private func profileMenuItem() -> NSMenuItem {
@@ -3573,14 +3497,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         truncatedLabel.backgroundColor = theme.amberSoftColor
         renderContextButton(theme: theme)
         renderExactStatus()
-    }
-
-    var selfTestStatusStyle: (exactColor: NSColor?, reach: Certainty, stonesVisible: Bool,
-                              truncatedFill: NSColor?, separator: CGColor?) {
-        (exactLabel.textColor, exactStones.certainty,
-         exactStones.window != nil && !exactStones.isHiddenOrHasHiddenAncestor
-            && exactStones.frame.width > 0,
-         truncatedLabel.backgroundColor, statusSeparator.layer?.backgroundColor)
     }
 
     private var initialIndexStatus: String? {

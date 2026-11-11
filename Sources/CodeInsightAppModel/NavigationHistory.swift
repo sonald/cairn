@@ -896,23 +896,6 @@ public final class NavigationHistory {
             || (cursor + 1 == records.count && forwardRecord != nil)
     }
 
-    /// The record goBack would move to, without committing the move.
-    public func peekBack(
-        from current: NavigationRecord
-    ) -> NavigationRecord? {
-        guard canGoBack else { return nil }
-        return navigationRecords[cursor - 1]
-    }
-
-    /// The record goForward would move to, without committing the move.
-    public func peekForward() -> NavigationRecord? {
-        guard canGoForward else { return nil }
-        if cursor + 1 < records.count {
-            return navigationRecords[cursor + 1]
-        }
-        return forwardRecord
-    }
-
     public func push(_ record: JumpRecord) {
         push(NavigationRecord(jump: record))
     }

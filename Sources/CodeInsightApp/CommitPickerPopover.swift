@@ -56,8 +56,6 @@ final class CommitPickerPopover: NSViewController,
         tableView.reloadData()
     }
 
-    var selfTestTheme: ReaderTheme { theme }
-
     override func loadView() {
         input.placeholderString = localized("panel.commit.search")
         input.delegate = self
@@ -280,21 +278,6 @@ final class CommitPickerPopover: NSViewController,
             visibleRows,
             popover.isShown
         )
-    }
-
-    /// Badge texts on one commit's row, only when the row is actually shown.
-    func selfTestVisibleBadges(forCommit fullSHA: String) -> [String] {
-        guard let row = rowIndex(ofRevision: fullSHA),
-              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true),
-              cell.window != nil
-        else { return [] }
-        cell.layoutSubtreeIfNeeded()
-        func labels(_ view: NSView) -> [NSTextField] {
-            ((view as? NSTextField).map { [$0] } ?? []) + view.subviews.flatMap(labels)
-        }
-        return labels(cell)
-            .filter { $0.drawsBackground && !$0.isHiddenOrHasHiddenAncestor && $0.frame.width > 0 }
-            .map { $0.stringValue.trimmingCharacters(in: .whitespaces) }
     }
 
     private func choose(_ commit: CommitInfo?) {

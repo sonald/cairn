@@ -161,15 +161,6 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         if let content = window?.contentView { visit(content) }
     }
 
-    var selfTestReaderPreviewSource: String {
-        String(decoding: ReaderSettingsPreview.document.bytes, as: UTF8.self)
-    }
-    var selfTestReaderPreviewDrawCount: Int {
-        var count = 0
-        forEachReaderPreview { count += $0.selfTestDrawCount }
-        return count
-    }
-
     /// Force the same deferred preview layout while testing retained closed windows.
     func selfTestLayoutReaderPreviews() {
         window?.contentView?.layoutSubtreeIfNeeded()
@@ -191,18 +182,6 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
     }
 
     // MARK: Key bindings self-test read points (K0b)
-
-    var selfTestKeybindingsSelectedTab: String { keyBindingsModel.selectedTab.rawValue }
-
-    var selfTestKeybindingVisibleRowCount: Int { keyBindingsModel.visibleCommandCount }
-
-    func selfTestKeycapTexts(commandID: String) -> [String] {
-        keyBindingsModel.keycapTexts(commandID: commandID)
-    }
-
-    var selfTestKeybindingConflictVisible: Bool {
-        keyBindingsModel.pendingConflict != nil
-    }
 
     var selfTestVisualControlGeometry: (
         frames: [NSRect],

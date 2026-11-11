@@ -649,32 +649,6 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         }
     }
 
-    func selfTestRowBadge(id: UUID) -> (
-        text: String, style: CairnBadgeView.Style, visible: Bool,
-        detail: String, detailWidthFraction: CGFloat, detailLines: Int
-    )? {
-        guard let row = rows.firstIndex(where: { $0.id == id }),
-              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
-        else { return nil }
-        func find(_ view: NSView) -> CairnBadgeView? {
-            if let badge = view as? CairnBadgeView { return badge }
-            return view.subviews.lazy.compactMap(find).first
-        }
-        guard let badge = find(cell) else { return nil }
-        cell.layoutSubtreeIfNeeded()
-        func detail(_ view: NSView) -> NSTextField? {
-            if let field = view as? NSTextField, field.stringValue.hasPrefix(rows[row].path + " · ") { return field }
-            return view.subviews.lazy.compactMap(detail).first
-        }
-        let field = detail(cell)
-        let lineHeight = field.flatMap { NSLayoutManager().defaultLineHeight(for: $0.font ?? .systemFont(ofSize: 11)) } ?? 1
-        return (badge.text, badge.style,
-                badge.window != nil && !badge.isHiddenOrHasHiddenAncestor && badge.frame.width > 0,
-                field?.stringValue ?? "",
-                (field?.frame.width ?? 0) / max(cell.bounds.width, 1),
-                Int(((field?.frame.height ?? 0) / lineHeight).rounded()))
-    }
-
     func statusColor(_ status: BookmarkStatus) -> NSColor {
         switch status {
         case .exactContent: theme.verifiedColor

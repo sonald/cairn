@@ -308,8 +308,6 @@ package final class BookmarkModel {
         }
     }
 
-    package var sharedRecordStore: SharedBookmarkStore? { sharedStore }
-
     package func reload() {
         guard sharedStore == nil else { return }
         records = []

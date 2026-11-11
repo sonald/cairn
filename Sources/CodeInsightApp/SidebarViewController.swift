@@ -77,14 +77,6 @@ final class SidebarViewController: NSViewController,
         loadViewIfNeeded()
         return fileLoadingIndicator.selfTestIsVisibleInWindow
     }
-    var selfTestFilesOpenProjectButtonTitle: String {
-        loadViewIfNeeded()
-        return filePlaceholderButton.title
-    }
-    var selfTestFilesOpenProjectButtonVisible: Bool {
-        loadViewIfNeeded()
-        return filePlaceholderButton.selfTestIsVisibleInWindow
-    }
     var selfTestFilesContentVisible: Bool {
         loadViewIfNeeded()
         return fileScrollView.selfTestIsVisibleInWindow
@@ -124,14 +116,6 @@ final class SidebarViewController: NSViewController,
             filePlaceholder.frame.height,
             abs(filePlaceholder.frame.midY - fileScrollView.frame.midY),
             abs(outlinePlaceholder.frame.midY - symbolScrollView.frame.midY)
-        )
-    }
-
-    var selfTestRowGeometry: (height: CGFloat, spacing: NSSize) {
-        loadViewIfNeeded()
-        return (
-            outlineView(fileOutlineView, heightOfRowByItem: NSObject()),
-            fileOutlineView.intercellSpacing
         )
     }
 

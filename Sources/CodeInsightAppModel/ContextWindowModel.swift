@@ -45,8 +45,6 @@ public final class ContextWindowModel {
         public let bindingKind: String?
         public let targetByteOffset: UInt32
         public let basis: Basis
-        /// Explanatory badge text, e.g. why the lens stays on a primitive.
-        public let note: String?
         /// The local answer is an import binding: the index did not resolve
         /// past the import to a declaration.
         public let isImportBinding: Bool
@@ -60,7 +58,6 @@ public final class ContextWindowModel {
             bindingKind: String?,
             targetByteOffset: UInt32,
             basis: Basis,
-            note: String? = nil,
             isImportBinding: Bool = false
         ) {
             self.symbol = symbol
@@ -71,7 +68,6 @@ public final class ContextWindowModel {
             self.bindingKind = bindingKind
             self.targetByteOffset = targetByteOffset
             self.basis = basis
-            self.note = note
             self.isImportBinding = isImportBinding
         }
 
@@ -89,22 +85,6 @@ public final class ContextWindowModel {
                     dispatch: resolutionDispatch ?? .direct,
                     provenance: provenance
                 ),
-                note: note,
-                isImportBinding: isImportBinding
-            )
-        }
-
-        func withNote(_ note: String) -> Candidate {
-            Candidate(
-                symbol: symbol,
-                path: path,
-                line: line,
-                column: column,
-                excerpt: excerpt,
-                bindingKind: bindingKind,
-                targetByteOffset: targetByteOffset,
-                basis: basis,
-                note: note,
                 isImportBinding: isImportBinding
             )
         }
@@ -1269,7 +1249,7 @@ public final class ContextWindowModel {
     /// P1.4: when the pointed-at candidate is a value binding or a field
     /// with a spelled type, the lens switches to `.typeHop` and shows the
     /// type. Primitives and unconstrained generics stay on the declaration
-    /// with an explanatory note; `.none` keeps the plain candidate list
+    /// as a plain candidate; `.none` keeps the plain candidate list
     /// (P2 may still promote it once the Exact layer answers).
     /// Returns true when the Exact `typeDefinition` should ride the same
     /// batch as the definition upgrade (value bindings and fields whose type
@@ -1304,19 +1284,15 @@ public final class ContextWindowModel {
                 boundNote: answer.boundNote
             ), selected: 0)
             return true
-        case let .primitive(name):
+        case .primitive:
             stage = .candidates(
-                [firstCandidate.withNote(localizedFormat(
-                    "model.typehop.primitiveNote", name
-                ))],
+                [firstCandidate],
                 selected: 0
             )
             return false
-        case let .genericUnbounded(name):
+        case .genericUnbounded:
             stage = .candidates(
-                [firstCandidate.withNote(localizedFormat(
-                    "model.typehop.genericNote", name
-                ))],
+                [firstCandidate],
                 selected: 0
             )
             return false
@@ -1849,7 +1825,6 @@ public final class ContextWindowModel {
             bindingKind: candidate.bindingKind,
             targetByteOffset: candidate.targetByteOffset,
             basis: .exact(attribution, origin: origin, language: language),
-            note: candidate.note,
             isImportBinding: candidate.isImportBinding
         )
     }

@@ -313,7 +313,6 @@
 "panel.palette.limit" = "Palette result limit";
 "panel.palette.line" = "Go to line…";
 "panel.palette.lineNumber" = "Line %lld";
-"panel.palette.navigation" = "↑↓ Select   ↩ Open   Esc Close";
 "panel.palette.noCommands" = "No commands found";
 "panel.palette.noFile" = "No active file";
 "panel.palette.noFiles" = "No files found";

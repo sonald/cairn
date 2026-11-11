@@ -70,9 +70,6 @@ public final class SearchPanelModel {
     public private(set) var isCaseSensitive = false
     public private(set) var isRegex = false
     public private(set) var isWholeWord = false
-    /// Comma-separated path globs as the user typed them.
-    public private(set) var includePaths = ""
-    public private(set) var excludePaths = ""
     /// Files searched and files the path filters removed, summed over sessions.
     public private(set) var searchedFileCount = 0
     public private(set) var excludedFileCount = 0
@@ -170,17 +167,6 @@ public final class SearchPanelModel {
     public func setWholeWord(_ enabled: Bool) {
         guard isWholeWord != enabled else { return }
         isWholeWord = enabled
-        restart()
-    }
-
-    public func setPathFilters(include: String, exclude: String) {
-        guard include != includePaths || exclude != excludePaths else { return }
-        includePaths = include
-        excludePaths = exclude
-        guard var parsed = try? ProjectSearchQuery.parse(query, isRegex: isRegex) else { return }
-        parsed.includeGlobs = PathGlob.list(include).map(\.pattern)
-        parsed.excludeGlobs = PathGlob.list(exclude).map(\.pattern)
-        query = parsed.serialized
         restart()
     }
 
@@ -304,9 +290,7 @@ public final class SearchPanelModel {
             pattern: query,
             isRegex: isRegex,
             caseSensitive: isCaseSensitive,
-            wholeWord: isWholeWord,
-            includeGlobs: PathGlob.list(includePaths).map(\.pattern),
-            excludeGlobs: PathGlob.list(excludePaths).map(\.pattern)
+            wholeWord: isWholeWord
         )
         let searcher = searcher
         let searchedQueryState = currentQueryState
@@ -499,11 +483,6 @@ public final class SearchPanelModel {
         isWholeWord = state.wholeWord
         isRegex = state.isRegex
         restart()
-    }
-
-    public func clearHistory() {
-        history = []
-        onStateChanged?()
     }
 
     public func clearSession() {

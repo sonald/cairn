@@ -20,7 +20,6 @@
 "model.app.fileChanged" = "文件在索引后已发生变化";
 "model.app.fileHead" = "已恢复至文件开头";
 "model.app.files" = "文件 %lld/%lld";
-"model.app.imports" = "%@ · 已解析导入 %lld";
 "model.app.invalidPath" = "记录的项目路径无效";
 "model.app.languageUnavailable" = "项目语言不可用";
 "model.app.languageUnsupported" = "不支持记录的源码语言";

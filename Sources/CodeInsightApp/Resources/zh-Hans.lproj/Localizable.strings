@@ -313,7 +313,6 @@
 "panel.palette.limit" = "面板结果上限";
 "panel.palette.line" = "跳转到行…";
 "panel.palette.lineNumber" = "第 %lld 行";
-"panel.palette.navigation" = "↑↓ 选择   ↩ 打开   Esc 关闭";
 "panel.palette.noCommands" = "未找到命令";
 "panel.palette.noFile" = "无当前文件";
 "panel.palette.noFiles" = "未找到文件";

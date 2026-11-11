@@ -38,22 +38,15 @@ public enum SnapshotPhase: Int, Sendable {
 public struct SnapshotCoverage: Equatable, Sendable {
     public let filesIndexed: Int
     public let filesTotal: Int
-    /// Reserved for a real module-import reachability count.
-    public let importsResolved: Int?
 
-    public init(filesIndexed: Int, filesTotal: Int, importsResolved: Int? = nil) {
+    public init(filesIndexed: Int, filesTotal: Int) {
         self.filesIndexed = filesIndexed
         self.filesTotal = filesTotal
-        self.importsResolved = importsResolved
     }
 
     public func statusText(for phase: SnapshotPhase?) -> String? {
         guard let phase, phase != .fullReady else { return nil }
-        let files = localizedFormat("model.app.files", filesIndexed, filesTotal)
-        guard let importsResolved else {
-            return files
-        }
-        return localizedFormat("model.app.imports", files, importsResolved)
+        return localizedFormat("model.app.files", filesIndexed, filesTotal)
     }
 }
 

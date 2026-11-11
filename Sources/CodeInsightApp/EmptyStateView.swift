@@ -141,13 +141,6 @@ final class EmptyStateView: NSView {
         rebuildRecents()
     }
 
-    var selfTestTaglineColor: NSColor? { taglineLabel.textColor }
-    var selfTestColumnsAreSideBySide: Bool { columns.orientation == .horizontal }
-    var selfTestRecentFrames: (actions: NSRect, recents: NSRect) {
-        (columns.arrangedSubviews.first.map { $0.convert($0.bounds, to: nil) } ?? .zero,
-         recentStack.convert(recentStack.bounds, to: nil))
-    }
-
     /// Trusted repositories and each project's last reading time, when known.
     func updateRecentStatus(trusted: Set<String>, lastRead: [String: Date]) {
         guard trusted != recentTrusted || lastRead != recentLastRead else { return }
@@ -171,7 +164,6 @@ final class EmptyStateView: NSView {
         }
         super.layout()
     }
-    var selfTestTitleFont: NSFont? { titleLabel.font }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -208,19 +200,6 @@ final class EmptyStateView: NSView {
         var titles = [openButton.title]
         if !chooseFolderButton.isHidden { titles.append(chooseFolderButton.title) }
         return titles
-    }
-
-    var selfTestFailureReason: String? {
-        reasonLabel.isHidden ? nil : reasonLabel.stringValue
-    }
-
-    var selfTestReasonIsSelectable: Bool {
-        !reasonLabel.isHidden && reasonLabel.isSelectable
-    }
-
-    var selfTestChooseFolderActionAvailable: Bool {
-        !chooseFolderButton.isHidden && chooseFolderButton.action
-            == #selector(chooseFolder(_:))
     }
 
     var selfTestAttachedToWindow: Bool { window != nil }

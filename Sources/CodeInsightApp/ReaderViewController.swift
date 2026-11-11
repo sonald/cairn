@@ -400,9 +400,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let scopeHeaderDivider = NSView()
     private let fileNameLabel = NSTextField(labelWithString: "")
     private let readingHeightControl = ReadingHeightControl()
-    private let readingHeightShortcutLabel = NSTextField(
-        labelWithString: "⌥⌘0/1/2"
-    )
     private let findBar = NSView()
     private let findBarDivider = NSView()
     private let findField = NSSearchField()
@@ -857,15 +854,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             .defaultLow,
             for: .horizontal
         )
-        readingHeightShortcutLabel.font = .systemFont(ofSize: 10)
-        readingHeightShortcutLabel.isHidden = true
         readingHeightControl.target = self
         readingHeightControl.action = #selector(changeReadingHeight(_:))
 
         let row = NSStackView(views: [
             fileNameLabel,
             tabStripView,
-            readingHeightShortcutLabel,
             readingHeightControl,
         ])
         row.orientation = .horizontal
@@ -1430,7 +1424,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             readerTheme.chromeDividerColor.cgColor
         pathRow.layer?.backgroundColor = readerTheme.chromeColor.cgColor
         fileNameLabel.textColor = readerTheme.foregroundColor
-        readingHeightShortcutLabel.textColor = readerTheme.chromeTertiaryColor
         readingHeightControl.apply(settings: settings)
         applyScopeHeaderTheme()
         applyFindBarTheme(settings)
@@ -1597,20 +1590,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         compareCloseButton.setAccessibilityLabel(closeTitle)
     }
 
-    var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {
-        view.layoutSubtreeIfNeeded()
-        return (
-            snapshotBadge.text,
-            snapshotBadge.style,
-            snapshotBadge.window != nil && !snapshotBadge.isHiddenOrHasHiddenAncestor
-                && snapshotBadge.frame.width > 0
-        )
-    }
-
-    var selfTestHistoricalSnapshot: (flag: Bool, background: NSColor?) {
-        (textView.historicalSnapshot, textView.view.backgroundColor)
-    }
-
     func apply(settings: ReaderSettings) {
         loadViewIfNeeded()
         let previewWrapChanged = previewWrapLines != settings.wrapLines
@@ -1770,15 +1749,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var selfTestEmptyStateButtonTitles: [String] {
         emptyStateView?.selfTestButtonTitles ?? []
     }
-    var selfTestEmptyStateFailureReason: String? {
-        emptyStateView?.selfTestFailureReason
-    }
-    var selfTestEmptyStateReasonIsSelectable: Bool {
-        emptyStateView?.selfTestReasonIsSelectable == true
-    }
-    var selfTestEmptyStateChooseFolderActionAvailable: Bool {
-        emptyStateView?.selfTestChooseFolderActionAvailable == true
-    }
     var selfTestEmptyStateAttachedToWindow: Bool {
         emptyStateView?.selfTestAttachedToWindow == true
     }
@@ -1873,10 +1843,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
     func selfTestPreviewFont(at substring: String) -> NSFont? {
         selfTestPreviewAttribute(.font, at: substring) as? NSFont
-    }
-
-    func selfTestPreviewParagraphStyle(at substring: String) -> NSParagraphStyle? {
-        selfTestPreviewAttribute(.paragraphStyle, at: substring) as? NSParagraphStyle
     }
 
     func selfTestPreviewAttribute(_ key: NSAttributedString.Key, at substring: String) -> Any? {
@@ -2154,7 +2120,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             labels: [String],
             frame: NSRect,
             controlFrame: NSRect,
-            shortcut: String,
             accessibilityLabel: String,
             hidden: Bool,
             enabled: Bool
@@ -2175,47 +2140,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 ),
                 to: nil
             ) ?? .zero,
-            readingHeightShortcutLabel.stringValue,
             readingHeightControl.accessibilityLabel() ?? "",
             readingHeightControl.isHidden,
             readingHeightControl.isEnabled
-        )
-    }
-    var selfTestPathBar: (hidden: Bool, frame: NSRect, titles: [String]) {
-        loadViewIfNeeded()
-        view.layoutSubtreeIfNeeded()
-        return (
-            pathRow.isHidden,
-            pathRow.convert(pathRow.bounds, to: view),
-            pathControl.pathItems.map(\.title)
-        )
-    }
-    var selfTestScopeHeader: (
-        hidden: Bool,
-        frame: NSRect,
-        readerFrame: NSRect,
-        labels: [String],
-        labelFrames: [NSRect],
-        fontNames: [String],
-        accessibilityLabel: String
-    ) {
-        loadViewIfNeeded()
-        view.layoutSubtreeIfNeeded()
-        let labels = scopeHeaderContent.arrangedSubviews.compactMap { $0 as? NSControl }
-        return (
-            scopeHeader.isHidden,
-            scopeHeader.convert(scopeHeader.bounds, to: nil),
-            readerArea.convert(readerArea.bounds, to: nil),
-            labels.map { ($0 as? NSButton)?.title ?? $0.stringValue },
-            labels.map { label in
-                guard let parent = label.superview else { return .zero }
-                return parent.convert(
-                    label.alignmentRect(forFrame: label.frame),
-                    to: nil
-                )
-            },
-            labels.compactMap { $0.font?.fontName },
-            scopeHeader.accessibilityLabel() ?? ""
         )
     }
 
@@ -2292,16 +2219,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             .foregroundColor: readerTheme.foregroundColor,
         ]))
         return title
-    }
-
-    var selfTestFunctionChips: [(title: String, kindColor: NSColor?, background: CGColor?)] {
-        functionSummaryStack.arrangedSubviews.compactMap { $0 as? NSButton }.map { button in
-            let title = button.attributedTitle
-            let color = title.length > 2
-                ? title.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor
-                : nil
-            return (title.string.trimmingCharacters(in: .whitespaces), color, button.layer?.backgroundColor)
-        }
     }
 
     func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
@@ -2569,7 +2486,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readingSetView.isHidden = false
         readingHeightControl.isHidden = true
         readingHeightControl.isEnabled = false
-        readingHeightShortcutLabel.isHidden = true
         fileNameLabel.stringValue = localizedFormat("main.reading.set", title)
         readingSetView.display(
             title: title,
@@ -2650,7 +2566,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.clear()
         readingHeightControl.isHidden = true
         readingHeightControl.isEnabled = false
-        readingHeightShortcutLabel.isHidden = true
         cancelSyntaxLoad()
         pendingFocusNavigationOffset = nil
         displayedDocument = nil
@@ -3104,7 +3019,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         setCodeViewHidden(false)
         readingHeightControl.isHidden = false
         readingHeightControl.isEnabled = false
-        readingHeightShortcutLabel.isHidden = true
         let rerunFind = !findBar.isHidden
         if rerunFind {
             invalidateFind()
@@ -3141,7 +3055,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             // No file displayed: the source-only reading height controls
             // leave with it (§3.1 no-project surface).
             readingHeightControl.isHidden = true
-            readingHeightShortcutLabel.isHidden = true
             return
         }
 

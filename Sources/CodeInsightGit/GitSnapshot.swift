@@ -353,10 +353,6 @@ public final class CommitSnapshot: Snapshot, Sendable {
         }
     }
 
-    public func read(path: String) throws -> Data {
-        Data(try readBytes(path: path))
-    }
-
     public func readBytes(path: String) throws -> [UInt8] {
         guard let file = files[path] else { throw GitError.missingPath(path) }
         return file.bytes
@@ -464,10 +460,6 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         files.keys.sorted().compactMap { path in
             files[path].map { (path, $0.contentID, $0.fileMode) }
         }
-    }
-
-    public func read(path: String) throws -> Data {
-        Data(try readBytes(path: path))
     }
 
     public func readBytes(path: String) throws -> [UInt8] {

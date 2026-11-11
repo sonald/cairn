@@ -294,10 +294,6 @@ final class ReadingSetView: NSView {
     }
 
     var selfTestGutterLabels: [[String]] { cards.map { $0.gutterLabels } }
-    var selfTestStyle: (titleFont: NSFont?, pageFill: CGColor?,
-                        cards: [(fill: CGColor?, role: NSColor?, badgeFill: CGColor?)]) {
-        (titleLabel.font, layer?.backgroundColor, cards.map(\.selfTestStyle))
-    }
     var selfTestCodeViews: [NSTextView] { cards.map(\.codeView) }
     var selfTestTextViews: [NSTextView] { selfTestCodeViews }
     var selfTestCodeScrollViews: [NSScrollView] { cards.map(\.codeScroll) }
@@ -696,9 +692,6 @@ private final class ReadingSetExcerptView: NSView {
     }
 
     var gutterLabels: [String] { lineNumbers.labels.map(\.0) }
-    var selfTestStyle: (fill: CGColor?, role: NSColor?, badgeFill: CGColor?) {
-        (layer?.backgroundColor, roleLabel.textColor, badge.layer?.backgroundColor)
-    }
 
     var selfTestCodeState: (String, Bool, Bool) {
         (codeView.string, codeView.isSelectable, codeView.isEditable)

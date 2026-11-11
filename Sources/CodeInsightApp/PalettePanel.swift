@@ -94,7 +94,6 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private static let resultsChromeHeight: CGFloat = 85
     private let appModel: AppModel
     private let symbolModel = SymbolSearchPanelModel()
-    private var lockedMode: (mode: Mode, prefix: String)?
     private let onOpen: (URL, UInt32?, ContentID?) -> Void
     private let input = NSTextField()
     private let modeLabel = NSTextField(labelWithString: "⌘P")
@@ -153,12 +152,10 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     func show(
         prefill: String,
-        lockMode: Bool = false,
         relativeTo owner: NSWindow?
     ) {
         prepare(
             prefill: prefill,
-            lockMode: lockMode,
             owner: owner,
             commands: Self.commandRows(in: NSApp.mainMenu)
         )
@@ -196,7 +193,6 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 
     var rowsForTesting: [Row] { rows }
-    var isModeLockedForTesting: Bool { lockedMode != nil }
     var hintForTesting: NSAttributedString { hintLabel.attributedStringValue }
 
     static func prefix(for mode: Mode) -> Character? {
@@ -257,12 +253,10 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     func prepareForTesting(
         prefill: String,
         owner: NSWindow?,
-        commands: [Row],
-        lockMode: Bool = false
+        commands: [Row]
     ) {
         prepare(
             prefill: prefill,
-            lockMode: lockMode,
             owner: owner,
             commands: commands
         )
@@ -628,7 +622,6 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     private func prepare(
         prefill: String,
-        lockMode: Bool,
         owner: NSWindow?,
         commands: [Row]
     ) {
@@ -646,25 +639,12 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         }
         originalResponder = owner?.firstResponder
         capturedCommands = commands
-        lockedMode = lockMode
-            ? (Mode.parse(prefill).mode, String(prefill.prefix(1)))
-            : nil
         input.stringValue = prefill
         refreshRows()
     }
 
     private func refreshRows() {
-        let raw = input.stringValue.trimmingCharacters(in: .whitespaces)
-        let parsed: (mode: Mode, query: String) = if let lockedMode {
-            (
-                lockedMode.mode,
-                raw.hasPrefix(lockedMode.prefix)
-                    ? String(raw.dropFirst())
-                    : raw
-            )
-        } else {
-            Mode.parse(input.stringValue)
-        }
+        let parsed = Mode.parse(input.stringValue)
         modeLabel.stringValue = switch parsed.mode {
         case .file: "⌘P"
         case .command: "⇧⌘P"
@@ -679,13 +659,9 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         case .projectSymbol: localized("panel.palette.projectSymbol")
         case .line: localized("panel.palette.line")
         }
-        if lockedMode == nil {
-            hintLabel.attributedStringValue = Self.modeHint(
-                localized("panel.palette.hint"), active: parsed.mode, theme: theme
-            )
-        } else {
-            hintLabel.stringValue = localized("panel.palette.navigation")
-        }
+        hintLabel.attributedStringValue = Self.modeHint(
+            localized("panel.palette.hint"), active: parsed.mode, theme: theme
+        )
         switch parsed.mode {
         case .file:
             symbolModel.reset()

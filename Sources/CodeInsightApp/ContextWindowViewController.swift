@@ -135,19 +135,6 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         enclosingBodyNoteLabel.textColor = theme.chromeSecondaryColor
     }
 
-    var selfTestLensStyle: (headerFill: CGColor?, stones: Certainty?, stonesVisible: Bool,
-                            symbol: String, symbolFont: NSFont?, badgeFill: CGColor?) {
-        loadViewIfNeeded()
-        return (
-            headerSurface.layer?.backgroundColor,
-            stones.isHidden ? nil : stones.certainty,
-            stones.window != nil && !stones.isHiddenOrHasHiddenAncestor && stones.frame.width > 0,
-            symbolLabel.stringValue,
-            symbolLabel.font,
-            candidateBadge.layer?.backgroundColor
-        )
-    }
-
     func selfTestSetPinned(_ pinned: Bool) {
         loadViewIfNeeded()
         pinButton.state = pinned ? .on : .off
@@ -191,11 +178,6 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         return enclosingNameLabel.stringValue.isEmpty ? nil : enclosingNameLabel.stringValue
     }
 
-    var selfTestShowsPreviousTokenNote: Bool {
-        loadViewIfNeeded()
-        return !previousTokenNoteLabel.isHidden
-    }
-
     var selfTestPlaceholderText: String? {
         loadViewIfNeeded()
         return placeholderLabel.stringValue
@@ -207,22 +189,6 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     var selfTestReaderVisible: Bool {
         loadViewIfNeeded()
         return scrollView.selfTestIsVisibleInWindow
-    }
-    var selfTestCandidateVisibleWithGeometry: Bool {
-        guard candidateBadge.window != nil,
-              view.window != nil,
-              !candidateBadge.isHiddenOrHasHiddenAncestor,
-              candidateBadge.bounds.width > 0,
-              candidateBadge.bounds.height > 0
-        else { return false }
-        let frame = candidateBadge.convert(candidateBadge.bounds, to: view)
-        return view.bounds.contains(frame)
-            && scrollView.selfTestIsVisibleInWindow
-    }
-    var selfTestHasDoubleClickOpen: Bool {
-        miniReader.view.gestureRecognizers.contains {
-            ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 2
-        }
     }
 
     override func loadView() {

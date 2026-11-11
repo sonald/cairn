@@ -20,7 +20,6 @@
 "model.app.fileChanged" = "File changed since indexing";
 "model.app.fileHead" = "restored at file head";
 "model.app.files" = "Files %lld/%lld";
-"model.app.imports" = "%@ · Imports resolved %lld";
 "model.app.invalidPath" = "recorded project path is invalid";
 "model.app.languageUnavailable" = "project language is unavailable";
 "model.app.languageUnsupported" = "recorded source language is unsupported";

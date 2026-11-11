@@ -365,75 +365,9 @@ final class RelationWindowController: NSViewController,
         return cell.selfTestBadgeLabelFrame(in: outlineView)
     }
 
-    /// Certainty and on-screen visibility of each visible edge's stones.
-    func selfTestEdgeStones(inGroup titlePrefix: String) -> [(String, Certainty?, Bool)] {
-        selfTestVisibleEdgeNodes(inGroup: titlePrefix).map { node in
-            let row = outlineView.row(forItem: node)
-            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
-                    as? RelationCellView,
-                  let stones = cell.selfTestStones
-            else { return (node.title, nil, false) }
-            let frame = stones.convert(stones.bounds, to: outlineView)
-            let visible = stones.window != nil && !stones.isHiddenOrHasHiddenAncestor
-                && selfTestFrameIsVisible(frame)
-            return (node.title, stones.certainty, visible)
-        }
-    }
-
-    var selfTestPossibleDisclosureStones: (Certainty?, Bool) {
-        guard let item = selfTestPossibleDisclosureItem,
-              let cell = outlineView.view(
-                atColumn: 0, row: outlineView.row(forItem: item), makeIfNecessary: true
-              ) as? RelationCellView,
-              let stones = cell.selfTestStones
-        else { return (nil, false) }
-        let frame = stones.convert(stones.bounds, to: outlineView)
-        return (stones.certainty, !stones.isHiddenOrHasHiddenAncestor && selfTestFrameIsVisible(frame))
-    }
-
-    var selfTestRootTitleIsSerif: Bool {
-        guard let root = model.root,
-              let cell = outlineView.view(
-                atColumn: 0, row: outlineView.row(forItem: root), makeIfNecessary: true
-              ) as? NSTableCellView,
-              let font = cell.textField?.font
-        else { return false }
-        return font.fontDescriptor.symbolicTraits.contains(.classModernSerifs)
-            || font.fontDescriptor.symbolicTraits.contains(.classOldStyleSerifs)
-            || font.fontDescriptor.symbolicTraits.contains(.classTransitionalSerifs)
-            || font.familyName?.contains("New York") == true
-            || font.fontName.contains("NewYork")
-    }
-
     func selfTestBadgeCornerRadius(titled title: String) -> CGFloat {
         (selfTestCell(titled: title, inGroup: "") as? RelationCellView)?
             .selfTestBadgeCornerRadius ?? 0
-    }
-
-    func selfTestBadgeToolTip(titled title: String) -> String? {
-        (selfTestCell(titled: title, inGroup: "") as? RelationCellView)?
-            .selfTestBadgeToolTip
-    }
-
-    func selfTestVisibleChildEdgeTitles(ofEdge title: String) -> [String] {
-        guard isViewLoaded else { return [] }
-        for row in 0..<outlineView.numberOfRows {
-            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
-                  node.kind == .edge,
-                  node.title == title
-            else { continue }
-            var result: [String] = []
-            for group in node.children ?? [] where group.kind == .group {
-                for child in group.children ?? []
-                    where child.kind == .edge
-                        && outlineView.row(forItem: child) >= 0
-                {
-                    result.append(child.title)
-                }
-            }
-            return result
-        }
-        return []
     }
 
     func selfTestDeselect() {
@@ -482,10 +416,6 @@ final class RelationWindowController: NSViewController,
         inspectorView.selfTestVisibleText
     }
 
-    var selfTestInspectorStones: (certainty: Certainty, visible: Bool)? {
-        inspectorView.selfTestStones
-    }
-
     var selfTestInspectorAuditVisible: Bool {
         inspectorView.selfTestAuditVisible
     }
@@ -504,15 +434,6 @@ final class RelationWindowController: NSViewController,
 
     func selfTestToggleInspectorAudit() {
         inspectorView.selfTestToggleAudit()
-    }
-
-    func selfTestExpandCorrectedCandidates() -> Bool {
-        guard let group = model.root?.children?.first(where: {
-            $0.kind == .group
-                && $0.candidateGroup == .corrected
-        }) else { return false }
-        outlineView.expandItem(group)
-        return outlineView.isItemExpanded(group)
     }
 
     func selfTestSelectCorrectedCandidate(titled title: String) -> Bool {
@@ -761,10 +682,6 @@ final class RelationWindowController: NSViewController,
         (node.children ?? []).reduce(0) { total, child in
             total + (child.kind == .edge ? 1 : 0) + (child.kind == .group ? edgeCount(under: child) : 0)
         }
-    }
-
-    var selfTestDirectionLabels: [String] {
-        (0..<directionControl.segmentCount).compactMap { directionControl.label(forSegment: $0) }
     }
 
     required init?(coder: NSCoder) {
@@ -1912,12 +1829,6 @@ private final class ResolutionInspectorView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    var selfTestStones: (certainty: Certainty, visible: Bool)? {
-        guard !stones.isHiddenOrHasHiddenAncestor else { return nil }
-        layoutSubtreeIfNeeded()
-        return (stones.certainty, stones.window != nil && stones.frame.width > 0)
-    }
-
     var selfTestVisibleText: [String] {
         var values: [String] = [
             captureChip.isHidden ? nil : captureChip.text,
@@ -2429,8 +2340,6 @@ private final class RelationCellView: NSTableCellView {
         badgeLabel.convert(badgeLabel.bounds, to: view)
     }
 
-    var selfTestBadgeToolTip: String? { badgeLabel.toolTip }
-    var selfTestStones: CertaintyStonesView? { stones.isHidden ? nil : stones }
     var selfTestBadgeCornerRadius: CGFloat { badgePill.layer?.cornerRadius ?? 0 }
     func selfTestInspect() { onInspect?() }
     var selfTestTitleAndCount: [String] {

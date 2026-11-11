@@ -126,9 +126,6 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
     }
     var hasSearchFocus: Bool { inputHasFocus || view.window?.firstResponder === outlineView }
     var outlineViewForTesting: NSOutlineView { outlineView }
-    var selfTestTheme: ReaderTheme { theme }
-    func selfTestStyledMatch(_ match: SearchMatch) -> NSAttributedString { styledMatch(match) }
-    func selfTestStyledGroup(path: String, count: Int) -> NSAttributedString { styledGroup(path: path, count: count) }
 
     func selfTestSetQuery(_ query: String) {
         input.stringValue = query
