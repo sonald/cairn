@@ -5,10 +5,17 @@ import Testing
 
 @testable import CodeInsightExact
 
+private let goToolchain = GoplsProvider.findExecutable(
+    named: "go",
+    projectURL: FileManager.default.temporaryDirectory
+)
+
 private let goTools: (gopls: URL, go: URL)? = {
-    let root = FileManager.default.temporaryDirectory
-    guard let gopls = GoplsProvider.findExecutable(named: "gopls", projectURL: root),
-          let go = GoplsProvider.findExecutable(named: "go", projectURL: root)
+    guard let go = goToolchain,
+          let gopls = GoplsProvider.findExecutable(
+              named: "gopls",
+              projectURL: FileManager.default.temporaryDirectory
+          )
     else { return nil }
     return (gopls, go)
 }()
@@ -466,7 +473,7 @@ private func downloadEnvironment(modcache: URL) -> [String: String] {
     return environment
 }
 
-@Test(.enabled(if: goTools != nil, "go is not installed"))
+@Test(.enabled(if: goToolchain != nil, "go is not installed"))
 func goDownloadRunsPerWorkspaceModuleAgainstCopiesAndLeavesTheRepositoryUnchanged() async throws {
     let fixture = try GoFixture([
         "go.work": "go 1.22\n\nuse (\n\t./a // first\n\t\"./b\"\n)\n",
@@ -499,7 +506,7 @@ func goDownloadRunsPerWorkspaceModuleAgainstCopiesAndLeavesTheRepositoryUnchange
     #expect(DependencySetup.suggestion(language: .go, unitRoot: fixture.root)?.runsInApp == false)
 }
 
-@Test(.enabled(if: goTools != nil, "go is not installed"))
+@Test(.enabled(if: goToolchain != nil, "go is not installed"))
 func goDownloadReportsGosWordsWhenGoModNeedsANewerGo() async throws {
     let fixture = try GoFixture([
         "go.mod": "module example.com/newgo\n\ngo 1.99\n",
@@ -525,7 +532,7 @@ private let cobraCorpus = FileManager.default.homeDirectoryForCurrentUser
 /// download fills the test's module cache while the repository, its
 /// incomplete `go.sum` included, stays byte for byte the same.
 @Test(.enabled(
-    if: goTools != nil
+    if: goToolchain != nil
         && FileManager.default.fileExists(atPath: cobraCorpus.appendingPathComponent(".git").path),
     "go or ~/.cache/cairn-corpora/cobra is unavailable"
 ))
