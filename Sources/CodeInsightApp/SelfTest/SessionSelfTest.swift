@@ -136,7 +136,8 @@ extension AppDelegate {
         let commitTitleMatchesRepository: Bool
         if (try? GitRepository(url: root)) != nil {
             commitTitleMatchesRepository = branchName.map {
-                commitTitle.hasPrefix("⎇ ") && commitTitle.contains($0)
+                $0 == "HEAD" ? commitTitle == "⎇ detached"
+                    : commitTitle.hasPrefix("⎇ ") && commitTitle.contains($0)
             } == true
         } else {
             commitTitleMatchesRepository = commitTitle == "Working Tree"

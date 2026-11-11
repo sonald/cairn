@@ -45,7 +45,9 @@ public func currentBranchName(repositoryURL: URL) -> String? {
         if detached < 0 {
             try check(detached, "git_repository_head_detached")
         }
-        if detached == 1 { return "detached" }
+        // Git's own spelling (`rev-parse --abbrev-ref`); git refuses it as a
+        // branch name, so no real branch can collide with it.
+        if detached == 1 { return "HEAD" }
         return git_reference_shorthand(head).map(String.init(cString:))
     }
 }

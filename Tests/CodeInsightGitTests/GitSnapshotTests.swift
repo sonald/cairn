@@ -179,6 +179,8 @@ func currentBranchNameReadsTheCheckedOutBranch() throws {
     try fixture.git("branch", "-M", "feature/toolbar")
 
     #expect(currentBranchName(repositoryURL: fixture.root) == "feature/toolbar")
+    try fixture.git("branch", "-M", "detached")
+    #expect(currentBranchName(repositoryURL: fixture.root) == "detached")
 }
 
 @Test
@@ -192,7 +194,7 @@ func currentBranchNameReportsDetachedHead() throws {
     try fixture.commit("base")
     try fixture.git("checkout", "--detach", "-q")
 
-    #expect(currentBranchName(repositoryURL: fixture.root) == "detached")
+    #expect(currentBranchName(repositoryURL: fixture.root) == "HEAD")
 }
 
 @Test

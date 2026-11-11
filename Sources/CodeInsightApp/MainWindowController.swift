@@ -3652,7 +3652,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.setExcludedByRules(excludedByRules)
         guard let revision = model.currentRevision else {
             commitButton.title = switch model.commitPicker.currentBranchName {
-            case "detached": localized("main.detached")
+            case "HEAD": localized("main.detached")
             case let branch?: localizedFormat("main.branch.working.tree", branch)
             case nil: localized("main.working.tree")
             }
