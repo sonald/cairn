@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightGoExtractor
 import CodeInsightReaderCore
 import CodeInsightRustExtractor
 import CodeInsightPythonExtractor
@@ -25,7 +26,13 @@ func indexedRegionsMatchReaderAndKnownSyntaxBoundaries() throws {
         export const value = `before ${x + "inside"} after`;
         export function run() { return /hello+/; }
         class Example { "quoted"() { return "body"; } }
-        """#, ["\"./module\"", "before ", "\"inside\"", " after", "/hello+/", "\"quoted\"", "\"body\""], "x +")
+        """#, ["\"./module\"", "before ", "\"inside\"", " after", "/hello+/", "\"quoted\"", "\"body\""], "x +"),
+        (GoExtractor(), #"""
+        package main
+        // 注释
+        func run() string { /* block */ r := 'x'; return "a" + `raw
+        文本` + string(r) }
+        """#, ["'x'", "\"a\"", "`raw\n文本`"], "+ string")
     ]
     for (extractor, source, expectedStrings, code) in fixtures {
         let bytes = Array(source.utf8)

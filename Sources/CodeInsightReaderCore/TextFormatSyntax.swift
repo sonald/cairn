@@ -209,8 +209,6 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         "xml": .markup, "plist": .markup, "xsd": .markup, "xsl": .markup,
         "xslt": .markup, "svg": .markup, "html": .markup, "htm": .markup,
         "js": .javascript, "jsx": .javascript, "mjs": .javascript, "cjs": .javascript,
-        // ponytail: until Go joins `LanguageMode.supported`, `classify(path:)` skips `.go`.
-        "go": .syntaxTree(LanguageMode(language: .go)),
     ].merging(CodeLanguage.byExtension.mapValues { .code($0) }) { format, _ in format }
     private static let exactNames: [String: TextFormat] = [
         "cargo.lock": .toml, "pipfile": .toml, "poetry.lock": .toml, "uv.lock": .toml,
