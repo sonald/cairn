@@ -28,10 +28,6 @@ func launchSelfTestIfRequested(
         _ = NSApplication.shared
         runReadonlyWorkloadSelfTest(arguments: arguments)
     }
-    if arguments.contains("--self-test-ligatures") {
-        _ = NSApplication.shared
-        runLigatureSelfTest(arguments: arguments)
-    }
     let foldPerformanceRequested = arguments.contains("--fold-perf-mode")
     let foldPerformance = foldPerformanceArguments(arguments)
     if foldPerformanceRequested, foldPerformance == nil {
@@ -50,19 +46,6 @@ func launchSelfTestIfRequested(
     if wrapPerformanceRequested, wrapPerformance == nil {
         let usage = "usage: codeinsight-app --self-test-wrap --fixture <path> --wrap <on|off> --scenario <initial|toggle|resize|reading-set> --output <json> [--code-sha <sha>] [--warmup N] [--samples N] [--font-postscript NAME] [--ligature-mode fontDefault|enabled|disabled]\n"
         FileHandle.standardError.write(Data(usage.utf8))
-        Darwin.exit(2)
-    }
-    let relationTimingRequested =
-        arguments.contains("--self-test-relation-timing")
-    let relationTimingTarget = relationTimingArguments(arguments)
-    if relationTimingRequested, relationTimingTarget == nil {
-        FileHandle.standardError.write(Data(
-            (
-                "usage: codeinsight-app --self-test-relation-timing "
-                    + "<project-root> <relative-file> <utf8-byte-offset> "
-                    + "<fake|real>\n"
-            ).utf8
-        ))
         Darwin.exit(2)
     }
     if let index = arguments.firstIndex(of: "--self-test-switch"),
@@ -190,70 +173,7 @@ func launchSelfTestIfRequested(
         Darwin.exit(2)
     }
     let delegate: AppDelegate
-    if let relationTimingTarget {
-        let temporaryRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "CodeInsightRelationTiming-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        let trustRegistry = TrustRegistry(
-            fileURL: temporaryRoot.appendingPathComponent("trust.json")
-        )
-        let providerState: ExactSelfTestProviderState?
-        let coordinator: ExactCoordinator
-        if relationTimingTarget.provider == "fake" {
-            let state = ExactSelfTestProviderState()
-            let location = ExactLocation(
-                file: relationTimingTarget.relativeFile,
-                byteOffset: Int(relationTimingTarget.offset),
-                line: 1,
-                column: 1
-            )
-            let item = exactSelfTestCallItem(
-                name: "relation-timing-target",
-                uri: relationTimingTarget.file,
-                location: location
-            )
-            let provider = InProcessExactProvider(
-                location: nil,
-                capabilities: [.callHierarchy],
-                callHierarchyItems: [item],
-                incomingRelations: [],
-                state: state
-            )
-            providerState = state
-            coordinator = ExactCoordinator(
-                providerFactory: { _ in provider },
-                sandboxAvailable: { true },
-                trustRegistry: trustRegistry
-            )
-        } else {
-            providerState = nil
-            coordinator = ExactCoordinator(
-                providerFactory: { projectURL in
-                    guard let executable = RustAnalyzerProvider.findExecutable()
-                    else {
-                        throw ExactError.unavailable(
-                            "rust-analyzer is not installed"
-                        )
-                    }
-                    return try RustAnalyzerProvider(
-                        projectURL: projectURL,
-                        executableURL: executable,
-                        requestTimeout: 30,
-                        closeGrace: 2
-                    )
-                },
-                trustRegistry: trustRegistry
-            )
-        }
-        delegate = AppDelegate(
-            startedAt: startedAt,
-            model: AppModel(exactCoordinator: coordinator),
-            exactSelfTestProviderState: providerState,
-            relationTimingTemporaryRoot: temporaryRoot
-        )
-    } else if let exactRoot {
+    if let exactRoot {
         let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
         let target = exactSelfTestTarget(root: fixtureRoot)
         let providerState = ExactSelfTestProviderState()
@@ -460,15 +380,7 @@ func launchSelfTestIfRequested(
     }
     app.delegate = delegate
     withExtendedLifetime(delegate) {
-        if let relationTimingTarget {
-            delegate.runRelationTimingSelfTest(
-                root: relationTimingTarget.root,
-                file: relationTimingTarget.file,
-                relativeFile: relationTimingTarget.relativeFile,
-                offset: relationTimingTarget.offset,
-                provider: relationTimingTarget.provider
-            )
-        } else if let exactRoot {
+        if let exactRoot {
             delegate.runExactSelfTest(root: exactRoot)
         } else if arguments.contains("--self-test-search") {
             delegate.runSearchSelfTest()
@@ -511,13 +423,6 @@ func launchSelfTestIfRequested(
            arguments.indices.contains(index + 1)
         {
             delegate.runProjectSelfTest(root: URL(
-                fileURLWithPath: arguments[index + 1],
-                isDirectory: true
-            ))
-        } else if let index = arguments.firstIndex(
-            of: "--self-test-gutter-line"
-        ), arguments.indices.contains(index + 1) {
-            delegate.runGutterLineSelfTest(root: URL(
                 fileURLWithPath: arguments[index + 1],
                 isDirectory: true
             ))
@@ -918,40 +823,6 @@ private func wrapPerformanceArguments(
     )
 }
 
-private func relationTimingArguments(
-    _ arguments: [String]
-) -> (
-    root: URL,
-    file: URL,
-    relativeFile: String,
-    offset: UInt32,
-    provider: String
-)? {
-    guard let index = arguments.firstIndex(of: "--self-test-relation-timing"),
-          arguments.indices.contains(index + 4),
-          let offset = UInt32(arguments[index + 3]),
-          ["fake", "real"].contains(arguments[index + 4])
-    else { return nil }
-    let root = URL(
-        fileURLWithPath: arguments[index + 1],
-        isDirectory: true
-    ).resolvingSymlinksInPath().standardizedFileURL
-    let relativeFile = arguments[index + 2]
-    guard !relativeFile.hasPrefix("/") else { return nil }
-    let file = root.appendingPathComponent(relativeFile)
-        .resolvingSymlinksInPath().standardizedFileURL
-    var isDirectory: ObjCBool = false
-    guard file.path.hasPrefix(root.path + "/"),
-          FileManager.default.fileExists(
-              atPath: root.path,
-              isDirectory: &isDirectory
-          ),
-          isDirectory.boolValue,
-          let bytes = try? Data(contentsOf: file),
-          Int(offset) < bytes.count
-    else { return nil }
-    return (root, file, relativeFile, offset, arguments[index + 4])
-}
 private func exactSelfTestCallItem(
     name: String,
     uri: URL,

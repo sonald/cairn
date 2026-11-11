@@ -49,7 +49,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// trust registry / checkout store / bookmark store (§4).
     private let injectedModel: AppModel?
     let exactSelfTestProviderState: ExactSelfTestProviderState?
-    let relationTimingTemporaryRoot: URL?
     let recentProjectsStore: RecentProjectsStore
     /// Session store anchor for windows the application assembles itself;
     /// self-tests inject an isolated URL so multi-window acceptance never
@@ -89,7 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         startedAt: ContinuousClock.Instant,
         model: AppModel? = nil,
         exactSelfTestProviderState: ExactSelfTestProviderState? = nil,
-        relationTimingTemporaryRoot: URL? = nil,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         windowSessionURL: URL? = nil,
         sharedTrustRegistry: TrustRegistry = TrustRegistry(),
@@ -98,7 +96,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         self.startedAt = startedAt
         self.injectedModel = model
         self.exactSelfTestProviderState = exactSelfTestProviderState
-        self.relationTimingTemporaryRoot = relationTimingTemporaryRoot
         self.recentProjectsStore = recentProjectsStore
         self.windowSessionURL = windowSessionURL
         self.sharedTrustRegistry = sharedTrustRegistry

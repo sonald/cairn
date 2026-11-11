@@ -3,4 +3,3 @@
 fixtures/wrap/** -text
 
 # Ligature fixtures include a byte-pinned CRLF sample.
-fixtures/ligatures/*.rs -text
