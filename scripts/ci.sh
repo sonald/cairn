@@ -166,15 +166,10 @@ mkdir -p .build
 # frozen total: deleted tests and parameterized tests are toolchain concerns.
 swift test ${swift_options[@]+"${swift_options[@]}"} list > .build/ci-test-list.txt
 filter="^($(IFS='|'; echo "${filters[*]}"))"
-# Shared window/font state and process-wide work counters require a fresh process.
-# AppKit state previously caused exit 0 without completing all targets.
+# Shared font state, native mouse input and process-wide work counters require
+# a fresh process.
 isolated=(
     'CodeInsightEngineTests\.readonlyCallOwnershipRepeatedQueriesHaveNoRegionScanOrRebuild'
-    'CodeInsightAppTests\.bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote'
-    'CodeInsightAppTests\.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
-    'CodeInsightAppTests\.productPolishRestoresUserPanelWidthsAcrossWindowRebuild'
-    'CodeInsightAppTests\.productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches'
-    'CodeInsightAppTests\.panelChangesAfterAClickDoNotRecordGeometry'
     'CodeInsightReaderUITests\.nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick'
     'CodeInsightReaderUITests\.nativeBlankClicksKeepTheReadingPositionAndFoldState'
     'readonlyFontProcessReplacementChangesRealFontWithoutChangingReaderSource'
