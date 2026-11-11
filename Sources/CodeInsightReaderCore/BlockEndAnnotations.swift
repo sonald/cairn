@@ -21,7 +21,7 @@ package enum BlockEndAnnotations {
     /// Annotations sorted by closing brace. Only brace languages qualify.
     package static func compute(for document: ReaderDocument) -> [BlockEndAnnotation] {
         let language = document.languageMode.language
-        guard language == .rust || language == .typescript else { return [] }
+        guard language == .rust || language == .typescript || language == .go else { return [] }
         let bytes = document.bytes
         var result: [BlockEndAnnotation] = []
         for region in document.foldRegions {
@@ -57,6 +57,9 @@ package enum BlockEndAnnotations {
         guard !header.isEmpty else { return nil }
         if language == .rust, let name = word(after: "fn", in: header) {
             return truncated("fn " + name)
+        }
+        if language == .go, let head = goFunctionHead(header) {
+            return truncated(head)
         }
         if language == .typescript {
             if let name = word(after: "function", in: header) { return truncated(name + "()") }
@@ -135,6 +138,27 @@ package enum BlockEndAnnotations {
             after = after[after.index(after: index)...].drop { $0 == " " }
         }
         return after.hasPrefix("(") ? String(name) : nil
+    }
+
+    /// `func (c *Command) Run(args []string) error` → `func (c *Command) Run`;
+    /// a function literal (`func(x int)`) has no name and keeps its header.
+    private static func goFunctionHead(_ header: String) -> String? {
+        guard header.hasPrefix("func ") || header.hasPrefix("func(") else { return nil }
+        var rest = header.dropFirst(4).drop { $0 == " " }
+        if rest.hasPrefix("(") {
+            var depth = 0
+            var index = rest.startIndex
+            while index < rest.endIndex {
+                if rest[index] == "(" { depth += 1 }
+                if rest[index] == ")" { depth -= 1; if depth == 0 { break } }
+                index = rest.index(after: index)
+            }
+            guard index < rest.endIndex else { return nil }
+            rest = rest[rest.index(after: index)...].drop { $0 == " " }
+        }
+        let name = rest.prefix(while: isIdentifierCharacter)
+        guard !name.isEmpty else { return nil }
+        return String(header[..<name.endIndex])
     }
 
     private static func isIdentifierCharacter(_ character: Character) -> Bool {

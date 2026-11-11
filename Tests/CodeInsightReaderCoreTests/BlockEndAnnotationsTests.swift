@@ -79,6 +79,32 @@ func blockEndAnnotationsLabelTypeScriptMethodsAndIgnorePython() throws {
 }
 
 @Test
+func blockEndAnnotationsNameGoFunctionsAndMethods() throws {
+    let go = """
+        package p
+
+        func (c *Command) Execute(args []string) error {
+        \(body(12, indent: "\t"))\
+        	switch len(args) {
+        	case 0:
+        \(body(12, indent: "\t\t"))\
+        	}
+        	return nil
+        }
+
+        func Map[T any](xs []T) []T {
+        \(body(12, indent: "\t"))\
+        	return xs
+        }
+
+        """
+    let labels = BlockEndAnnotations.compute(for: try load(go, .init(language: .go), name: "cmd.go")).map(\.label)
+    #expect(labels.contains("func (c *Command) Execute"))
+    #expect(labels.contains("func Map"))
+    #expect(labels.contains("switch len(args)"))
+}
+
+@Test
 func blockEndLabelsStayWithinTheLengthLimitForAnyHeader() {
     let headers = [
         "fn " + String(repeating: "长名字", count: 30) + "(x: i32)",
