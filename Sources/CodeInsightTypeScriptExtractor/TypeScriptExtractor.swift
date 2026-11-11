@@ -64,10 +64,14 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
         // Explicit stack, not recursion: project search runs this on a
         // cooperative thread, and a long `+` chain nests thousands deep.
         // A `property_identifier` counts only as a member access property
-        // (`obj.foo`), never as an object key or property/field declaration.
+        // (`obj.foo`) or an enum member name, never as an object key or
+        // property/field declaration. Shorthand `{ foo }` in a literal or a
+        // destructuring pattern names the binding itself.
         var pending = [(node: tree.rootNode, isMemberProperty: false)]
         while let (node, isMemberProperty) = pending.popLast() {
             if node.kind == "identifier" || node.kind == "type_identifier"
+                || node.kind == "shorthand_property_identifier"
+                || node.kind == "shorthand_property_identifier_pattern"
                 || (isMemberProperty && node.kind == "property_identifier"),
                (node.byteRange.upperBound - node.byteRange.lowerBound) == UInt32(name.count),
                bytes[Int(node.byteRange.lowerBound)..<Int(node.byteRange.upperBound)]
@@ -80,12 +84,17 @@ public struct TypeScriptExtractor: LanguageExtractor, Sendable {
             }
             let skippedTagName = ["jsx_opening_element", "jsx_self_closing_element", "jsx_closing_element"]
                 .contains(node.kind) ? childField(node, "name")?.byteRange : nil
-            let memberProperty = node.kind == "member_expression"
-                ? childField(node, "property")?.byteRange : nil
+            let memberField = switch node.kind {
+            case "member_expression": "property"
+            case "enum_assignment": "name"
+            default: ""
+            }
+            let memberProperty = memberField.isEmpty ? nil : childField(node, memberField)?.byteRange
+            let enumBody = node.kind == "enum_body"
             for child in node.namedChildren.reversed()
                 where child.byteRange != skippedTagName
             {
-                pending.append((child, child.byteRange == memberProperty))
+                pending.append((child, enumBody || child.byteRange == memberProperty))
             }
         }
         return hits

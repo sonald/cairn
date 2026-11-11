@@ -297,6 +297,31 @@ func identifierRangesIncludeSelfClosingJSXValueRefsButNotTagTokens() throws {
 }
 
 @Test
+func identifierRangesIncludeShorthandAndEnumMembersButNotKeysOrFields() throws {
+    let source = """
+        enum Kind { Shape, Other = 2 }
+        enum Assigned { Shape = 1 }
+        const Shape = Kind.Shape
+        const literal = { Shape }
+        const { Shape } = literal
+        const { Shape: renamed } = literal
+        const keyed = { Shape: 1 }
+        class Holder { Shape = 1 }
+        """
+    let bytes = Array(source.utf8)
+    let ranges = try TypeScriptExtractor().identifierRanges(
+        named: "Shape", in: bytes, mode: .init(language: .typescript)
+    )
+    let lines = ranges.map { range in
+        bytes[..<Int(range.lowerBound)].filter { $0 == UInt8(ascii: "\n") }.count + 1
+    }
+
+    // Both enum members, the const and `Kind.Shape`, both shorthands; not
+    // the renamed or literal keys or the class field.
+    #expect(lines == [1, 2, 3, 3, 4, 5])
+}
+
+@Test
 func importsExportsReexportAndDefaultNamespaceHonesty() throws {
     let source = """
         export function model(value: string): string {
