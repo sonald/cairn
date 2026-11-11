@@ -69,6 +69,17 @@ struct LSPLanguageSpec {
     /// A failure in server output that no restart fixes; the session
     /// becomes unavailable with the returned reason.
     var unavailableReason: (@Sendable (_ diagnostic: String) -> String?)?
+    /// Published diagnostics `onDiagnostic` sees while a document has one
+    /// (servers send them per document, replacing the last set).
+    var keepsPublishedDiagnostic: (@Sendable (_ message: String) -> Bool)?
+
+    /// Call on every client before `initialize`.
+    func configure(_ client: LSPClient) {
+        if let workspaceLoad { client.trackLoadProgress(title: workspaceLoad.title) }
+        if let keepsPublishedDiagnostic {
+            client.keepPublishedDiagnostics(matching: keepsPublishedDiagnostic)
+        }
+    }
 }
 
 /// Capabilities the server's `initialize` result advertises, for the given
@@ -217,9 +228,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         closeGrace: TimeInterval,
         attribution: ExactAttribution
     ) throws -> LSPLanguageSession {
-        if let load = language.workspaceLoad {
-            client.trackLoadProgress(title: load.title)
-        }
+        language.configure(client)
         let initializeResult = try client.initialize(
             rootURL: projectURL,
             initializationOptions: language.initializationOptions,
@@ -1046,9 +1055,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         openedFiles.removeAll()
         stateLock.unlock()
         observe(newClient)
-        if let load = language.workspaceLoad {
-            newClient.trackLoadProgress(title: load.title)
-        }
+        language.configure(newClient)
         do {
             _ = try newClient.initialize(
                 rootURL: projectURL,

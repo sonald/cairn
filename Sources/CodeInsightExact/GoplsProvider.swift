@@ -299,23 +299,30 @@ extension LSPLanguageSpec {
             acceptsPath: { LanguageMode.classify(path: $0, language: .go) != nil },
             languageID: { _ in "go" },
             onDiagnostic: goplsEnvironment,
-            unavailableReason: goplsUnavailableReason
+            unavailableReason: goplsUnavailableReason,
+            keepsPublishedDiagnostic: { $0.contains(goplsMissingPackage) }
         )
     }
 }
 
 /// Module lookups fail when the module cache lacks what the unit needs.
 /// A module without a pruned graph (`go` < 1.17) fails `go list` as a
-/// whole and gopls logs the lookup failure (evidence §3).
+/// whole and gopls logs the lookup failure (evidence §3). Newer modules
+/// load, and each import from a missing module gets a published diagnostic
+/// instead; an import that `go.mod` does not require reads the same.
 func goplsEnvironment(
     base: ExactAnalysisEnvironment,
     diagnostic: String
 ) -> ExactAnalysisEnvironment {
-    guard diagnostic.contains("module lookup disabled by GOPROXY=off") else { return base }
+    guard diagnostic.contains("module lookup disabled by GOPROXY=off")
+        || diagnostic.contains(goplsMissingPackage)
+    else { return base }
     var limitations = base.limitations
     limitations.insert(.dependenciesUnavailableOffline)
     return ExactAnalysisEnvironment(trustMode: base.trustMode, limitations: limitations)
 }
+
+let goplsMissingPackage = "(no required module provides package "
 
 /// go's own words when `go.mod` (or a dependency) needs a newer Go than the
 /// local toolchain, e.g. "go.mod requires go >= 1.99 (running go 1.27.3;

@@ -288,6 +288,40 @@ func goplsLabelsAModuleWhoseRequirementIsNotInTheModuleCache() throws {
 }
 
 @Test(.enabled(if: goTools != nil, "gopls or go is not installed"))
+func goplsLabelsAModernModuleWhoseImportedModuleIsNotInTheModuleCache() throws {
+    // `go 1.22` loads without the module; only the import's published
+    // diagnostic says it is missing.
+    let fixture = try GoFixture([
+        "go.mod": "module example.com/missing\n\ngo 1.22\n\nrequire example.invalid/dep v1.0.0\n",
+        "go.sum": """
+            example.invalid/dep v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            example.invalid/dep v1.0.0/go.mod h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+            """,
+        "main.go": """
+            package main
+
+            import "example.invalid/dep"
+
+            func answer() int { return dep.X }
+
+            func main() { _ = answer() }
+
+            """,
+    ])
+    let session = try fixture.session()
+    defer { session.close() }
+    let definition = try onlyDefinitionLocation(try session.definition(
+        file: "main.go",
+        byteOffset: fixture.offset(of: "answer", in: "main.go", occurrence: 2)
+    ))
+    #expect(definition.line == 5)
+    #expect(eventually {
+        session.attribution.environment.limitations.contains(.dependenciesUnavailableOffline)
+    })
+}
+
+@Test(.enabled(if: goTools != nil, "gopls or go is not installed"))
 func goplsBecomesUnavailableWithGosWordsWhenGoModNeedsANewerGo() throws {
     let fixture = try GoFixture([
         "go.mod": "module example.com/newgo\n\ngo 1.99\n",

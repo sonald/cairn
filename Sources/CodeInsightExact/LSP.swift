@@ -383,6 +383,11 @@ public final class LSPClient: @unchecked Sendable {
     /// A server tracked by `loadProgressTitle` that has not begun it this
     /// long after `initialized` is taken as loaded.
     static let loadProgressWindow: TimeInterval = 5
+    /// Published diagnostics the diagnostic text carries: per document,
+    /// the first message `keepsPublishedDiagnostic` accepts in its latest
+    /// publication, so one stays in the text while any document has one.
+    private var keepsPublishedDiagnostic: (@Sendable (String) -> Bool)?
+    private var keptPublishedDiagnostics: [String: String] = [:]
     /// Readiness signals in arrival order (`$/progress` begin/end,
     /// `experimental/serverStatus`, `window/logMessage`) for confirming a
     /// warm switch; `signalBase` counts the entries trimmed from the front.
@@ -435,6 +440,9 @@ public final class LSPClient: @unchecked Sendable {
     private var diagnosticTextLocked: String {
         return String(decoding: stderr, as: UTF8.self)
             + serverDiagnostics
+            + (keptPublishedDiagnostics.values.min().map {
+                "\ntextDocument/publishDiagnostics: \($0)"
+            } ?? "")
     }
 
     public init(
@@ -585,6 +593,13 @@ public final class LSPClient: @unchecked Sendable {
             ) { [weak self] in self?.loadProgressNeverBegan() }
         }
         return result
+    }
+
+    /// Call before `initialize`.
+    func keepPublishedDiagnostics(matching keeps: @escaping @Sendable (String) -> Bool) {
+        condition.lock()
+        keepsPublishedDiagnostic = keeps
+        condition.unlock()
     }
 
     /// Call before `initialize`: the server is quiescent once a `$/progress`
@@ -893,6 +908,19 @@ public final class LSPClient: @unchecked Sendable {
                     }
                     if let params = message["params"] as? [String: Any] {
                         recordSignal(method: method, params: params)
+                    }
+                    if method == "textDocument/publishDiagnostics",
+                       let keeps = keepsPublishedDiagnostic,
+                       let params = message["params"] as? [String: Any],
+                       let uri = params["uri"] as? String
+                    {
+                        let kept = (params["diagnostics"] as? [[String: Any]] ?? [])
+                            .lazy.compactMap { $0["message"] as? String }
+                            .first(where: keeps)
+                        if keptPublishedDiagnostics[uri] != kept {
+                            keptPublishedDiagnostics[uri] = kept
+                            diagnosticsChanged = true
+                        }
                     }
                     if method == "window/showMessage"
                         || method == "window/logMessage"
