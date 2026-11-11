@@ -1122,10 +1122,6 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                 markLoaded(observedClient)
             }
         }
-        // The load may have ended before anything reached the observer.
-        if watchesQuiescence, observedClient.isQuiescent {
-            markLoaded(observedClient)
-        }
     }
 
     /// The first quiescence after start (or a crash restart): the same
