@@ -2,10 +2,10 @@ import CodeInsightCore
 import Foundation
 
 /// How to put a unit's missing dependencies on this Mac. Analysis itself
-/// stays offline; the only download Cairn runs is `cargo fetch --locked`,
-/// which writes `~/.cargo` alone and runs no project code. The rest are
-/// commands the user runs, since they execute install scripts and write
-/// into the repository.
+/// stays offline; the downloads Cairn runs are `cargo fetch --locked` and
+/// `go mod download`, which write only the user's cargo or module cache and
+/// run no project code. The rest are commands the user runs, since they
+/// execute install scripts and write into the repository.
 public struct DependencySetup: Equatable, Sendable {
     public let command: String
     /// Where the command runs.
@@ -15,8 +15,8 @@ public struct DependencySetup: Equatable, Sendable {
     let unitRoot: URL
 
     /// `unitRoot` is the directory the server analyzes: for a commit, the
-    /// checkout (its `Cargo.lock` is the commit's); TypeScript and Python
-    /// pass the workspace unit, whose installs a commit borrows.
+    /// checkout (its `Cargo.lock` or `go.sum` is the commit's); TypeScript
+    /// and Python pass the workspace unit, whose installs a commit borrows.
     public static func suggestion(language: LanguageID, unitRoot: URL) -> DependencySetup? {
         let unit = unitRoot.standardizedFileURL
         switch language {
@@ -69,6 +69,18 @@ public struct DependencySetup: Equatable, Sendable {
                 command: command, directory: unit, runsInApp: false,
                 language: language, unitRoot: unit
             )
+        case .go:
+            // A vendored unit has its dependencies; without `go.sum` the
+            // download would not be pinned by the repository.
+            let fileManager = FileManager.default
+            let vendored = fileManager.fileExists(atPath: unit.appendingPathComponent("vendor").path)
+            let summed = goModules(unitRoot: unit).allSatisfy {
+                fileManager.fileExists(atPath: $0.appendingPathComponent("go.sum").path)
+            }
+            return DependencySetup(
+                command: "go mod download", directory: unit, runsInApp: summed && !vendored,
+                language: language, unitRoot: unit
+            )
         default:
             return nil
         }
@@ -87,33 +99,101 @@ public struct DependencySetup: Equatable, Sendable {
         }
     }
 
-    /// Runs `cargo fetch --locked` with the network allowed. Cancelling the
-    /// task terminates cargo. Throws with cargo's last stderr line.
+    /// Runs the download with the network allowed: `cargo fetch --locked`,
+    /// or for Go `go mod download` per module. Cancelling the task
+    /// terminates the tool. Throws with the tool's last stderr line.
     public func fetch() async throws {
+        try await fetch(environment: ProcessInfo.processInfo.environment)
+    }
+
+    func fetch(environment inherited: [String: String]) async throws {
         precondition(runsInApp)
+        if language == .go {
+            try await fetchGoModules(environment: inherited)
+            return
+        }
         // A Finder launch's PATH lacks rustup's `~/.cargo/bin`.
-        let cargoHome = ProcessInfo.processInfo.environment["CARGO_HOME"].map(URL.init(fileURLWithPath:))
+        let cargoHome = inherited["CARGO_HOME"].map(URL.init(fileURLWithPath:))
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo")
         let rustup = cargoHome.appendingPathComponent("bin/cargo")
         guard let cargo = FileManager.default.isExecutableFile(atPath: rustup.path)
-            ? rustup : findExecutable(named: "cargo")
+            ? rustup : findExecutable(named: "cargo", environment: inherited)
         else {
             throw ExactError.unavailable("cargo not found")
         }
-        let process = Process()
-        process.executableURL = cargo
-        process.arguments = ["fetch", "--locked"]
-        process.currentDirectoryURL = directory
-        var environment = ProcessInfo.processInfo.environment
+        var environment = inherited
         environment.removeValue(forKey: "CARGO_NET_OFFLINE")
         environment["CARGO_TERM_COLOR"] = "never"
         // rustup's cargo proxy finds rustc through PATH.
-        environment["PATH"] = ([cargo.deletingLastPathComponent()] + executableSearchDirectories())
+        environment["PATH"] = ([cargo.deletingLastPathComponent()] + executableSearchDirectories(environment: inherited))
             .map(\.path).joined(separator: ":")
+        try await Self.run(cargo, ["fetch", "--locked"], in: directory, environment: environment)
+    }
+
+    /// `go mod download` would rewrite an incomplete `go.sum`, so each module
+    /// downloads against copies of its `go.mod`/`go.sum` outside the
+    /// repository (`-modfile`); `-modfile` is refused in workspace mode,
+    /// hence `GOWORK=off` (evidence §5). `GOTOOLCHAIN=local` makes a
+    /// too-new `go.mod` fail with go's own words instead of fetching a
+    /// toolchain.
+    private func fetchGoModules(environment inherited: [String: String]) async throws {
+        guard let go = GoplsProvider.findExecutable(
+            named: "go", projectURL: unitRoot, environment: inherited
+        ) else {
+            throw ExactError.unavailable("go not found")
+        }
+        var environment = inherited
+        environment["GOWORK"] = "off"
+        environment["GOTOOLCHAIN"] = "local"
+        // `direct` module paths fetch with git.
+        environment["PATH"] = ([go.resolvingSymlinksInPath().deletingLastPathComponent()]
+            + executableSearchDirectories(environment: inherited))
+            .map(\.path).joined(separator: ":")
+        let fileManager = FileManager.default
+        for module in goModules(unitRoot: unitRoot) {
+            let copy = fileManager.temporaryDirectory
+                .appendingPathComponent("cairn-go-mod-\(UUID().uuidString)", isDirectory: true)
+            try fileManager.createDirectory(at: copy, withIntermediateDirectories: true)
+            defer { try? fileManager.removeItem(at: copy) }
+            for name in ["go.mod", "go.sum"]
+            where fileManager.fileExists(atPath: module.appendingPathComponent(name).path) {
+                try fileManager.copyItem(
+                    at: module.appendingPathComponent(name),
+                    to: copy.appendingPathComponent(name)
+                )
+            }
+            do {
+                try await Self.run(
+                    go,
+                    ["mod", "download", "-modfile=" + copy.appendingPathComponent("go.mod").path],
+                    in: module,
+                    environment: environment
+                )
+            } catch ExactError.unavailable(let detail) {
+                // go names the copy; say which of the unit's files it means.
+                let relative = projectRelativePath(of: module, projectURL: unitRoot) ?? module.path
+                throw ExactError.unavailable(detail.replacingOccurrences(
+                    of: copy.path + "/",
+                    with: relative.isEmpty ? "" : relative + "/"
+                ))
+            }
+        }
+    }
+
+    private static func run(
+        _ tool: URL,
+        _ arguments: [String],
+        in directory: URL,
+        environment: [String: String]
+    ) async throws {
+        let process = Process()
+        process.executableURL = tool
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
         process.environment = environment
-        // A file, not a pipe: cargo logs one line per crate and a full pipe would stall it.
+        // A file, not a pipe: the tool logs one line per package and a full pipe would stall it.
         let log = FileManager.default.temporaryDirectory
-            .appendingPathComponent("cairn-cargo-fetch-\(UUID().uuidString).log")
+            .appendingPathComponent("cairn-\(tool.lastPathComponent)-fetch-\(UUID().uuidString).log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         defer { try? FileManager.default.removeItem(at: log) }
         process.standardError = try FileHandle(forWritingTo: log)
@@ -138,9 +218,43 @@ public struct DependencySetup: Equatable, Sendable {
         guard status == 0 else {
             let output = String(decoding: (try? Data(contentsOf: log)) ?? Data(), as: UTF8.self)
             let lastLine = output.split(whereSeparator: \.isNewline).last.map(String.init)
-            throw ExactError.unavailable(lastLine ?? "cargo fetch exited with status \(status)")
+            throw ExactError.unavailable(
+                lastLine ?? "\(tool.lastPathComponent) \(arguments[0]) exited with status \(status)"
+            )
         }
     }
+}
+
+/// The modules a Go unit downloads for: each `use` directory of its
+/// `go.work`, else the unit itself.
+func goModules(unitRoot: URL) -> [URL] {
+    guard let work = try? String(
+        contentsOf: unitRoot.appendingPathComponent("go.work"),
+        encoding: .utf8
+    ) else { return [unitRoot] }
+    var modules: [URL] = []
+    var inBlock = false
+    for raw in work.split(whereSeparator: \.isNewline) {
+        var line = raw.split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false)[0]
+            .trimmingCharacters(in: .whitespaces)
+        if inBlock {
+            if line == ")" { inBlock = false; continue }
+        } else if line == "use (" || line == "use(" {
+            inBlock = true
+            continue
+        } else if line.hasPrefix("use ") {
+            line = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+        } else {
+            continue
+        }
+        let path = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"`"))
+        guard !path.isEmpty else { continue }
+        modules.append(
+            (path.hasPrefix("/") ? URL(fileURLWithPath: path) : unitRoot.appendingPathComponent(path))
+                .standardizedFileURL
+        )
+    }
+    return modules
 }
 
 /// Node resolves packages from every ancestor's `node_modules`, so a

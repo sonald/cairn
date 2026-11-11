@@ -376,3 +376,132 @@ func goplsWarmSwitchAnswersFromTheTargetCommitAtOnce() throws {
     #expect("\(before.file):\(before.line)" == "answer.go:5")
     #expect("\(after.file):\(after.line)" == "answer.go:3")
 }
+
+// MARK: Dependency download
+
+/// Every file under `root` (`.git` excluded) with its bytes.
+private func tree(_ root: URL) throws -> [String: Data] {
+    var files: [String: Data] = [:]
+    let base = root.resolvingSymlinksInPath().path + "/"
+    let walk = try #require(FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil))
+    for case let url as URL in walk {
+        let path = String(url.resolvingSymlinksInPath().path.dropFirst(base.count))
+        if path == ".git" { walk.skipDescendants(); continue }
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        files[path] = isDirectory.boolValue ? Data() : try Data(contentsOf: url)
+    }
+    return files
+}
+
+/// The download's environment with a module cache the test owns.
+private func downloadEnvironment(modcache: URL) -> [String: String] {
+    var environment = ProcessInfo.processInfo.environment
+    environment["GOMODCACHE"] = modcache.path
+    // The module cache is read-only by default; the test deletes it.
+    environment["GOFLAGS"] = "-modcacherw"
+    return environment
+}
+
+@Test(.enabled(if: goTools != nil, "go is not installed"))
+func goDownloadRunsPerWorkspaceModuleAgainstCopiesAndLeavesTheRepositoryUnchanged() async throws {
+    let fixture = try GoFixture([
+        "go.work": "go 1.22\n\nuse (\n\t./a // first\n\t\"./b\"\n)\n",
+        "a/go.mod": "module example.com/a\n\ngo 1.22\n",
+        "a/go.sum": "",
+        "a/a.go": "package a\n",
+        "b/go.mod": "module example.com/b\n\ngo 1.22\n",
+        "b/go.sum": "",
+        "b/b.go": "package b\n",
+    ])
+    #expect(goModules(unitRoot: fixture.root) == [
+        fixture.root.appendingPathComponent("a").standardizedFileURL,
+        fixture.root.appendingPathComponent("b").standardizedFileURL,
+    ])
+    let setup = try #require(DependencySetup.suggestion(language: .go, unitRoot: fixture.root))
+    #expect(setup.command == "go mod download")
+    #expect(setup.runsInApp)
+    let before = try tree(fixture.root)
+
+    // In workspace mode go refuses `-modfile`.
+    try await setup.fetch(
+        environment: downloadEnvironment(modcache: fixture.scratch.appendingPathComponent("modcache"))
+    )
+
+    #expect(try tree(fixture.root) == before)
+    try FileManager.default.createDirectory(
+        at: fixture.root.appendingPathComponent("vendor"),
+        withIntermediateDirectories: true
+    )
+    #expect(DependencySetup.suggestion(language: .go, unitRoot: fixture.root)?.runsInApp == false)
+}
+
+@Test(.enabled(if: goTools != nil, "go is not installed"))
+func goDownloadReportsGosWordsWhenGoModNeedsANewerGo() async throws {
+    let fixture = try GoFixture([
+        "go.mod": "module example.com/newgo\n\ngo 1.99\n",
+        "go.sum": "",
+    ])
+    let setup = try #require(DependencySetup.suggestion(language: .go, unitRoot: fixture.root))
+    // Without GOTOOLCHAIN=local go would try to download go1.99 instead.
+    await #expect {
+        try await setup.fetch(
+            environment: downloadEnvironment(modcache: fixture.scratch.appendingPathComponent("modcache"))
+        )
+    } throws: { error in
+        guard case ExactError.unavailable(let detail) = error else { return false }
+        return detail.hasPrefix("go: go.mod requires go >= 1.99 (running go ")
+            && detail.hasSuffix("; GOTOOLCHAIN=local)")
+    }
+}
+
+private let cobraCorpus = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".cache/cairn-corpora/cobra", isDirectory: true)
+
+/// Evidence §5 on cobra adbc881 with two `go.sum` lines removed: the
+/// download fills the test's module cache while the repository, its
+/// incomplete `go.sum` included, stays byte for byte the same.
+@Test(.enabled(
+    if: goTools != nil
+        && FileManager.default.fileExists(atPath: cobraCorpus.appendingPathComponent(".git").path),
+    "go or ~/.cache/cairn-corpora/cobra is unavailable"
+))
+func goDownloadFillsTheModuleCacheWithoutTouchingAnIncompleteGoSum() async throws {
+    let scratch = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let clone = scratch.appendingPathComponent("cobra", isDirectory: true)
+    let git = URL(fileURLWithPath: "/usr/bin/git")
+    for arguments in [
+        ["clone", "-q", "--local", "--no-checkout", cobraCorpus.path, clone.path],
+        ["-C", clone.path, "checkout", "-q", "--detach", "adbc8813901bba65827259daa8e22ff94ec1f30e"],
+    ] {
+        let result = try run(executable: git, arguments: arguments)
+        try #require(result.status == 0, "\(result.output)")
+    }
+    let goSum = clone.appendingPathComponent("go.sum")
+    let lines = try String(contentsOf: goSum, encoding: .utf8)
+        .split(separator: "\n", omittingEmptySubsequences: false)
+    try Data(lines.filter { !$0.hasPrefix("github.com/spf13/pflag v1.0.9") }
+        .joined(separator: "\n").utf8).write(to: goSum)
+    let before = try tree(clone)
+    let status = try run(executable: git, arguments: ["-C", clone.path, "status", "--porcelain"])
+    let modcache = scratch.appendingPathComponent("modcache")
+    let setup = try #require(DependencySetup.suggestion(language: .go, unitRoot: clone))
+    #expect(setup.runsInApp)
+
+    do {
+        try await setup.fetch(environment: downloadEnvironment(modcache: modcache))
+    } catch ExactError.unavailable(let detail)
+        where ["dial tcp", "no such host", "i/o timeout", "connection refused", "TLS handshake"]
+            .contains(where: detail.contains)
+    {
+        #expect(try tree(clone) == before)
+        try Test.cancel("cobra download: network unavailable: \(detail)")
+    }
+
+    #expect(try tree(clone) == before)
+    #expect(try run(executable: git, arguments: ["-C", clone.path, "status", "--porcelain"]).output
+        == status.output)
+    #expect(FileManager.default.fileExists(atPath: modcache
+        .appendingPathComponent("cache/download/github.com/spf13/pflag/@v/v1.0.9.zip").path))
+}
