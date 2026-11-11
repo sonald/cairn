@@ -51,7 +51,9 @@ struct RelationUXTests {
             == CodeInsightApp.localizedFormat("relation.inspector.node.capture", display.nodeTitle))
 
         fixture.model.updateProjectState(.empty)
-        await pumpRunLoop()
+        #expect(await relationTestWaitUntil("inspector leaves with the project") {
+            !fixture.controller.selfTestInspectorIsFrozen && !fixture.controller.selfTestInspectorVisible
+        })
         // The frozen excerpt remains valid, but a departed project must
         // not leave its inspector visible in the next project's window.
         #expect(!fixture.controller.selfTestInspectorIsFrozen)
@@ -135,7 +137,8 @@ struct RelationUXTests {
         fixture.controller.onOpen = { _ in opens += 1 }
 
         #expect(fixture.controller.selfTestClickBadge(titled: "first"))
-        await pumpRunLoop()
+        #expect(await relationTestWaitUntil("inspector visible") { fixture.controller.selfTestInspectorVisible })
+        await pumpRunLoop() // negative check below: a stray open must have time to arrive
         let text = fixture.controller.selfTestInspectorText
         let accessibility = fixture.controller.selfTestInspectorAccessibility
         #expect(fixture.controller.selfTestInspectorVisible)
@@ -423,13 +426,8 @@ struct RelationUXTests {
 
         #expect(requestedOffsets.isEmpty)
         #expect(fixture.controller.selfTestExpandPossibleMatches())
-        for _ in 0..<100 {
-            if requestedOffsets.count
-                == RelationTreeModel.possibleValidationBatchSize
-            {
-                break
-            }
-            try? await Task.sleep(for: .milliseconds(10))
+        _ = await relationTestWaitUntil("first possible-match batch requested") {
+            requestedOffsets.count >= RelationTreeModel.possibleValidationBatchSize
         }
         #expect(
             requestedOffsets.count
@@ -438,13 +436,11 @@ struct RelationUXTests {
         #expect(Set(requestedOffsets) == firstBatchOffsets)
         #expect(requestedOffsets.count < possible.count)
 
-        for _ in 0..<100 {
-            let count = fixture.model.root?.children?.first {
+        _ = await relationTestWaitUntil("validated matches leave the possible group") {
+            fixture.model.root?.children?.first {
                 $0.kind == .group
                     && $0.title.hasSuffix("possible matches")
-            }?.children?.count
-            if count == possible.count - requestedOffsets.count { break }
-            try? await Task.sleep(for: .milliseconds(10))
+            }?.children?.count == possible.count - requestedOffsets.count
         }
         let remainingPossible = try #require(fixture.model.root?.children?.first {
             $0.kind == .group
@@ -456,9 +452,8 @@ struct RelationUXTests {
         #expect(fixture.controller.selfTestScrollPossibleMatchToVisible(
             at: remainingPossible.count - 1
         ))
-        for _ in 0..<100 {
-            if requestedOffsets.count == possible.count { break }
-            try? await Task.sleep(for: .milliseconds(10))
+        _ = await relationTestWaitUntil("scrolled possible matches requested") {
+            requestedOffsets.count >= possible.count
         }
         print(
             "possible viewport requests first="
@@ -793,6 +788,7 @@ func mixedProjectReaderDisplaysFourModesWithTsxVariant() async throws {
     )
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path, "init", "-q"]
     try process.run()
     process.waitUntilExit()
@@ -988,12 +984,12 @@ func sessionRestoreRemembersPresetAndDistinctViewportAndSelectionAnchors() async
     )
 
     fixture.controller.restoreSession(snapshot)
-    let deadline = ContinuousClock.now + .seconds(3)
-    while ContinuousClock.now < deadline {
-        if fixture.controller.selfTestReadingByteOffset == scroll,
-           fixture.controller.selfTestReaderCaretByteOffset == selection { break }
-        try await Task.sleep(for: .milliseconds(10))
-    }
+    #expect(await relationTestWaitUntil("restored file, viewport and caret") {
+        fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL
+            && fixture.controller.selfTestTabCount == 1
+            && fixture.controller.selfTestReadingByteOffset == scroll
+            && fixture.controller.selfTestReaderCaretByteOffset == selection
+    })
     #expect(fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL)
 
     #expect(fixture.controller.selfTestPanelPreset == .relations)
@@ -1313,9 +1309,12 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(fixture.controller.selfTestResolutionInspectorVisible)
     // The relation jump commits after its content-identity validation task,
     // so the window chrome renders one main-actor hop later than the model.
-    await pumpRunLoop()
     fixture.controller.showWindow(nil)
-    fixture.controller.window?.displayIfNeeded()
+    #expect(await relationTestWaitUntil("trail bar shows both nodes") {
+        fixture.controller.window?.displayIfNeeded()
+        return fixture.controller.selfTestTrailBarVisible
+            && fixture.controller.selfTestTrailBreadcrumbTitles.count == 2
+    })
     #expect(fixture.controller.selfTestTrailBarVisible)
     #expect(fixture.controller.selfTestTrailBreadcrumbTitles.count == 2)
     #expect(fixture.controller.selfTestTrailBreadcrumbText.contains("relation"))
@@ -1463,8 +1462,11 @@ func semanticTrailKeepsBranchesVisibleAndRestorable() async throws {
         fixture.model.selectedFile?.standardizedFileURL == b.standardizedFileURL
     })
     // The last relation jump commits after its content-identity validation
-    // task; let the observation-driven render publish the trail first.
-    await pumpRunLoop()
+    // task; wait for the observation-driven render to publish the trail.
+    #expect(await relationTestWaitUntil("trail publishes the b.rs branch") {
+        fixture.model.readingTrail.nodes.count == 3
+            && fixture.controller.selfTestTrailBreadcrumbTitles.last?.contains("b.rs") == true
+    })
 
     #expect(fixture.model.readingTrail.nodes.count == 3)
     #expect(fixture.model.readingTrail.edges.count == 2)
@@ -2272,9 +2274,11 @@ func openingRelationsInTheNarrowestWindowSqueezesZonesWithoutGrowingIt() async t
     try #require(await relationTestWaitUntil("references loaded") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
     })
-    try await Task.sleep(for: .milliseconds(200))
-    fixture.controller.renderForSelfTest()
-    fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    #expect(await relationTestWaitUntil("relations pane rendered open") {
+        fixture.controller.renderForSelfTest()
+        fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+        return !fixture.controller.selfTestRelationsPaneCollapsed
+    })
 
     // Both zones stay open and are squeezed: the window keeps its width
     // and the reader its 320pt floor.

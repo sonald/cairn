@@ -190,11 +190,11 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     func selfTestFinalizeNote() { finalizeNote() }
 
-    func selfTestPressCopyMarkdown() { copyButton.performClick(nil) }
+    func selfTestPressCopyMarkdown() { selfTestPress(copyButton) }
 
     var selfTestLastCopiedMarkdown: String { lastCopiedMarkdown }
 
-    func selfTestPressExportMarkdown() { markdownExportButton.performClick(nil) }
+    func selfTestPressExportMarkdown() { selfTestPress(markdownExportButton) }
 
     @discardableResult
     func selfTestPressFirstOpen() -> Bool {
@@ -233,14 +233,22 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             makeIfNecessary: true
         ), let button = buttons(in: cell).first(where: { $0.title == title })
         else { return false }
-        button.performClick(nil)
+        selfTestPress(button)
         return true
+    }
+
+    /// Sends the button's action directly. `performClick` spins the event loop
+    /// for its highlight and leaves a run-loop stop behind; in a test process
+    /// that stops the main run loop and the runner exits 0 mid-run.
+    private func selfTestPress(_ button: NSButton) {
+        guard button.isEnabled else { return }
+        _ = button.sendAction(button.action, to: button.target)
     }
 
     @discardableResult
     func selfTestPressExport() -> Bool {
         guard !exportButton.isHidden, exportButton.isEnabled else { return false }
-        exportButton.performClick(nil)
+        selfTestPress(exportButton)
         return true
     }
 

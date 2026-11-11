@@ -77,7 +77,7 @@ private actor GatedIndexService: IndexService {
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> [EngineSession] {
         waiting += 1
-        while holdsComplete { await Task.yield() }
+        _ = await testWaitUntil("complete released") { await !self.holdsComplete }
         waiting -= 1
         let sessions = try await wrapped.completeSnapshot(prepared)
         completedFromCached.append(zip(sessions, prepared.cachedSessions).allSatisfy { $0 === $1 })
@@ -1883,6 +1883,7 @@ private final class SnapshotGitFixture {
     func git(_ arguments: String...) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.environment = hermeticGitEnvironment
         process.arguments = arguments
         process.currentDirectoryURL = root
         let output = Pipe()

@@ -79,9 +79,11 @@ func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() asyn
         #expect(abs(after.offset - anchor.offset) <= 2)
         #expect(view.selfTestLayoutState.allSatisfy { $0.heightConstraints == 1 && $0.contentBottom <= $0.documentHeight })
         let measured = view.selfTestMeasurementCount
+        let revision = ReaderFontResolver.shared.fontEnvironmentRevision
         view.apply(settings: settings)
         await settleLigatureReadingSet(window)
-        #expect(view.selfTestMeasurementCount == measured)
+        #expect(view.selfTestMeasurementCount == measured,
+                "font environment revision \(revision) -> \(ReaderFontResolver.shared.fontEnvironmentRevision)")
     }
     let beforeRefresh = view.selfTestMeasurementCount
     ReaderFontResolver.shared.refresh()

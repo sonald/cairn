@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightReaderCore
+import CodeInsightReaderUI
 import Foundation
 import Testing
 @testable import CodeInsightApp
@@ -57,7 +58,7 @@ func readingSetScrollPublishesItsNumericCheckpointOffset() async throws {
     window.contentView?.layoutSubtreeIfNeeded()
 
     controller.setReadingSetScrollOffsetForSelfTest(80)
-    try? await Task.sleep(for: .milliseconds(20))
+    #expect(await mainWindowWaitUntil(observedOffset == 80))
 
     #expect(observedOffset == 80)
     #expect(controller.currentReadingSetScrollOffset == 80)
@@ -201,9 +202,11 @@ func readingSetWrapUsesActualRowsAndOneHeightConstraint() async throws {
         #expect(state.contentBottom <= state.documentHeight)
     }
     let counts = view.selfTestLayoutState.map(\.measurements)
+    let revision = ReaderFontResolver.shared.fontEnvironmentRevision
     view.apply(settings: settings)
     await settleReadingSet(window)
-    #expect(view.selfTestLayoutState.map(\.measurements) == counts)
+    #expect(view.selfTestLayoutState.map(\.measurements) == counts,
+            "font environment revision \(revision) -> \(ReaderFontResolver.shared.fontEnvironmentRevision)")
     for style in [NSScroller.Style.legacy, .overlay] {
         view.selfTestCodeScrollViews.forEach { $0.scrollerStyle = style }
         settings.wrapLines = false

@@ -373,13 +373,13 @@ func projectSearchQueriesAllWorkspaceSessions() async throws {
 
     try #require(await mainWindowWaitUntil(
         controller.selfTestProjectSearchOutlineState.map {
-            $0.matchRows == 3 && $0.status.contains("3 matches in 3 files")
+            // All matches can be listed a moment before the search reports done.
+            $0.matchRows == 3 && $0.status.contains("3 matches in 3 files") && !$0.searching
         } ?? false
     ))
     let state = try #require(controller.selfTestProjectSearchOutlineState)
     #expect(state.groupRows == 3)
     #expect(state.matchRows == 3)
-    #expect(!state.searching)
 }
 
 @MainActor
@@ -550,6 +550,7 @@ private func mainWindowTemporaryGitProject(
     let root = try mainWindowTemporaryProject(files)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path, "init", "-q"]
     try process.run()
     process.waitUntilExit()
@@ -566,7 +567,7 @@ private func mainWindowProjectStateFailed(_ model: AppModel) -> Bool {
 }
 
 @MainActor
-private func mainWindowWaitUntil(
+func mainWindowWaitUntil(
     _ condition: @autoclosure () -> Bool
 ) async -> Bool {
     let deadline = ContinuousClock.now + .seconds(30)
@@ -635,7 +636,10 @@ func lensListsEveryCandidateBesideTheExcerptAndClickingSelectsIt() async throws 
         offset: UInt32(main[..<main.range(of: "target();")!.lowerBound].utf8.count)
     )
     #expect(await mainWindowWaitUntil(contextModel.candidateCount >= 2))
-    try await Task.sleep(for: .milliseconds(100))
+    #expect(await mainWindowWaitUntil(
+        controller.selfTestCandidateList.visible
+            && controller.selfTestCandidateList.rows.count == contextModel.candidateCount
+    ))
     let list = controller.selfTestCandidateList
     #expect(list.visible)
     #expect(list.rows.count == contextModel.candidateCount)
@@ -710,8 +714,10 @@ func contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() async throw
         offset: UInt32(source[..<source.range(of: "target();")!.lowerBound].utf8.count)
     )
     #expect(await mainWindowWaitUntil(contextModel.candidateCount >= 1))
-    try await Task.sleep(for: .milliseconds(150))
-    content.layoutSubtreeIfNeeded()
+    #expect(await mainWindowWaitUntil({
+        content.layoutSubtreeIfNeeded()
+        return controller.selfTestProvenance?.contains("·") == true
+    }()))
     #expect(controller.selfTestProvenance?.contains("·") == true)
     let fuzzyFrame = window.frame
 
@@ -748,7 +754,10 @@ func contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() async throw
             contextModel.displayedCandidate?.certainty == .exact
         )
     )
-    try await Task.sleep(for: .milliseconds(150))
+    #expect(await mainWindowWaitUntil({
+        content.layoutSubtreeIfNeeded()
+        return controller.selfTestProvenanceTooltip?.contains("extremely-long-provider-name") == true
+    }()))
     content.layoutSubtreeIfNeeded()
     // The badge line stays short and the window keeps its frame; the full
     // provenance remains reachable through the tooltip and AX value.
@@ -1630,7 +1639,7 @@ func panelChangesAfterAClickDoNotRecordGeometry() async throws {
         with: .leftMouseUp, location: NSPoint(x: 600, y: 400), modifierFlags: [], timestamp: 0,
         windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 0
     ))
-    NSApp.postEvent(click, atStart: true)
+    postTestEvent(click)
     let current = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: true)
     try #require(current != nil && NSApp.currentEvent?.type == .leftMouseUp)
     let before = controller.panelLayout
@@ -1682,8 +1691,12 @@ func projectSymbolPreviewShowsTheSymbolInTheContext() async throws {
     // The file is not shown yet when the preview hands over the symbol.
     try preview("append")
     #expect(await mainWindowWaitUntil(model.contextWindow.displayedCandidate?.targetByteOffset == 39))
+    #expect(await mainWindowWaitUntil({
+        controller.renderForSelfTest()
+        return !controller.selfTestContextPaneCollapsed
+    }()))
+    // Negative check below: give a late previous-token flag time to appear.
     try await Task.sleep(for: .milliseconds(300))
-    controller.renderForSelfTest()
     #expect(!controller.selfTestContextPaneCollapsed, "the Context appears as for a reader click")
     #expect(!model.contextWindow.isShowingPreviousToken)
 
@@ -1733,3 +1746,27 @@ func olderWindowSessionSaveKeepsAnotherWindowsLayoutChange() async throws {
     #expect(!PanelLayout.decode(defaults.data(forKey: "Cairn.panelLayout.v2")).hidden.contains(.relations),
             "The newer window's change survives")
 }
+
+/// `NSApp.postEvent` stops the run loop it is called under. Called straight
+/// from a test, that is the test process's main run loop: the runner then
+/// exits 0 without running the remaining tests or printing a summary. Posting
+/// from a nested run keeps the stop inside it; the event stays queued.
+@MainActor
+private func postTestEvent(_ event: NSEvent) {
+    nonisolated(unsafe) let event = event
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) {
+        MainActor.assumeIsolated { NSApp.postEvent(event, atStart: true) }
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+    CFRunLoopRunInMode(.defaultMode, 1, false)
+}
+
+/// Test repositories must not read the user's git configuration.
+let hermeticGitEnvironment = ProcessInfo.processInfo.environment.merging([
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "CodeInsight Tests",
+    "GIT_AUTHOR_EMAIL": "codeinsight@example.com",
+    "GIT_COMMITTER_NAME": "CodeInsight Tests",
+    "GIT_COMMITTER_EMAIL": "codeinsight@example.com",
+]) { $1 }

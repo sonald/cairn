@@ -18,6 +18,7 @@ private func appServicesMakeGitProject(at project: URL) throws {
     ] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.environment = hermeticGitEnvironment
         process.arguments = arguments
         process.currentDirectoryURL = project
         process.standardOutput = FileHandle.nullDevice
@@ -30,7 +31,8 @@ private func appServicesMakeGitProject(at project: URL) throws {
 
 @MainActor
 private func appServicesEventually(_ condition: () -> Bool) async -> Bool {
-    let deadline = Date(timeIntervalSinceNow: 10)
+    // Hang fuse only; a parallel target run has taken longer than 10 s to open.
+    let deadline = Date(timeIntervalSinceNow: 30)
     while !condition(), Date() < deadline {
         try? await Task.sleep(for: .milliseconds(20))
     }

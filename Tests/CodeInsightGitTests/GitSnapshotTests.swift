@@ -1026,6 +1026,7 @@ final class GitFixture {
     func git(_ arguments: String...) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.environment = hermeticGitEnvironment
         process.arguments = arguments
         process.currentDirectoryURL = root
         let outputPipe = Pipe()
@@ -1059,6 +1060,7 @@ enum FixtureError: Error {
 private func repositoryGit(_ arguments: String...) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = arguments
     process.currentDirectoryURL = repositoryRoot
     let output = Pipe()
@@ -1078,3 +1080,15 @@ private func repositoryGit(_ arguments: String...) throws -> String {
         encoding: .utf8
     )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 }
+
+/// Child environment for test git processes: no user or system config (the
+/// user's ~/.gitconfig can sit behind a macOS privacy prompt) and a fixed
+/// identity for fixture commits.
+private let hermeticGitEnvironment = ProcessInfo.processInfo.environment.merging([
+    "GIT_CONFIG_GLOBAL": "/dev/null",
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "CodeInsight Tests",
+    "GIT_AUTHOR_EMAIL": "codeinsight@example.com",
+    "GIT_COMMITTER_NAME": "CodeInsight Tests",
+    "GIT_COMMITTER_EMAIL": "codeinsight@example.com",
+]) { $1 }

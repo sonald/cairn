@@ -1572,6 +1572,7 @@ private func sessionRestoreGit(
 ) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path] + arguments
     try process.run()
     process.waitUntilExit()
@@ -1583,6 +1584,7 @@ private func sessionRestoreGit(
 private func sessionRestoreCurrentHEAD(_ root: URL) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path, "rev-parse", "HEAD"]
     let pipe = Pipe()
     process.standardOutput = pipe

@@ -2801,7 +2801,9 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
         if blockReferences {
             didStartReferences = true
             condition.broadcast()
-            while blockReferences { condition.wait() }
+            let deadline = Date().addingTimeInterval(120)
+            while blockReferences, condition.wait(until: deadline) {}
+            if blockReferences { Issue.record("Hang fuse expired waiting for blockReferences release") }
         }
         condition.unlock()
         return referenceLocations
@@ -2827,7 +2829,9 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
         if blockIncoming {
             didStartIncoming = true
             condition.broadcast()
-            while blockIncoming { condition.wait() }
+            let deadline = Date().addingTimeInterval(120)
+            while blockIncoming, condition.wait(until: deadline) {}
+            if blockIncoming { Issue.record("Hang fuse expired waiting for blockIncoming release") }
         }
         condition.unlock()
         return switch item.name {
@@ -3400,6 +3404,7 @@ private func relationGit(_ root: URL, _ arguments: String...) throws {
     let process = Process()
     let output = Pipe()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = arguments
     process.currentDirectoryURL = root
     process.standardOutput = output

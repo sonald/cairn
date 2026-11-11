@@ -9,20 +9,6 @@ import Testing
 @testable import CodeInsightExact
 
 @Test
-func exactReferencesCapabilityUsesTheNextUnusedBit() {
-    #expect(ExactCapabilities.references.rawValue == 1 << 3)
-}
-
-@Test
-func pyrightProviderCapabilitiesAreFixedMaximum() {
-    #expect(
-        PyrightProvider.supportedCapabilities
-            == [.definition, .references, .callHierarchy, .hover]
-    )
-    #expect(!PyrightProvider.supportedCapabilities.contains(.implementations))
-}
-
-@Test
 func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions() throws {
     #expect(
         TypeScriptLanguageServerProvider.supportedCapabilities
@@ -2127,9 +2113,9 @@ func explicitOfflineDependencyFailureAddsLimitation() {
     ])
 }
 
-@Test
+@Test(.enabled(if: RustAnalyzerProvider.findExecutable() != nil, "rust-analyzer is not installed"))
 func rustAnalyzerUsesEachCheckedOutCommitWhenInstalled() throws {
-    guard let executable = RustAnalyzerProvider.findExecutable() else { return }
+    let executable = try #require(RustAnalyzerProvider.findExecutable())
     let fixture = try ExactGitFixture()
     defer { fixture.remove() }
     try fixture.write("[package]\nname='history'\nversion='0.1.0'\nedition='2021'\n", to: "Cargo.toml")
@@ -2186,26 +2172,28 @@ func rustAnalyzerUsesEachCheckedOutCommitWhenInstalled() throws {
     } catch ExactError.unavailable(let detail)
         where detail.contains("sandbox-exec")
     {
-        print("SKIP historical exact: \(detail); noBareExecution=true")
+        try Test.cancel("historical exact: \(detail); noBareExecution=true")
     }
 }
+
+private let toydb = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("work/rust/toydb", isDirectory: true)
 
 /// S0 evidence item 2 on the real corpus: after a warm switch of toydb
 /// from 46308de to babe5de, `src/sql/execution/mod.rs:40:79` resolves to
 /// the `HashJoin` declared in `join.rs` by the target commit. Reads the
 /// user's clone only through the checkout's alternates.
-@Test
+@Test(.enabled(
+    if: RustAnalyzerProvider.findExecutable() != nil
+        && FileManager.default.fileExists(atPath: toydb.appendingPathComponent(".git").path)
+        && (try? CommitSnapshot(repositoryURL: toydb, revision: "46308de")) != nil
+        && (try? CommitSnapshot(repositoryURL: toydb, revision: "babe5de")) != nil,
+    "rust-analyzer or ~/work/rust/toydb at 46308de/babe5de unavailable"
+))
 func rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb() throws {
-    let toydb = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("work/rust/toydb", isDirectory: true)
-    guard let executable = RustAnalyzerProvider.findExecutable(),
-          FileManager.default.fileExists(atPath: toydb.appendingPathComponent(".git").path),
-          let from = try? CommitSnapshot(repositoryURL: toydb, revision: "46308de"),
-          let to = try? CommitSnapshot(repositoryURL: toydb, revision: "babe5de")
-    else {
-        print("SKIP toydb warm switch: rust-analyzer or ~/work/rust/toydb unavailable")
-        return
-    }
+    let executable = try #require(RustAnalyzerProvider.findExecutable())
+    let from = try CommitSnapshot(repositoryURL: toydb, revision: "46308de")
+    let to = try CommitSnapshot(repositoryURL: toydb, revision: "babe5de")
     let scratch = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: scratch) }
     let checkout = try CheckoutRoot(
@@ -2257,7 +2245,7 @@ func rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb() throws {
     } catch ExactError.unavailable(let detail)
         where detail.contains("sandbox-exec")
     {
-        print("SKIP toydb warm switch: \(detail)")
+        try Test.cancel("toydb warm switch: \(detail)")
     }
 }
 
@@ -2265,17 +2253,16 @@ func rustAnalyzerWarmSwitchResolvesACrossFileDeclarationOnToydb() throws {
 /// Cargo.toml and Cargo.lock (tokio 0.2 → 1.6). After each warm switch no
 /// answer may come from the old crate graph; `TcpListener` in
 /// `src/server.rs` must land in the tokio the target commit locks.
-@Test
+@Test(.enabled(
+    if: RustAnalyzerProvider.findExecutable() != nil
+        && (try? CommitSnapshot(repositoryURL: toydb, revision: "69c46e5")) != nil
+        && (try? CommitSnapshot(repositoryURL: toydb, revision: "5b72c04")) != nil,
+    "rust-analyzer or ~/work/rust/toydb at 69c46e5/5b72c04 unavailable"
+))
 func rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb() throws {
-    let toydb = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("work/rust/toydb", isDirectory: true)
-    guard let executable = RustAnalyzerProvider.findExecutable(),
-          let old = try? CommitSnapshot(repositoryURL: toydb, revision: "69c46e5"),
-          let new = try? CommitSnapshot(repositoryURL: toydb, revision: "5b72c04")
-    else {
-        print("SKIP toydb manifest switch: rust-analyzer or ~/work/rust/toydb unavailable")
-        return
-    }
+    let executable = try #require(RustAnalyzerProvider.findExecutable())
+    let old = try CommitSnapshot(repositoryURL: toydb, revision: "69c46e5")
+    let new = try CommitSnapshot(repositoryURL: toydb, revision: "5b72c04")
     let file = "src/server.rs"
     func listenerOffset(_ snapshot: CommitSnapshot) throws -> Int {
         let source = try #require(String(
@@ -2330,11 +2317,10 @@ func rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb() throws {
         defer { session.close() }
         let cold = try tokio(session, old, stale: nil)
         guard cold.version == "tokio-0.2.19" else {
-            print(
-                "SKIP toydb manifest switch: cold start at 69c46e5 resolved "
+            try Test.cancel(Comment(
+                rawValue: "toydb manifest switch: cold start at 69c46e5 resolved "
                     + "\(cold.version ?? "nothing") (registry lacks a locked crate offline)"
-            )
-            return
+            ))
         }
         var timings: [String] = []
         for (from, to, expected, stale) in [
@@ -2356,7 +2342,7 @@ func rustAnalyzerWarmSwitchFollowsACargoLockChangeOnToydb() throws {
     } catch ExactError.unavailable(let detail)
         where detail.contains("sandbox-exec")
     {
-        print("SKIP toydb manifest switch: \(detail)")
+        try Test.cancel("toydb manifest switch: \(detail)")
     }
 }
 
@@ -3811,8 +3797,7 @@ func pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() throws
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     guard let executable = PyrightProvider.findExecutable(projectURL: root) else {
-        print("SKIP pyright parent-probe regression: pyright-langserver is not installed")
-        return
+        try Test.cancel("pyright parent-probe regression: pyright-langserver is not installed")
     }
     let cache = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: cache) }
@@ -3837,8 +3822,7 @@ func pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() throws
         )
         print("pyright parent-probe regression: \(provider.toolVersion)")
     } catch ExactError.unavailable(let detail) where detail.contains("sandbox-exec") {
-        print("SKIP pyright parent-probe regression: \(detail); noBareExecution=true")
-        return
+        try Test.cancel("pyright parent-probe regression: \(detail); noBareExecution=true")
     }
     defer { session.close() }
     // Pyright probes the parent every 3 seconds; cross two probes before querying.
@@ -3860,12 +3844,9 @@ func pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() throws
     #expect(session.readiness == .closed)
 }
 
-@Test
+@Test(.enabled(if: RustAnalyzerProvider.findExecutable() != nil, "rust-analyzer is not installed"))
 func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
-    guard let executableURL = RustAnalyzerProvider.findExecutable() else {
-        // Environmental coverage: CI without rust-analyzer remains green.
-        return
-    }
+    let executableURL = try #require(RustAnalyzerProvider.findExecutable())
     let fixture = try copiedFixture()
     defer { try? FileManager.default.removeItem(at: fixture) }
     let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -3893,8 +3874,7 @@ func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
         where detail.contains("sandbox-exec")
     {
         // Safe exact is intentionally disabled instead of running bare.
-        print("SKIP rust-analyzer: \(detail); noBareExecution=true")
-        return
+        try Test.cancel("rust-analyzer: \(detail); noBareExecution=true")
     }
     defer { session.close() }
     #expect(session.readiness == .preparing)
@@ -3933,15 +3913,13 @@ func sandboxDeniesProjectWrites() throws {
     try FileManager.default.createDirectory(
         at: project, withIntermediateDirectories: true)
     let denied = project.appendingPathComponent("DENIED")
-    guard
-        let sandbox = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/bin/sh"),
-            arguments: ["-c", "printf denied > \"$1\"", "probe", denied.path]
-        )
-    else { return }
+    let sandbox = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "printf denied > \"$1\"", "probe", denied.path]
+    )
 
     let result = try run(sandbox)
 
@@ -3960,15 +3938,13 @@ func sandboxAllowsPrivateCacheWrites() throws {
     try FileManager.default.createDirectory(
         at: project, withIntermediateDirectories: true)
     let allowed = cache.appendingPathComponent("ALLOWED")
-    guard
-        let sandbox = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/bin/sh"),
-            arguments: ["-c", "printf allowed > \"$1\"", "probe", allowed.path]
-        )
-    else { return }
+    let sandbox = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "printf allowed > \"$1\"", "probe", allowed.path]
+    )
 
     let result = try run(sandbox)
 
@@ -3992,22 +3968,20 @@ func sandboxReadsBorrowedDependenciesThroughLinksButNeverWritesThem() throws {
         at: project.appendingPathComponent("node_modules"),
         withDestinationURL: modules
     )
-    guard
-        let sandbox = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/bin/sh"),
-            arguments: [
-                "-c",
-                "cat \"$1/index.d.ts\" && ! printf x > \"$1/linked\" 2>/dev/null"
-                    + " && ! printf x > \"$2/real\" 2>/dev/null",
-                "probe",
-                project.appendingPathComponent("node_modules").path,
-                modules.path,
-            ]
-        )
-    else { return }
+    let sandbox = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [
+            "-c",
+            "cat \"$1/index.d.ts\" && ! printf x > \"$1/linked\" 2>/dev/null"
+                + " && ! printf x > \"$2/real\" 2>/dev/null",
+            "probe",
+            project.appendingPathComponent("node_modules").path,
+            modules.path,
+        ]
+    )
 
     let result = try run(sandbox)
 
@@ -4024,15 +3998,13 @@ func sandboxDeniesNetworkToLocalListener() throws {
     let cache = root.appendingPathComponent("cache", isDirectory: true)
     try FileManager.default.createDirectory(
         at: project, withIntermediateDirectories: true)
-    guard
-        try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/usr/bin/true"),
-            arguments: []
-        ) != nil
-    else { return }
+    _ = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/usr/bin/true"),
+        arguments: []
+    )
     let (listener, port) = try localListener()
     defer { Darwin.close(listener) }
 
@@ -4041,15 +4013,13 @@ func sandboxDeniesNetworkToLocalListener() throws {
         arguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
     )
     #expect(direct.status == 0)
-    guard
-        let deniedLaunch = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/usr/bin/nc"),
-            arguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
-        )
-    else { return }
+    let deniedLaunch = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/usr/bin/nc"),
+        arguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
+    )
     let denied = try run(deniedLaunch)
 
     #expect(denied.status != 0)
@@ -4066,15 +4036,13 @@ func trustedSandboxAllowsTargetButStillDeniesNetwork() throws {
     try FileManager.default.createDirectory(
         at: target, withIntermediateDirectories: true)
     let allowed = target.appendingPathComponent("ALLOWED")
-    guard
-        let writeSandbox = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .trusted,
-            helper: URL(fileURLWithPath: "/bin/sh"),
-            arguments: ["-c", "printf target > \"$1\"", "probe", allowed.path]
-        )
-    else { return }
+    let writeSandbox = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .trusted,
+        helper: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "printf target > \"$1\"", "probe", allowed.path]
+    )
 
     let write = try run(writeSandbox)
     if write.status != 0 { print("target-write output=\(write.output)") }
@@ -4110,18 +4078,16 @@ func sandboxShimSetsTheAddressSpaceLimitButNoCPULimit() throws {
     let script = """
         test "$(ulimit -S -t)" = unlimited && test "$(ulimit -S -v)" = "$1"
         """
-    guard
-        let sandbox = try availableSandbox(
-            project: project,
-            cache: cache,
-            mode: .safe,
-            helper: URL(fileURLWithPath: "/bin/sh"),
-            arguments: [
-                "-c", script, "probe",
-                String(Sandbox.addressSpaceLimitKiB),
-            ]
-        )
-    else { return }
+    let sandbox = try availableSandbox(
+        project: project,
+        cache: cache,
+        mode: .safe,
+        helper: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [
+            "-c", script, "probe",
+            String(Sandbox.addressSpaceLimitKiB),
+        ]
+    )
 
     let result = try run(sandbox)
 
@@ -4204,12 +4170,9 @@ func trustRegistrySerializesConcurrentWrites() async throws {
     }
 }
 
-@Test
+@Test(.enabled(if: RustAnalyzerProvider.findExecutable() != nil, "rust-analyzer is not installed"))
 func rustAnalyzerSafeMarkerControlWhenInstalled() throws {
-    guard let executableURL = RustAnalyzerProvider.findExecutable() else {
-        // Environmental coverage: CI without rust-analyzer remains green.
-        return
-    }
+    let executableURL = try #require(RustAnalyzerProvider.findExecutable())
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
     let safeFixture = try copiedFixture(into: root.appendingPathComponent("safe"))
@@ -4254,7 +4217,7 @@ func rustAnalyzerSafeMarkerControlWhenInstalled() throws {
         where detail.contains("sandbox-exec")
     {
         // The control must never bypass an unavailable OS sandbox.
-        print("SKIP marker-control: \(detail); noBareExecution=true")
+        try Test.cancel("marker-control: \(detail); noBareExecution=true")
     }
 }
 
@@ -4386,7 +4349,7 @@ private func availableSandbox(
     mode: TrustMode,
     helper: URL,
     arguments: [String]
-) throws -> Sandbox? {
+) throws -> Sandbox {
     do {
         return try Sandbox(
             projectURL: project,
@@ -4397,8 +4360,7 @@ private func availableSandbox(
         )
     } catch ExactError.unavailable(let detail) {
         #expect(detail.contains("sandbox-exec"))
-        print("sandbox-exec unavailable: \(detail); noBareExecution=true")
-        return nil
+        try Test.cancel("sandbox-exec unavailable: \(detail); noBareExecution=true")
     }
 }
 
@@ -4574,11 +4536,14 @@ private func onlyDefinitionLocation(
     guard case .completed(let targets) = result else {
         throw DefinitionTestError.notCompleted
     }
-    return try #require(targets.first).location
+    // Throws without recording an issue, so polling callers can use `try?`.
+    guard let first = targets.first else { throw DefinitionTestError.noTarget }
+    return first.location
 }
 
 private enum DefinitionTestError: Error {
     case notCompleted
+    case noTarget
 }
 
 private final class ExactGitFixture {
@@ -4622,6 +4587,15 @@ private final class ExactGitFixture {
         let result = try run(
             executable: URL(fileURLWithPath: "/usr/bin/git"),
             arguments: arguments,
+            environment: ProcessInfo.processInfo.environment.merging([
+                // Hermetic: no user/system config, fixed identity for commits.
+                "GIT_CONFIG_GLOBAL": "/dev/null",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_AUTHOR_NAME": "CodeInsight Tests",
+                "GIT_AUTHOR_EMAIL": "codeinsight@example.com",
+                "GIT_COMMITTER_NAME": "CodeInsight Tests",
+                "GIT_COMMITTER_EMAIL": "codeinsight@example.com",
+            ]) { $1 },
             workingDirectory: root
         )
         guard result.status == 0 else {

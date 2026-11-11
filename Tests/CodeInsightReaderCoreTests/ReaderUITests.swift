@@ -1727,7 +1727,9 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
                 document.lineTable.lineColumn(at: nestedOffset)
             ).line)
     )
-    while reader.navigationLandingLineForTesting != nil {
+    // Hang fuse only; the timing budget is the expectation below.
+    let landingDeadline = markerStarted + .seconds(120)
+    while reader.navigationLandingLineForTesting != nil, ContinuousClock.now < landingDeadline {
         try await Task.sleep(for: .milliseconds(10))
         let now = ContinuousClock.now
         if lastPoll.duration(to: now) > .milliseconds(250) {

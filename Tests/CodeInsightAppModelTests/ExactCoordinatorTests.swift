@@ -3172,7 +3172,9 @@ private final class BlockingExactSession: ExactSession, @unchecked Sendable {
         condition.lock()
         didStart = true
         condition.broadcast()
-        while !released { condition.wait() }
+        let deadline = Date().addingTimeInterval(120)
+        while !released, condition.wait(until: deadline) {}
+        if !released { Issue.record("Hang fuse expired waiting for definition release") }
         condition.unlock()
         return .completed([ExactTarget(location: ExactLocation(
             file: file,
@@ -3526,6 +3528,7 @@ private func exactGit(_ root: URL, _ arguments: String...) throws {
     let process = Process()
     let output = Pipe()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = arguments
     process.currentDirectoryURL = root
     process.standardOutput = output

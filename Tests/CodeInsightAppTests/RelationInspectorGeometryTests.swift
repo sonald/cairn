@@ -101,7 +101,8 @@ func relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() t
         x: 0, y: 0, width: sourceLabel.bounds.width, height: 10_000
     )).height
     #expect(sourceLabel.bounds.height >= measuredHeight - 1)
-    close.performClick(nil)
+    // Not performClick: its highlight spin stops the test runner's main run loop.
+    _ = close.sendAction(close.action, to: close.target)
     layout()
     #expect(!controller.selfTestInspectorVisible)
     #expect(!controller.selfTestListPaneHidden)
@@ -120,7 +121,8 @@ func relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() t
         / (split.bounds.width - split.dividerThickness) - fraction) <= 0.005)
     #expect(controller.selfTestInspectorText == capturedText)
 
-    close.performClick(nil)
+    // Not performClick: its highlight spin stops the test runner's main run loop.
+    _ = close.sendAction(close.action, to: close.target)
     layout()
     #expect(!controller.selfTestInspectorVisible)
     #expect(abs(controller.selfTestRelationListFrame.width - split.bounds.width) <= 2)

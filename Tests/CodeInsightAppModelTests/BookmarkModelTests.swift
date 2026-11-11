@@ -1123,6 +1123,7 @@ private func bookmarkModelTemporaryGitProject(source: String) throws -> URL {
     try source.write(to: file, atomically: true, encoding: .utf8)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path, "init", "-q"]
     try process.run()
     process.waitUntilExit()
@@ -1133,6 +1134,7 @@ private func bookmarkModelTemporaryGitProject(source: String) throws -> URL {
 private func bookmarkModelGit(_ root: URL, _ arguments: String...) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.currentDirectoryURL = root
     process.arguments = arguments
     try process.run()
@@ -1143,6 +1145,7 @@ private func bookmarkModelGit(_ root: URL, _ arguments: String...) throws {
 private func bookmarkModelGitOutput(_ root: URL, _ arguments: String...) throws -> String {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.currentDirectoryURL = root
     process.arguments = arguments
     let output = Pipe()

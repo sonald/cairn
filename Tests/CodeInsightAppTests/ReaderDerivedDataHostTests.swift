@@ -218,7 +218,8 @@ func readonlyMainWindowShowsPreparationWithoutReplacingFocusNotice() async throw
 
 @MainActor
 private func readonlyStatusWaitUntil(_ condition: @MainActor () -> Bool) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+    // Hang fuse only; a parallel target run has needed more than 10 s to index.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(30))
     while !condition(), ContinuousClock.now < deadline {
         // Advance actual main-queue work; the builder is released by the explicit gate, never a sleep.
         await withCheckedContinuation { continuation in

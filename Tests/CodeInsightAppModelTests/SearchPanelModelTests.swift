@@ -639,6 +639,7 @@ private struct SearchPanelFixture {
         )
         let gitInit = Process()
         gitInit.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        gitInit.environment = hermeticGitEnvironment
         gitInit.arguments = ["-C", root.path, "init", "-q"]
         try gitInit.run()
         gitInit.waitUntilExit()

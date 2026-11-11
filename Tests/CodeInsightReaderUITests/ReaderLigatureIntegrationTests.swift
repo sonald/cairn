@@ -377,8 +377,8 @@ func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() async throw
     }
     // Feed AppKit's tracking loop actual drag/up events; mouseDown itself must
     // preserve the selection produced by super, not a programmatically seeded range.
-    NSApp.postEvent(try event(.leftMouseUp, at: end, number: 3), atStart: true)
-    NSApp.postEvent(try event(.leftMouseDragged, at: end, number: 2), atStart: true)
+    postTestEvent(try event(.leftMouseUp, at: end, number: 3))
+    postTestEvent(try event(.leftMouseDragged, at: end, number: 2))
     reader.view.mouseDown(with: try event(.leftMouseDown, at: start, number: 1))
     #expect(reader.view.selectedRange() == selection)
     #expect(reader.sourceText(forDisplaySelection: reader.view.selectedRange()) == "!==")
@@ -394,13 +394,27 @@ func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() async throw
     let symbolRect = try #require(ReaderViewportGeometry.characterRect(
         displayLocation: symbol.location + 1, in: reader.view))
     let symbolPoint = reader.view.convert(NSPoint(x: symbolRect.midX, y: symbolRect.midY), to: nil)
-    NSApp.postEvent(try event(.leftMouseUp, at: symbolPoint, number: 5, clickCount: 2), atStart: true)
+    postTestEvent(try event(.leftMouseUp, at: symbolPoint, number: 5, clickCount: 2))
     reader.view.mouseDown(with: try event(.leftMouseDown, at: symbolPoint, number: 4, clickCount: 2))
     #expect(reader.view.selectedRange() == symbol)
     #expect(reader.primarySelectionRange == nil)
     let selectedBackground = try #require(reader.view.selectedTextAttributes[.backgroundColor] as? NSColor)
     #expect(selectedBackground.alphaComponent > 0)
     #expect(clicks == 0)
+}
+
+/// `NSApp.postEvent` stops the run loop it is called under. Called straight
+/// from a test, that is the test process's main run loop: the runner then
+/// exits 0 without running the remaining tests or printing a summary. Posting
+/// from a nested run keeps the stop inside it; the event stays queued.
+@MainActor
+private func postTestEvent(_ event: NSEvent) {
+    nonisolated(unsafe) let event = event
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) {
+        MainActor.assumeIsolated { NSApp.postEvent(event, atStart: true) }
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+    CFRunLoopRunInMode(.defaultMode, 1, false)
 }
 
 @MainActor
@@ -437,7 +451,7 @@ func nativeBlankClicksKeepTheReadingPositionAndFoldState() async throws {
                 timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
         }
-        NSApp.postEvent(try event(.leftMouseUp), atStart: true)
+        postTestEvent(try event(.leftMouseUp))
         reader.view.mouseDown(with: try event(.leftMouseDown))
         settleLigatureLayout(reader)
     }

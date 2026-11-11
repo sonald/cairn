@@ -27,16 +27,19 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
 
     controller.window?.appearance = NSAppearance(named: .aqua)
     controller.showWindow(nil)
-    try await Task.sleep(for: .milliseconds(200))
-    let contentView = try #require(controller.window?.contentView)
-    let preview = try #require(readerSettingsDescendants(contentView)
-        .compactMap { $0 as? NSTextView }
-        .first { $0.accessibilityLabel() == CodeInsightApp.localized("settings.preview.accessibility") })
+    #expect(await mainWindowWaitUntil(readerSettingsPreview(controller) != nil))
+    let preview = try #require(readerSettingsPreview(controller))
     var changed = ReaderSettings(fontSize: 17)
     changed.wrapLines = true
     changed.theme = .dark
     controller.update(settings: changed)
-    try await Task.sleep(for: .milliseconds(200))
+    #expect(await mainWindowWaitUntil(
+        controller.selfTestReaderToggleCount == 8
+            && (preview.textStorage?.length ?? 0) > 0
+            && preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
+                as? NSFont == NSFont.monospacedSystemFont(ofSize: 17, weight: .regular)
+            && preview.textContainer?.widthTracksTextView == true
+    ))
 
     #expect(controller.currentSettings == changed)
     #expect(controller.selfTestReaderToggleCount == 8)
@@ -48,7 +51,12 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     #expect(!preview.isEditable)
 
     #expect(controller.selfTestPressReaderControl("Restore Reader Defaults"))
-    try await Task.sleep(for: .milliseconds(200))
+    #expect(await mainWindowWaitUntil(
+        updatedSettings == ReaderSettings()
+            && (preview.textStorage?.length ?? 0) > 0
+            && preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
+                as? NSFont == NSFont.monospacedSystemFont(ofSize: ReaderSettings().fontSize, weight: .regular)
+    ))
     #expect(updatedSettings == ReaderSettings())
     #expect(preview.string == originalText)
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
@@ -61,6 +69,13 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
 @MainActor
 private func readerSettingsDescendants(_ view: NSView) -> [NSView] {
     [view] + view.subviews.flatMap(readerSettingsDescendants)
+}
+
+@MainActor
+private func readerSettingsPreview(_ controller: ReaderSettingsWindowController) -> NSTextView? {
+    controller.window?.contentView.flatMap(readerSettingsDescendants)?
+        .compactMap { $0 as? NSTextView }
+        .first { $0.accessibilityLabel() == CodeInsightApp.localized("settings.preview.accessibility") }
 }
 
 @MainActor
@@ -84,17 +99,17 @@ func settingsPreviewRecolorsWhenQuietSyntaxToggles() async throws {
     )
     defer { controller.close() }
     controller.showWindow(nil)
-    try await Task.sleep(for: .milliseconds(300))
-    let contentView = try #require(controller.window?.contentView)
-    let preview = try #require(readerSettingsDescendants(contentView)
-        .compactMap { $0 as? NSTextView }
-        .first { $0.accessibilityLabel() == CodeInsightApp.localized("settings.preview.accessibility") })
-    let greet = (preview.string as NSString).range(of: "greet")
-    #expect(greet.location != NSNotFound)
     let quietColor = ReaderTheme(settings: quiet).color(for: .functionName)
     var full = quiet
     full.quietSyntax = false
     let fullColor = ReaderTheme(settings: full).color(for: .functionName)
+    func greetRange(_ preview: NSTextView) -> NSRange { (preview.string as NSString).range(of: "greet") }
+    #expect(await mainWindowWaitUntil(readerSettingsPreview(controller).map {
+        previewColors($0, in: greetRange($0)).contains { $0.isEquivalent(to: quietColor) }
+    } ?? false))
+    let preview = try #require(readerSettingsPreview(controller))
+    let greet = greetRange(preview)
+    #expect(greet.location != NSNotFound)
     #expect(previewColors(preview, in: greet).contains { $0.isEquivalent(to: quietColor) })
 
     // Flip the toggle itself, as the user does: it is the first switch after
@@ -104,10 +119,10 @@ func settingsPreviewRecolorsWhenQuietSyntaxToggles() async throws {
     let toggle = try #require(elements[popUp...].first { $0.accessibilityRole?() == .checkBox })
     // AXPress on a SwiftUI switch reports false yet flips it; judge by the effect.
     _ = toggle.accessibilityPerformPress?()
-    try await Task.sleep(for: .milliseconds(300))
+    #expect(await mainWindowWaitUntil(changedTo != nil))
     // What the app does with the change: hand the settings back to the window.
     if let changedTo { controller.update(settings: changedTo) }
-    try await Task.sleep(for: .milliseconds(300))
+    #expect(await mainWindowWaitUntil(previewColors(preview, in: greet).contains { $0.isEquivalent(to: fullColor) }))
     #expect(changedTo?.quietSyntax == false)
     #expect(previewColors(preview, in: greet).contains { $0.isEquivalent(to: fullColor) },
             "preview still shows \(previewColors(preview, in: greet).map(\.hexDescription))")

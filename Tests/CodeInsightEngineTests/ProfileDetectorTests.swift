@@ -879,6 +879,7 @@ private func withGitProject(
 private func git(in root: URL, _ arguments: String...) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = ["-C", root.path] + arguments
     try process.run()
     process.waitUntilExit()

@@ -74,10 +74,9 @@ func sessionReopenRetriesAfterSavedFileBecomesReadable() async throws {
     #expect(model.tabStrip.tabs.isEmpty)
     try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path)
     controller.openProject(root: root)
-    let deadline = ContinuousClock.now + .seconds(2)
-    while model.tabStrip.tabs.isEmpty && ContinuousClock.now < deadline {
-        try await Task.sleep(for: .milliseconds(10))
-    }
+    #expect(await sessionBoundaryWait {
+        model.tabStrip.activeTab?.fileURL == file && model.sessionLoadNotice == nil
+    })
     #expect(model.tabStrip.activeTab?.fileURL == file)
     #expect(model.sessionLoadNotice == nil)
 }

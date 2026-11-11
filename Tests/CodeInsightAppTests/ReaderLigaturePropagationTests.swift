@@ -22,6 +22,7 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
                       ["-c", "user.name=Ligature Test", "-c", "user.email=ligature@example.invalid", "commit", "-qm", "fixture"]] {
         let git = Process()
         git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.environment = hermeticGitEnvironment
         git.arguments = ["-C", root.path] + arguments
         try git.run()
         git.waitUntilExit()
@@ -215,10 +216,16 @@ func appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettin
     defer { observers.forEach(NotificationCenter.default.removeObserver) }
     // No manual apply: the real AppDelegate observer must refresh registered windows.
     ReaderFontResolver.shared.refresh()
-    try await Task.sleep(for: .milliseconds(200))
-    continuation.finish()
+    // Hang fuse only: the loop ends as soon as both surfaces were edited.
+    let fuse = Task { try? await Task.sleep(for: .seconds(30)); continuation.finish() }
+    defer { fuse.cancel() }
     var editedSurfaces = Set<Int>()
-    for await index in notifications { editedSurfaces.insert(index) }
+    for await index in notifications {
+        editedSurfaces.insert(index)
+        if editedSurfaces == [0, 1] { break }
+    }
+    // Negative checks below: a late write to the preferences must have time to land.
+    try await Task.sleep(for: .milliseconds(200))
     #expect(editedSurfaces == [0, 1])
     #expect(reader.string == source)
     #expect(settings.currentSettings == savedPreferences)

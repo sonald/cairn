@@ -275,19 +275,26 @@ func documentationPanelModelDropsTheResultOfASupersededSearch() async {
 // MARK: - Live Dash
 
 /// The real HTTP path against this machine's Dash. Skipped when Dash or its
-/// API server is not available (CI has no Dash).
+/// API server is not available (CI has no Dash), or when its installed
+/// docsets lack the Python one the queries below need.
 private func dashAPIAnswers() async -> Bool {
     guard let data = try? Data(contentsOf: DashDocumentationSource.defaultStatusFile),
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let port = object["port"] as? Int,
-          let url = URL(string: "http://127.0.0.1:\(port)/health")
+          let url = URL(string: "http://127.0.0.1:\(port)/health"),
+          let docsetsURL = URL(string: "http://127.0.0.1:\(port)/docsets/list")
     else { return false }
-    let response = try? await URLSession(configuration: .ephemeral)
-        .data(for: URLRequest(url: url, timeoutInterval: 1)).1
-    return (response as? HTTPURLResponse)?.statusCode == 200
+    let session = URLSession(configuration: .ephemeral)
+    let response = try? await session.data(for: URLRequest(url: url, timeoutInterval: 1)).1
+    guard (response as? HTTPURLResponse)?.statusCode == 200,
+          let list = try? await session.data(for: URLRequest(url: docsetsURL, timeoutInterval: 1)).0,
+          let docsets = (try? JSONSerialization.jsonObject(with: list) as? [String: Any])?["docsets"]
+            as? [[String: Any]]
+    else { return false }
+    return docsets.contains { $0["platform"] as? String == "python" }
 }
 
-@Test(.enabled("Dash with its API server enabled is not available on this machine") {
+@Test(.enabled("Dash with its API server and Python docset is not available on this machine") {
     await dashAPIAnswers()
 })
 func dashSourceSearchesTheLocalDashAPI() async throws {

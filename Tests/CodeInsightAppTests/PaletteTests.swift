@@ -285,6 +285,7 @@ struct PaletteTests {
         )
         let git = Process()
         git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.environment = hermeticGitEnvironment
         git.arguments = ["-C", root.path, "init", "-q"]
         try git.run()
         git.waitUntilExit()

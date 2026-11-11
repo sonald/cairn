@@ -183,6 +183,7 @@ private final class PickerGitFixture {
     func git(_ arguments: String...) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.environment = hermeticGitEnvironment
         process.arguments = arguments
         process.currentDirectoryURL = root
         let output = Pipe()

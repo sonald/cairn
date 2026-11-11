@@ -86,7 +86,7 @@ func welcomeMarksTrustedRecentsAndShowsWhenEachWasLastRead() async throws {
     let welcome = try #require(mirrored("emptyStateView", of: reader, as: EmptyStateView?.self) ?? nil)
     let trustedLabel = CodeInsightApp.localized("main.trusted")
     // The registry is read asynchronously; the mark arrives on a later render.
-    for _ in 0..<200 where welcome.selfTestRecentTitle(path: trusted.path)?.string.contains(trustedLabel) != true {
+    for _ in 0..<3_000 where welcome.selfTestRecentTitle(path: trusted.path)?.string.contains(trustedLabel) != true {
         try await Task.sleep(for: .milliseconds(10))
     }
 

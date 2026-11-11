@@ -698,6 +698,7 @@ private func multiWindowGit(_ root: URL, _ arguments: String...) throws {
     let process = Process()
     process.currentDirectoryURL = root
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.environment = hermeticGitEnvironment
     process.arguments = arguments
     let output = Pipe()
     process.standardOutput = output
