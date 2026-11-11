@@ -40,7 +40,7 @@ struct ReadonlyIdentifierOracle {
         switch languageMode.language {
         case .rust, .python, .typescript:
             break
-        case .javascript:
+        case .javascript, .go:
             return []
         }
         guard byteOffset < bytes.count,
@@ -77,7 +77,7 @@ struct ReadonlyIdentifierOracle {
             guard !Self.pythonKeywords.contains(selected) else { return [] }
         case .typescript:
             guard !Self.typeScriptKeywords.contains(selected) else { return [] }
-        case .javascript:
+        case .javascript, .go:
             return []
         }
 

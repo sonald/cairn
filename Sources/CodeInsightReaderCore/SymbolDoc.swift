@@ -73,7 +73,7 @@ public func syntacticSymbolDoc(
         return pythonSymbolDoc(at: range, in: document, location: location)
     case .typescript:
         return typescriptSymbolDoc(at: range, in: document, location: location)
-    case .javascript:
+    case .javascript, .go:
         return SymbolDoc(
             location: location,
             signature: firstLineSignature(at: range, in: document),
@@ -228,6 +228,7 @@ private func languageHint(_ language: LanguageID) -> String {
     case .python: "python"
     case .typescript: "typescript"
     case .javascript: "javascript"
+    case .go: "go"
     }
 }
 

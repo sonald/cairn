@@ -474,6 +474,7 @@ private func hoverSignatureLanguageHint(_ language: LanguageID) -> String {
     case .rust: "rust"
     case .python: "python"
     case .typescript, .javascript: "typescript"
+    case .go: "go"
     }
 }
 

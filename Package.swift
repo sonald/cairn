@@ -76,6 +76,7 @@ let package = Package(
             name: "CodeInsightRustExtractor",
             targets: ["CodeInsightRustExtractor"]
         ),
+        .library(name: "CodeInsightGoExtractor", targets: ["CodeInsightGoExtractor"]),
         .library(name: "CodeInsightEngine", targets: ["CodeInsightEngine"]),
         .executable(name: "codeinsight", targets: ["CodeInsightCLI"]),
         .executable(name: "codeinsight-app", targets: ["CodeInsightApp"]),
@@ -126,6 +127,13 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CTreeSitterGo",
+            dependencies: ["CTreeSitter"],
+            path: "Sources/CTreeSitterGo",
+            exclude: ["src/node-types.json"],
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "CProcessGuard",
             path: "Sources/CProcessGuard",
             publicHeadersPath: "include"
@@ -166,6 +174,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CodeInsightGoExtractor",
+            dependencies: [
+                "CodeInsightCore",
+                "TreeSitterKit",
+                "CTreeSitterGo",
+            ]
+        ),
+        .target(
             name: "CodeInsightExact",
             dependencies: [
                 "CProcessGuard",
@@ -181,6 +197,7 @@ let package = Package(
                 "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
                 "CodeInsightTypeScriptExtractor",
+                "CodeInsightGoExtractor",
             ],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -217,10 +234,12 @@ let package = Package(
                 "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
                 "CodeInsightTypeScriptExtractor",
+                "CodeInsightGoExtractor",
                 "TreeSitterKit",
                 "CTreeSitterRust",
                 "CTreeSitterPython",
                 "CTreeSitterTypeScript",
+                "CTreeSitterGo",
             ],
             resources: [.copy("Themes")]
         ),
@@ -249,6 +268,7 @@ let package = Package(
                 "CTreeSitterRust",
                 "CTreeSitterPython",
                 "CTreeSitterTypeScript",
+                "CTreeSitterGo",
             ]
         ),
         .testTarget(
@@ -302,6 +322,15 @@ let package = Package(
             exclude: ["Fixtures"]
         ),
         .testTarget(
+            name: "GoExtractorTests",
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightEngine",
+                "CodeInsightGoExtractor",
+            ],
+            exclude: ["Fixtures"]
+        ),
+        .testTarget(
             name: "CodeInsightEngineTests",
             dependencies: [
                 "CodeInsightCore",
@@ -311,6 +340,7 @@ let package = Package(
                 "CodeInsightRustExtractor",
                 "CodeInsightPythonExtractor",
                 "CodeInsightTypeScriptExtractor",
+                "CodeInsightGoExtractor",
             ]
         ),
         .testTarget(
@@ -331,6 +361,7 @@ let package = Package(
                 "CodeInsightTypeScriptExtractor",
                 "CodeInsightRustExtractor",
                 "CodeInsightPythonExtractor",
+                "CodeInsightGoExtractor",
             ],
             exclude: ["Fixtures"]
         ),

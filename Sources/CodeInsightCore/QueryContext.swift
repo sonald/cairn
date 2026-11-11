@@ -61,6 +61,29 @@ package func typescriptConfigIdentity(
     return (configFingerprint, environmentFingerprint)
 }
 
+/// Go's configuration is the workspace file when there is one, else the
+/// module file; its environment is the checksum files. gopls reloads both
+/// itself, so neither forces a cold start.
+package func goConfigIdentity(
+    readBytes: (String) -> [UInt8]?
+) -> (config: String, environment: String) {
+    func framed(_ names: [String]) -> [UInt8]? {
+        let present = names.compactMap { name in readBytes(name).map { (name, $0) } }
+        guard !present.isEmpty else { return nil }
+        return present.flatMap { name, bytes in
+            Array("\(name.utf8.count):\(name)\(bytes.count):".utf8) + bytes
+        }
+    }
+    func hex(_ bytes: [UInt8]) -> String {
+        ContentID.sha256(of: bytes).bytes.map { String(format: "%02x", $0) }.joined()
+    }
+    let config = framed(readBytes("go.work") != nil ? ["go.work"] : ["go.mod"])
+    return (
+        hex(config ?? Array("go-config\0none".utf8)),
+        framed(["go.sum", "go.work.sum"]).map(hex) ?? ""
+    )
+}
+
 public struct AnalysisProfileID: Hashable, Sendable {
     public let rawValue: UUID
 
@@ -186,6 +209,7 @@ private extension LanguageID {
         case .python: "python"
         case .typescript: "typescript"
         case .javascript: "javascript"
+        case .go: "go"
         }
     }
 }

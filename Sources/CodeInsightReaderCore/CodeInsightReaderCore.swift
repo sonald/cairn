@@ -131,22 +131,22 @@ public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
     /// the same icon; `isMethod` marks a Python/TypeScript function of a class.
     public init(_ kind: DeclarationKind, isMethod: Bool) {
         self = switch kind {
-        case .rustFn: .fn
-        case .rustMethod: .method
+        case .rustFn, .goFunction: .fn
+        case .rustMethod, .goMethod: .method
         case .pythonFunction, .typescriptFunction: isMethod ? .method : .fn
-        case .rustStruct: .struct
+        case .rustStruct, .goStruct: .struct
         case .rustEnum, .typescriptEnum: .enum
-        case .rustTrait, .typescriptInterface: .trait
+        case .rustTrait, .typescriptInterface, .goInterface: .trait
         case .rustImpl: .impl
         case .rustMod: .mod
-        case .rustConst: .const
+        case .rustConst, .goConst: .const
         case .rustStatic: .static
-        case .rustTypeAlias, .typescriptTypeAlias: .typeAlias
-        case .rustField: .field
+        case .rustTypeAlias, .typescriptTypeAlias, .goType: .typeAlias
+        case .rustField, .goField: .field
         case .pythonClass, .typescriptClass: .class
         case .rustEnumVariant: .enumMember
         case .rustMacro: .macro
-        case .pythonVariable: .variable
+        case .pythonVariable, .goVar: .variable
         }
     }
 }
@@ -986,7 +986,7 @@ public struct DocumentLoader: Sendable {
             return
         case .typescript:
             try requireSupportedTypeScriptReaderMode(languageMode)
-        case .javascript:
+        case .javascript, .go:
             throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }
@@ -1053,7 +1053,7 @@ public struct DocumentLoader: Sendable {
                     shouldCancel: shouldCancel
                 )
             }
-        case .javascript:
+        case .javascript, .go:
             throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }

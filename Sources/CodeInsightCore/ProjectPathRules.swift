@@ -11,6 +11,7 @@ public struct ProjectPathRules: Equatable, Sendable {
     /// Directories skipped by default in a worktree; a `!` rule can restore them.
     public static let defaultSkippedDirectories = [
         "target", "node_modules", ".build", "venv", ".venv", "__pycache__", "dist", "build",
+        "vendor",
     ]
     /// Never part of a project, whatever the rules say.
     public static let alwaysSkippedDirectories = [".git"]

@@ -933,6 +933,7 @@ public final class EngineSession: Sendable {
         .rustStruct, .rustEnum, .rustTrait, .rustTypeAlias,
         .pythonClass, .typescriptClass,
         .typescriptInterface, .typescriptTypeAlias, .typescriptEnum,
+        .goStruct, .goInterface, .goType,
     ]
 
     public func tokenRange(
@@ -1111,6 +1112,13 @@ public final class EngineSession: Sendable {
         case .typescriptClass: 22
         case .typescriptInterface, .typescriptEnum: 18
         case .typescriptTypeAlias: 14
+        case .goFunction: 24
+        case .goStruct: 22
+        case .goMethod: 20
+        case .goInterface: 18
+        case .goType: 14
+        case .goConst, .goVar: 10
+        case .goField: 0
         }
     }
 }

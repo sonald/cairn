@@ -36,16 +36,17 @@ public enum DeclarationFamily: Sendable {
 public extension DeclarationKind {
     var shape: DeclarationShape {
         switch self {
-        case .rustFn, .rustMethod, .pythonFunction, .typescriptFunction: .function
-        case .rustStruct: .struct
+        case .rustFn, .rustMethod, .pythonFunction, .typescriptFunction, .goFunction, .goMethod: .function
+        case .rustStruct, .goStruct: .struct
         case .rustEnum, .typescriptEnum: .enum
         case .pythonClass, .typescriptClass: .class
-        case .rustTypeAlias, .typescriptTypeAlias: .typeAlias
-        case .rustTrait, .typescriptInterface: .trait
+        case .rustTypeAlias, .typescriptTypeAlias, .goType: .typeAlias
+        case .rustTrait, .typescriptInterface, .goInterface: .trait
         case .rustImpl: .impl
         case .rustMod: .module
         case .rustMacro: .macro
-        case .rustConst, .rustStatic, .rustField, .rustEnumVariant, .pythonVariable: .value
+        case .rustConst, .rustStatic, .rustField, .rustEnumVariant, .pythonVariable,
+             .goConst, .goVar, .goField: .value
         }
     }
 
@@ -58,6 +59,8 @@ public extension DeclarationKind {
         case .pythonFunction, .pythonClass, .pythonVariable: .python
         case .typescriptFunction, .typescriptClass, .typescriptInterface,
              .typescriptTypeAlias, .typescriptEnum: .typescript
+        case .goFunction, .goMethod, .goStruct, .goInterface, .goType,
+             .goConst, .goVar, .goField: .go
         }
     }
 

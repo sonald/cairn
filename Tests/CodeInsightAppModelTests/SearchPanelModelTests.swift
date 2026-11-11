@@ -778,7 +778,7 @@ private func activeWorkspacePathID(
         return fixture.python.pathID
     case .typescript:
         return fixture.typescript.pathID
-    case .javascript:
+    case .javascript, .go:
         return nil
     }
 }

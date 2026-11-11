@@ -154,7 +154,7 @@ enum ProfileDetector {
             return name == "pyrightconfig.json" || name == "pyproject.toml"
         case .typescript:
             return URL(fileURLWithPath: path).lastPathComponent == "tsconfig.json"
-        case .javascript:
+        case .javascript, .go:
             return false
         }
     }
@@ -200,7 +200,7 @@ enum ProfileDetector {
                 projectRoot: projectRoot,
                 reader: reader
             )
-        case .javascript:
+        case .javascript, .go:
             return fallback(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,

@@ -450,7 +450,7 @@ extension CodeInsight {
                     borrowedFromWorkspace: borrowed
                 )
                 .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
-            case .javascript:
+            case .javascript, .go:
                 throw ValidationError("--language must be rust, python or typescript.")
             }
         }
@@ -1474,7 +1474,7 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                         "corpus is missing tsconfig.json, package.json, or bun.lockb: \(url.path)\n"
                     )
                 }
-            case .javascript:
+            case .javascript, .go:
                 throw ValidationError("unsupported language: \(language)")
             }
         }

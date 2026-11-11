@@ -389,6 +389,7 @@ private func extractor(for language: LanguageID) -> any LanguageExtractor {
     case .rust: RustExtractor()
     case .python: PythonExtractor()
     case .typescript, .javascript: TypeScriptExtractor()
+    case .go: preconditionFailure("Go fixtures need GoExtractor")
     }
 }
 

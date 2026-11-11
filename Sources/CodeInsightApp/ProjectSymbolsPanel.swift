@@ -638,6 +638,7 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         case .python: "py"
         case .typescript: "ts"
         case .javascript: "js"
+        case .go: "go"
         }
     }
 
@@ -647,6 +648,7 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         case .python: "Python"
         case .typescript: "TypeScript"
         case .javascript: "JavaScript"
+        case .go: "Go"
         }
     }
 

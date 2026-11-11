@@ -57,6 +57,7 @@ public enum TextFormat: Equatable, Hashable, Sendable {
             case .python: "Python"
             case .typescript: "TypeScript"
             case .javascript: "JavaScript"
+            case .go: "Go"
             }
         case .jinja: "Jinja"
         }

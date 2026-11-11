@@ -195,7 +195,7 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .javascript:
+        case .javascript, .go:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -254,7 +254,7 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .javascript:
+        case .javascript, .go:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -290,7 +290,7 @@ public struct ExactProfileKey: Hashable, Sendable {
         switch language {
         case .rust, .python, .typescript:
             return
-        case .javascript:
+        case .javascript, .go:
             throw Self.unsupportedFingerprint(language)
         }
     }

@@ -280,7 +280,7 @@ package struct IdentifierIndex: Sendable {
         case .rust: RustHighlighter.isKeyword(value)
         case .python: pythonReaderIsKeyword(value)
         case .typescript: typeScriptReaderIsKeyword(value)
-        case .javascript: true
+        case .javascript, .go: true
         }
     }
 

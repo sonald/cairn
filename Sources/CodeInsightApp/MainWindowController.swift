@@ -3148,6 +3148,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .python: "Python"
         case .typescript: "TypeScript"
         case .javascript: "JavaScript"
+        case .go: "Go"
         }
     }
 
@@ -3990,7 +3991,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         switch request.document.languageMode.language {
         case .rust, .python, .typescript:
             break
-        case .javascript:
+        case .javascript, .go:
             return nil
         }
         guard let path = projectPath(for: request.file)

@@ -119,6 +119,7 @@ public actor DashDocumentationSource: DocumentationSource {
         .rust: ["rust", "crate"],
         .typescript: ["typescript", "javascript", "nodejs"],
         .javascript: ["typescript", "javascript", "nodejs"],
+        .go: ["go", "godoc"],
     ]
 
     /// Docsets for `language` first, then user-contributed ones (third-party

@@ -5,6 +5,7 @@ public enum LanguageID: UInt8, Codable, Sendable {
     case python = 1
     case typescript = 2
     case javascript = 3
+    case go = 4
 }
 
 public struct LanguageMode: Codable, Hashable, Sendable {
@@ -18,7 +19,7 @@ public struct LanguageMode: Codable, Hashable, Sendable {
 
     public static func classify(path: String, language: LanguageID) -> LanguageMode? {
         switch language {
-        case .rust, .python:
+        case .rust, .python, .go:
             let stringPath = path as NSString
             var pathExtension = stringPath.pathExtension
             if pathExtension.isEmpty {
@@ -28,7 +29,12 @@ public struct LanguageMode: Codable, Hashable, Sendable {
                     pathExtension = URL(fileURLWithPath: path).pathExtension
                 }
             }
-            guard pathExtension == (language == .rust ? "rs" : "py") else {
+            let expected = switch language {
+            case .rust: "rs"
+            case .python: "py"
+            default: "go"
+            }
+            guard pathExtension == expected else {
                 return nil
             }
             return LanguageMode(language: language)
@@ -151,6 +157,17 @@ public enum DeclarationKind: UInt8, Codable, Sendable {
     case rustMacro = 19
     /// A module-level `name = …` (first assignment per name and file).
     case pythonVariable = 20
+    case goFunction = 21
+    /// A function with a receiver; the receiver's base type name is in the
+    /// file's `implRelations`.
+    case goMethod = 22
+    case goStruct = 23
+    case goInterface = 24
+    /// Any other `type T …` declaration, including `type T = U`.
+    case goType = 25
+    case goConst = 26
+    case goVar = 27
+    case goField = 28
 }
 
 /// The visibility modifier written at a declaration (`pub`, `export`, a

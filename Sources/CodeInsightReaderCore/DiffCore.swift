@@ -387,7 +387,7 @@ public struct DiffCore: Sendable {
                 ])
             }
             return
-        case .javascript:
+        case .javascript, .go:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "DiffCore does not support \(String(describing: languageMode.language))",
@@ -403,7 +403,7 @@ public struct DiffCore: Sendable {
             RustExtractor()
         case .typescript:
             TypeScriptExtractor()
-        case .javascript:
+        case .javascript, .go:
             preconditionFailure("DiffCore requireSupported must reject \(languageMode.language)")
         }
     }

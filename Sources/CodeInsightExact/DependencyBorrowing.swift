@@ -58,7 +58,7 @@ public enum DependencyBorrowing {
             ), path != unitPrefix
             else { break }
             borrow(path)
-        case .rust, .javascript:
+        case .rust, .javascript, .go:
             break
         }
         return links

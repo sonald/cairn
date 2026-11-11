@@ -1929,6 +1929,7 @@ private func bookmarkSelfTestLanguageName(_ language: LanguageID) -> String {
     case .python: "python"
     case .typescript: "typescript"
     case .javascript: "javascript"
+    case .go: "go"
     }
 }
 

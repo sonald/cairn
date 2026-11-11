@@ -484,7 +484,7 @@ public final class ExactCoordinator {
                 tsserverURL: tsserver,
                 borrowedFromWorkspace: dependencies.borrowedFromWorkspace
             )
-        case .javascript:
+        case .javascript, .go:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
@@ -2008,7 +2008,7 @@ private func validateExactLanguage(_ language: LanguageID) throws {
     switch language {
     case .rust, .python, .typescript:
         return
-    case .javascript:
+    case .javascript, .go:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
@@ -2105,7 +2105,7 @@ private func validateProfile(
             && profile.environmentFingerprint
                 == analysisProfile.environmentFingerprint
             && profile.featureSelection == analysisProfile.featureSelection
-    case .javascript:
+    case .javascript, .go:
         matches = false
     }
     guard matches else {

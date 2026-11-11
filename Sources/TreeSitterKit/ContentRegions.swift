@@ -21,6 +21,12 @@ public func contentRegionKind(nodeKind: String, language: LanguageID) -> Content
         case "string", "regex", "string_fragment", "escape_sequence", "`": return .string
         default: return nil
         }
+    case .go:
+        switch nodeKind {
+        case "comment": return .comment
+        case "interpreted_string_literal", "raw_string_literal", "rune_literal": return .string
+        default: return nil
+        }
     }
 }
 

@@ -532,7 +532,7 @@ public struct ProjectIndexer: Sendable {
             return PythonExtractor()
         case .typescript:
             return TypeScriptExtractor()
-        case .javascript:
+        case .javascript, .go:
             throw unsupportedLanguage(language)
         }
     }
@@ -577,7 +577,7 @@ public struct ProjectIndexer: Sendable {
                 language: language,
                 projectRoot: projectRoot
             )
-        case .javascript:
+        case .javascript, .go:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)

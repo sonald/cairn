@@ -73,7 +73,7 @@ public struct ModuleMap: Sendable {
             })
             pythonRootsByFile = [:]
             moduleChildren = [:]
-        case .javascript:
+        case .javascript, .go:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
     }
@@ -222,7 +222,7 @@ public struct ModuleMap: Sendable {
                 from: source,
                 strings: strings
             )
-        case .javascript:
+        case .javascript, .go:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
     }
@@ -445,7 +445,7 @@ public struct ModuleMap: Sendable {
             return components
         case .typescript:
             return pathsByID[file].map { $0.split(separator: "/").map(String.init) }
-        case .javascript:
+        case .javascript, .go:
             return nil
         }
     }

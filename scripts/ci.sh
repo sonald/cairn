@@ -25,7 +25,7 @@ for domain in "$@"; do
         static) run_static=true ;;
         core) filters+=('CodeInsightCoreTests\.|CodeInsightGitTests\.|TreeSitterKitTests\.') ;;
         reader) filters+=('CodeInsightReaderCoreTests\.|CodeInsightReaderUITests\.') ;;
-        engine) filters+=('CodeInsightEngineTests\.|RustExtractorTests\.|PythonExtractorTests\.|TypeScriptExtractorTests\.') ;;
+        engine) filters+=('CodeInsightEngineTests\.|RustExtractorTests\.|PythonExtractorTests\.|TypeScriptExtractorTests\.|GoExtractorTests\.') ;;
         exact) filters+=('CodeInsightExactTests\.') ;;
         app) filters+=('CodeInsightAppModelTests\.|CodeInsightAppTests\.') ;;
         full) run_static=true; run_full=true; filters+=('.*') ;;

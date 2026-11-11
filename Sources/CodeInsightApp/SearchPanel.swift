@@ -633,6 +633,7 @@ final class SearchPanel: NSViewController, NSTextFieldDelegate, NSOutlineViewDat
             case .python: "Python"
             case .typescript: "TypeScript"
             case .javascript: "JavaScript"
+            case .go: "Go"
             }
         }.joined(separator: ", ")
         var scope = [panelModel.query.isEmpty ? localized("panel.search.placeholder") : languages.isEmpty

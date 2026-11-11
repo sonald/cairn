@@ -15,6 +15,11 @@ private func originalClassification(path: String, language: LanguageID) -> Langu
             return nil
         }
         return LanguageMode(language: .python)
+    case .go:
+        guard URL(fileURLWithPath: path).pathExtension == "go" else {
+            return nil
+        }
+        return LanguageMode(language: .go)
     case .typescript, .javascript:
         guard language == .typescript else { return nil }
         if path.hasSuffix(".ts")
@@ -33,9 +38,9 @@ private func originalClassification(path: String, language: LanguageID) -> Langu
 
 @Test
 func languageClassificationMatchesOriginalOnGeneratedPaths() {
-    let languages: [LanguageID] = [.rust, .python, .typescript, .javascript]
+    let languages: [LanguageID] = [.rust, .python, .typescript, .javascript, .go]
     let stems = ["file", "file.test", ".hidden", "", "..", "源", "cafe\u{301}", "a b", "a%2Eb", "a#b"]
-    let extensions = ["", ".", ".rs", ".RS", ".py", ".PY", ".pyi", ".ts", ".TS", ".tsx", ".d.ts", ".mts", ".cts", ".js"]
+    let extensions = ["", ".", ".rs", ".RS", ".py", ".PY", ".pyi", ".ts", ".TS", ".tsx", ".d.ts", ".mts", ".cts", ".js", ".go", ".GO", "_test.go"]
     let prefixes = ["", "/", "./", "../", "src/", "src/../", "src.rs/", "src.py/../nested/", "a//b/"]
     let suffixes = ["", "/", "//", "/.", "/.."]
     for stem in stems {
