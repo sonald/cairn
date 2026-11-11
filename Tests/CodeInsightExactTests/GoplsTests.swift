@@ -309,3 +309,70 @@ func goplsBecomesUnavailableWithGosWordsWhenGoModNeedsANewerGo() throws {
         try session.definition(file: "main.go", byteOffset: 0)
     }
 }
+
+/// Evidence §2: after a warm switch the first request already answers from
+/// the target commit, including a file that was never opened.
+@Test(.enabled(if: goTools != nil, "gopls or go is not installed"))
+func goplsWarmSwitchAnswersFromTheTargetCommitAtOnce() throws {
+    let tools = try #require(goTools)
+    let fixture = try ExactGitFixture()
+    defer { fixture.remove() }
+    try fixture.write("module example.com/history\n\ngo 1.22\n", to: "go.mod")
+    try fixture.write("package history\n\nfunc Answer() int { return 1 }\n", to: "answer.go")
+    try fixture.write("package history\n\nvar value = Answer()\n", to: "use.go")
+    try fixture.commit("definition line 3")
+    try fixture.write(
+        "package history\n\n// moved\n// again\nfunc Answer() int { return 2 }\n",
+        to: "answer.go"
+    )
+    try fixture.commit("definition line 5")
+    let head = try CommitSnapshot(repositoryURL: fixture.root)
+    let previous = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD~1")
+    let scratch = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: scratch) }
+    let checkout = try CheckoutRoot(
+        directory: scratch.appendingPathComponent("checkout"),
+        source: fixture.root
+    )
+    defer { try? checkout.remove() }
+    try FileManager.default.createDirectory(
+        at: scratch.appendingPathComponent("modcache"),
+        withIntermediateDirectories: true
+    )
+    try checkout.checkout(commit: head.commitOID)
+    let session: any ExactSession
+    do {
+        session = try GoplsProvider(
+            projectURL: checkout.url,
+            executableURL: tools.gopls,
+            goURL: tools.go,
+            cacheURL: scratch.appendingPathComponent("cache"),
+            requestTimeout: 60,
+            closeGrace: 2,
+            environmentOverrides: [
+                "GOMODCACHE": scratch.appendingPathComponent("modcache").path,
+            ]
+        ).prepare(
+            snapshot: head,
+            profile: ExactProfileKey(snapshot: head, language: .go),
+            trustMode: .safe
+        )
+    } catch ExactError.unavailable(let detail) where detail.contains("sandbox-exec") {
+        try Test.cancel("gopls warm switch: \(detail); noBareExecution=true")
+    }
+    defer { session.close() }
+    let call = "package history\n\nvar value = ".utf8.count
+    let before = try onlyDefinitionLocation(try session.definition(file: "use.go", byteOffset: call))
+
+    try session.switchSnapshot(
+        to: previous,
+        profile: ExactProfileKey(snapshot: previous, language: .go),
+        changes: ExactFileChange.changes(from: head, to: previous, under: checkout.url),
+        configChanged: false,
+        prepareFiles: { try checkout.checkout(commit: previous.commitOID) }
+    )
+    let after = try onlyDefinitionLocation(try session.definition(file: "use.go", byteOffset: call))
+
+    #expect("\(before.file):\(before.line)" == "answer.go:5")
+    #expect("\(after.file):\(after.line)" == "answer.go:3")
+}
