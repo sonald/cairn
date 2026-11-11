@@ -115,7 +115,7 @@ Full、Structure、Overview 和 Focus Scope 是文件 Reader 的折叠方式，�
 
 ### 悬浮文档
 
-Rust、Python、TypeScript/TSX 支持延迟悬浮文档；也可用 `⌥` 单击或“显示符号文档”。优先使用语言服务器结果，不可用时用源码签名与 doc comment/docstring/JSDoc，并说明降级原因。无注释与缺少本地依赖源码是不同状态。语言服务器有正文时不附 Safe 模式等限制说明（它们解释的是缺失）；commit 分析借用了工作区依赖时，有正文也附“依赖来自当前工作区，可能与该 commit 不一致”。
+Rust、Python、TypeScript/TSX、Go 支持延迟悬浮文档；也可用 `⌥` 单击或“显示符号文档”。优先使用语言服务器结果，不可用时用源码签名与 doc comment/docstring/JSDoc/Go 文档注释，并说明降级原因。无注释与缺少本地依赖源码是不同状态。语言服务器有正文时不附 Safe 模式等限制说明（它们解释的是缺失）；commit 分析借用了工作区依赖时，有正文也附“依赖来自当前工作区，可能与该 commit 不一致”。
 
 卡片可容纳签名、Markdown 和滚动正文；移进卡片可继续阅读，Esc 关闭。卡片中的符号链接尝试在应用内导航；这不等于普通 HTML/Markdown 文件预览会开放外部网络。
 
@@ -137,7 +137,7 @@ Rust、Python、TypeScript/TSX 支持延迟悬浮文档；也可用 `⌥` 单击
 
 光标紧挨 `()`、`[]`、`{}` 时给这一对括号描边，找不到另一半时只给当前括号画虚线；字符串和注释里的括号不参与。“跳到配对括号”默认 `⌃⌘M`；“选中括号内内容”默认 `⌃⇧⌘M`，重复执行逐层向外扩大。Rust 泛型尖括号与 JSX 标签不配对。
 
-Rust、TypeScript/TSX 中，从块头到 `}` 跨 12 行以上的声明块和控制块，会在独占一行的 `}` 后淡色标注块头的简短形式（如 `‹ fn release`、`‹ match self.state`、`‹ acquire()`），最长 40 个字符。`} else {`、`} catch (e) {` 和没有块头文字的裸块不标注；Python 没有闭合符号，不标注。标注不进入文本，不能选中、复制或查找；块被折叠或换行后放不下时不显示。点击标注跳到块头并计入前进/后退，悬停显示完整块头。设置里的“标注长代码块的结尾”可以关闭。
+Rust、TypeScript/TSX、Go 中，从块头到 `}` 跨 12 行以上的声明块和控制块，会在独占一行的 `}` 后淡色标注块头的简短形式（如 `‹ fn release`、`‹ match self.state`、`‹ acquire()`），最长 40 个字符。`} else {`、`} catch (e) {` 和没有块头文字的裸块不标注；Python 没有闭合符号，不标注。标注不进入文本，不能选中、复制或查找；块被折叠或换行后放不下时不显示。点击标注跳到块头并计入前进/后退，悬停显示完整块头。设置里的“标注长代码块的结尾”可以关闭。
 
 ### 概览标记
 
@@ -211,7 +211,7 @@ Settings → 快捷键提供搜索、按键搜索、录制、冲突替换及恢�
 
 Markdown 使用只读富文本；Jupyter Notebook（`.ipynb`，nbformat 4）按同一渲染显示：Markdown 单元原样，代码单元按内核语言着色，输出以引用块列在其下——流和错误（去除 ANSI 颜色）为等宽文本，PNG/JPEG/GIF 图像内联显示，其他富输出（HTML 表格、组件、LaTeX）显示其 `text/plain` 形式；单元附件图片不显示，无法解析的 notebook 作为普通文本预览。HTML 使用受控 WKWebView（关闭 JavaScript、网络及本地子资源），图片和 PDF 使用只读预览，其余严格 UTF-8 文本可选择复制；未知二进制明确为不支持。
 
-配置、脚本，以及 Cairn 不分析的源码语言（C/C++、Objective-C、C#、Java、Kotlin、Go、Swift、PHP、Perl、CSS、SQL、Pascal、Visual Basic、Ada、汇编）按后缀做词法着色：关键字、注释、字符串、数字、预处理指令、注解和形如 `name(` 的调用，与 Source Insight 语言文件同一层次，不提供跳转。`.h` 按 C++ 着色。JS/JSX（`.js`、`.jsx`、`.mjs`、`.cjs`）用内置的 TSX 语法树着色，超过约 20 万 UTF-16 单元时显示为不着色等宽文本（预览在主线程同步着色）；其他格式的上限为 150 万。`.rs`、`.py`、`.ts`、`.tsx` 在项目未分析该语言时（只在切换到工作区没有该语言的 commit 时出现）同样以对应语法树预览着色。Markdown 代码块使用同一套规则。
+配置、脚本，以及 Cairn 不分析的源码语言（C/C++、Objective-C、C#、Java、Kotlin、Swift、PHP、Perl、CSS、SQL、Pascal、Visual Basic、Ada、汇编）按后缀做词法着色：关键字、注释、字符串、数字、预处理指令、注解和形如 `name(` 的调用，与 Source Insight 语言文件同一层次，不提供跳转。`.h` 按 C++ 着色。JS/JSX（`.js`、`.jsx`、`.mjs`、`.cjs`）用内置的 TSX 语法树着色，超过约 20 万 UTF-16 单元时显示为不着色等宽文本（预览在主线程同步着色）；其他格式的上限为 150 万。`.rs`、`.py`、`.ts`、`.tsx`、`.go` 在项目未分析该语言时（只在切换到工作区没有该语言的 commit 时出现）同样以对应语法树预览着色。Markdown 代码块使用同一套规则。
 
 这些着色预览可以像源码一样逐块折叠（行号栏三角、折叠占位符、“展开或折叠” `⌃⌘[`），复制仍来自原文：内置语法树（JS/JSX 及未分析时的 `.rs`、`.py`、`.ts`、`.tsx`）用语法折叠；TOML、INI 按 `[节]` 折叠到下一个节；Diff 按文件（`diff `）和 hunk（`@@`）折叠；其余格式（YAML、JSON、XML、Shell、Dockerfile、Makefile、其他语言、Jinja 及无格式文本）按缩进折叠——一行折叠其后缩进更深的行，YAML 中 `- ` 列表项视为比所在键深一级。词法折叠不认括号，压缩成一行的 JSON 或括号独占一行时块头留在外层。Markdown 预览按标题折叠：悬停标题时左侧页边出现箭头，点击或 `⌃⌘[`（光标所在节）把该标题之后、下一个同级或更高级标题之前的内容收起，收起的标题保留箭头；跳到被收起的锚点会先展开。跨折叠复制得到完整的渲染文本。HTML、纯文本文档（`.txt` 等）、图片和 PDF 不折叠。
 
@@ -225,7 +225,7 @@ Markdown/HTML 的项目内链接可导航，前进/后退跨预览可用，commi
 
 | 项目 | 当前依据与限制 |
 | --- | --- |
-| 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`；`.pyi`、`.d.ts`、`.mts`、`.cts` 不是项目源码，不因 CLI 能选择语言就获得索引支持。`.d.ts` 与 `.pyi` 只在作为依赖跳转目标时只读打开与高亮。JS/JSX 未开放语言分析，只在预览中按语法树着色。 |
+| 语言范围 | 索引分类仅 `.rs`、`.py`、`.ts`、`.tsx`、`.go`（含 `_test.go`）；`.pyi`、`.d.ts`、`.mts`、`.cts` 不是项目源码，不因 CLI 能选择语言就获得索引支持。`.d.ts` 与 `.pyi` 只在作为依赖跳转目标时只读打开与高亮。JS/JSX 未开放语言分析，只在预览中按语法树着色。 |
 | 自动探测的混合语言项目 | 2026-10-10 在打包应用（分支 `mixed-auto-detect`，0bdca4f 构建）上验收：真实混合仓库（两个 Rust 单元、两个 TypeScript 单元、根 `pyproject.toml`）无对话框打开，分析配置菜单列出三门语言与单元根，按文件切换 profile，Rust 显示缺少根 `Cargo.toml`、Python/TypeScript 精确分析就绪，Refresh 后集合不变，关窗后从最近打开恢复会话；单语言仓库、非 Git 混合目录、零源码目录按设计表现。在同一应用上用版本选择器切到历史 commit（工具栏显示 commit、路径栏“只读快照”，分析配置仍为 Rust）再切回工作区，均正常。后续三个提交（部分索引期间的点击、CLI `index` 默认语言、自测断言）由对应测试与自测通道验证，未重新原生验收。 |
 | 每语言多个分析单元 | 单元数没有上限：N 个 `pyproject.toml` 的 Python monorepo 产生 N 个单元，每次索引每门语言把 manifest 走一遍分给各单元（每个文件按目录深度查单元根表，与单元数无关），但每个单元各建一个 session，这部分开销仍随单元数增长（codex 的 132 个 Rust 单元一遍约 0.1 s）；首帧建一遍，提取完成后只在确有新内容装入时再建一遍，持久缓存已覆盖全部内容时首帧的会话就是完整会话；分析配置菜单列 N 行；Exact 一次只在一个单元运行。同一语言两个单元的 `projectUnitName` 可能相同（TypeScript 有 `tsconfig.json` 时单元名固定为 `tsconfig.json`），工具栏与分析配置菜单头无法区分当前是哪个单元，只有菜单行列出单元根；单元名不能改成相对路径（Exact 用目录名重算 profile 校验），待后续在界面上补单元根。2026-10-10 在打包应用（分支 `multi-unit`，db1c1aa 构建，独立标识 `dev.cairn.Cairn.v2accept`）上验收 llm-tools HEAD bb6e992：无对话框打开；分析配置菜单 5 行（Rust 11 `crates/qrcode2txt`、Rust 22 `tools/semantic-json-viewer/src-tauri`、Python 8 `.`、TypeScript 49 `tools/model-files-web`、TypeScript 21 `tools/semantic-json-viewer`），Rust 两行之和等于仓库 `.rs` 数；打开 `crates/qrcode2txt/src/main.rs` 后 profile 为 qrcode2txt、精确分析就绪（安全模式离线依赖提示），hover `std::process` 得到 std 文档；切到 src-tauri 的文件时 profile 变为 semantic-json-viewer；切到两个 TypeScript 单元的文件时精确分析各重启一次后就绪，但工具栏与菜单头对两个 TypeScript 单元都显示 `tsconfig.json`，只能从菜单行的单元根区分；项目搜索 `"fn main("` 覆盖 111 个源码文件（33+8+70，不重复计数），结果同时来自两个 Rust 单元；Refresh 前后搜索范围（111）与命中数（8）不变，Refresh 后菜单 5 行；关闭最后一个窗口后应用退出，重新启动即恢复 llm-tools 并停在同一文件；版本选择器切到 457b66e 变为 3 行、切回工作区恢复 5 行；tokio 仍是一个单元。未验：TypeScript 单元内的 hover；`run-self-tests.sh` 的 typescript 通道在 main 上同样失败（fuzzy-relative 断言，与本功能无关），diff 通道一次挂起后重跑通过。 |
 | TypeScript 类型直达 | 句法联合类型当前取首个非 `null`/`undefined` 成员，不承诺 `A \| B` 全候选；interface、type alias、enum 是声明种类，但类型直达仍不以它们为句法目标，相关目标依赖 Exact。 |
