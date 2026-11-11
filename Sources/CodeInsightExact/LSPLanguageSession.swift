@@ -61,6 +61,9 @@ struct LSPLanguageSpec {
         _ base: ExactAnalysisEnvironment,
         _ diagnostic: String
     ) -> ExactAnalysisEnvironment)?
+    /// A failure in server output that no restart fixes; the session
+    /// becomes unavailable with the returned reason.
+    var unavailableReason: (@Sendable (_ diagnostic: String) -> String?)?
 }
 
 /// Capabilities the server's `initialize` result advertises, for the given
@@ -1072,11 +1075,21 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             stateLock.unlock()
         }
         let onDiagnostic = language.onDiagnostic
+        let unavailableReason = language.unavailableReason
         // `experimental/serverStatus` reaches the diagnostics observer too.
         let watchesQuiescence = language.requestFlow == .awaitQuiescence
-        guard onDiagnostic != nil || watchesQuiescence else { return }
+        guard onDiagnostic != nil || unavailableReason != nil || watchesQuiescence
+        else { return }
         observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
             guard let self, let observedClient else { return }
+            if let reason = unavailableReason?(diagnostic) {
+                stateLock.lock()
+                if state != .closed, client === observedClient {
+                    state = .unavailable(reason)
+                    didRestart = true
+                }
+                stateLock.unlock()
+            }
             if let onDiagnostic {
                 stateLock.lock()
                 let base = baseAttribution.environment

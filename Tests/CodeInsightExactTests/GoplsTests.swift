@@ -135,3 +135,69 @@ func goplsAnswersDefinitionReferencesAndImplementationsAcrossFiles() throws {
     #expect(session.readiness == .ready)
     print("gopls cross-file: \(session.attribution.toolVersion)")
 }
+
+/// Messages as gopls v0.19.1 logged them in the feasibility probes.
+@Test
+func goplsOutputMarksMissingModulesAndNamesTheToolchainGoNeeds() {
+    let base = ExactAnalysisEnvironment(trustMode: .safe)
+    let lookup = "window/logMessage: initial workspace load failed: packages.Load error: "
+        + "err: exit status 1: stderr: go: github.com/cpuguy83/go-md2man/v2@v2.0.6: "
+        + "module lookup disabled by GOPROXY=off"
+    #expect(goplsEnvironment(base: base, diagnostic: lookup).limitations
+        == [.dependenciesUnavailableOffline])
+    #expect(goplsEnvironment(base: base, diagnostic: "Created View (#1)").limitations.isEmpty)
+
+    let toolchain = #"window/logMessage: Optional(["message": "go/packages.Load #1: err: "#
+        + #"exit status 1: stderr: go: go.mod requires go >= 1.99 (running go 1.27.3; "#
+        + #"GOTOOLCHAIN=local)\n\n\tview_id=\"1\""])"#
+    #expect(goplsUnavailableReason(toolchain)
+        == "go.mod requires go >= 1.99 (running go 1.27.3; GOTOOLCHAIN=local)")
+    #expect(goplsUnavailableReason(lookup) == nil)
+}
+
+@Test(.enabled(if: goTools != nil, "gopls or go is not installed"))
+func goplsLabelsAModuleWhoseRequirementIsNotInTheModuleCache() throws {
+    // `go 1.15` has no pruned module graph: go list needs every required
+    // module's go.mod, and the test's module cache is empty.
+    let fixture = try GoFixture([
+        "go.mod": "module example.com/missing\n\ngo 1.15\n\nrequire example.invalid/dep v1.0.0\n",
+        "go.sum": """
+            example.invalid/dep v1.0.0 h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            example.invalid/dep v1.0.0/go.mod h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+            """,
+        "main.go": "package main\n\nfunc answer() int { return 1 }\n\nfunc main() { _ = answer() }\n",
+    ])
+    let session = try fixture.session()
+    defer { session.close() }
+    _ = try? session.definition(
+        file: "main.go",
+        byteOffset: fixture.offset(of: "answer", in: "main.go", occurrence: 2)
+    )
+    #expect(eventually {
+        session.attribution.environment.limitations.contains(.dependenciesUnavailableOffline)
+    })
+}
+
+@Test(.enabled(if: goTools != nil, "gopls or go is not installed"))
+func goplsBecomesUnavailableWithGosWordsWhenGoModNeedsANewerGo() throws {
+    let fixture = try GoFixture([
+        "go.mod": "module example.com/newgo\n\ngo 1.99\n",
+        "main.go": "package main\n\nfunc answer() int { return 1 }\n\nfunc main() { _ = answer() }\n",
+    ])
+    let session = try fixture.session()
+    defer { session.close() }
+    _ = try? session.definition(
+        file: "main.go",
+        byteOffset: fixture.offset(of: "answer", in: "main.go", occurrence: 2)
+    )
+    #expect(eventually {
+        guard case .unavailable(let reason) = session.readiness else { return false }
+        return reason.hasPrefix("go.mod requires go >= 1.99 (running go ")
+            && reason.contains("; GOTOOLCHAIN=local)")
+    })
+    // No restart: the same toolchain would fail the same way.
+    #expect(throws: ExactError.self) {
+        try session.definition(file: "main.go", byteOffset: 0)
+    }
+}

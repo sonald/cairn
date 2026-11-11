@@ -293,7 +293,30 @@ extension LSPLanguageSpec {
                 ]).intersection(GoplsProvider.supportedCapabilities)
             },
             acceptsPath: { LanguageMode.classify(path: $0, language: .go) != nil },
-            languageID: { _ in "go" }
+            languageID: { _ in "go" },
+            onDiagnostic: goplsEnvironment,
+            unavailableReason: goplsUnavailableReason
         )
     }
+}
+
+/// Module lookups fail when the module cache lacks what the unit needs.
+/// A module without a pruned graph (`go` < 1.17) fails `go list` as a
+/// whole and gopls logs the lookup failure (evidence §3).
+func goplsEnvironment(
+    base: ExactAnalysisEnvironment,
+    diagnostic: String
+) -> ExactAnalysisEnvironment {
+    guard diagnostic.contains("module lookup disabled by GOPROXY=off") else { return base }
+    var limitations = base.limitations
+    limitations.insert(.dependenciesUnavailableOffline)
+    return ExactAnalysisEnvironment(trustMode: base.trustMode, limitations: limitations)
+}
+
+/// go's own words when `go.mod` (or a dependency) needs a newer Go than the
+/// local toolchain, e.g. "go.mod requires go >= 1.99 (running go 1.27.3;
+/// GOTOOLCHAIN=local)": no package loads, and no restart changes that.
+func goplsUnavailableReason(_ diagnostic: String) -> String? {
+    diagnostic.firstMatch(of: #/\S+ requires go >= \S+ \(running go [^)]*\)/#)
+        .map { String($0.output) }
 }
