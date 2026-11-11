@@ -121,6 +121,19 @@ for target in CodeInsightApp CodeInsightAppModel CodeInsightReaderCore CodeInsig
     test -d "$resource_bundle"
     cp -R "$resource_bundle" "$APP/Contents/Resources/"
 done
+# Third-party notices for code linked into the binary. The base16 themes'
+# LICENSE already travels inside the ReaderCore resource bundle.
+licenses="$APP/Contents/Resources/Licenses"
+mkdir -p "$licenses"
+for grammar in CTreeSitter CTreeSitterPython CTreeSitterRust CTreeSitterTypeScript; do
+    cp "Sources/$grammar/LICENSE" "$licenses/$grammar-LICENSE"
+done
+if [[ "${CAIRN_LIBGIT2:-}" == "vendored" ]]; then
+    cp Vendor/libgit2/LICENSE "$licenses/libgit2-LICENSE"
+else
+    # ponytail: dev bundles only; the other Homebrew dylibs' notices are not copied.
+    cp "$(brew --prefix libgit2)/COPYING" "$licenses/libgit2-LICENSE"
+fi
 
 bundle_homebrew_dylibs() {
     local main_binary="$1"
