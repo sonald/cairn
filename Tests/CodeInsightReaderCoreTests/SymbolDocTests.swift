@@ -417,6 +417,88 @@ func typeScriptDocLinksJSDocReferencesOutsideCodeFences() {
     """)
 }
 
+@Test
+func goSyntacticDocReadsLineCommentsDirectivesAndCodeBlocks() {
+    let doc = goDoc("""
+    package cobra
+
+    // Execute runs the command.
+    //
+    // Usage:
+    //
+    //	cmd.Execute()
+    //	cmd.Help()
+    //
+    // Options:
+    //   - quiet
+    //   - verbose
+    //
+    // See [Command].
+    //go:noinline
+    func (c *Command) Execute(args ...string) map[string]struct{} {
+    	return nil
+    }
+    """, declaration: "func (c *Command)")
+    #expect(doc.signatureLanguage == "go")
+    #expect(doc.signature == "func (c *Command) Execute(args ...string) map[string]struct{}")
+    #expect(doc.markdown == """
+    Execute runs the command.
+
+    Usage:
+
+    ```
+    cmd.Execute()
+    cmd.Help()
+    ```
+
+    Options:
+    - quiet
+    - verbose
+
+    See [Command](cairn-symbol:Command).
+    """)
+}
+
+@Test
+func goSyntacticSignaturesEndAtNewlinesAndInlineTypeBodies() {
+    let source = """
+    package p
+
+    /*
+    Config holds settings.
+    */
+    type Config[T any] struct {
+    	Name string `json:"name"` // shown
+    }
+
+    // Limit caps reads.
+    const Limit = 10 // bytes
+
+    var (
+    	// Default is used when unset.
+    	Default = Config[int]{}
+    )
+
+    type Reader interface {
+    	Read(p []byte) (n int, err error)
+    }
+    """
+    let config = goDoc(source, declaration: "Config[T any]")
+    #expect(config.signature == "type Config[T any] struct {\n\tName string `json:\"name\"` // shown\n}")
+    #expect(config.markdown == "Config holds settings.")
+    let limit = goDoc(source, declaration: "Limit =")
+    #expect(limit.signature == "const Limit = 10")
+    #expect(limit.markdown == "Limit caps reads.")
+    let fallback = goDoc(source, declaration: "Default =")
+    #expect(fallback.signature == "Default = Config[int]{}")
+    #expect(fallback.markdown == "Default is used when unset.")
+    #expect(goDoc(source, declaration: "Read(p").signature == "Read(p []byte) (n int, err error)")
+}
+
+private func goDoc(_ source: String, declaration: String) -> SymbolDoc {
+    syntacticDoc(source, language: .go, declaration: declaration)
+}
+
 private func pythonDoc(_ source: String, declaration: String) -> SymbolDoc {
     syntacticDoc(source, language: .python, declaration: declaration)
 }

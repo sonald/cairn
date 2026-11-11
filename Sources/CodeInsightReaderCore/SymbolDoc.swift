@@ -73,7 +73,9 @@ public func syntacticSymbolDoc(
         return pythonSymbolDoc(at: range, in: document, location: location)
     case .typescript:
         return typescriptSymbolDoc(at: range, in: document, location: location)
-    case .javascript, .go:
+    case .go:
+        return goSymbolDoc(at: range, in: document, location: location)
+    case .javascript:
         return SymbolDoc(
             location: location,
             signature: firstLineSignature(at: range, in: document),
@@ -245,6 +247,12 @@ public func docCommentRange(
     guard let start = document.lineTable.lineColumn(at: range.lowerBound) else {
         return nil
     }
+    if document.languageMode.language == .go {
+        guard let firstLine = goDocComment(above: range, in: document)?.firstLine,
+              let begin = document.lineTable.byteOffset(line: UInt32(firstLine + 1), column: 1)
+        else { return nil }
+        return ByteRange(lowerBound: begin, upperBound: range.lowerBound)
+    }
     var index = Int(start.line) - 2
     var firstLine = Int(start.line) - 1
     var found = false
@@ -402,6 +410,8 @@ private struct HeaderScanConfiguration {
     var backticks = false
     /// Generic `<…>` nesting keeps a `{` from ending the header (Rust, TS).
     var angles = true
+    /// A newline or `//` at depth zero ends the header (Go).
+    var newlineTerminates = false
 
     static let rust = HeaderScanConfiguration()
     static let python = HeaderScanConfiguration(
@@ -414,6 +424,14 @@ private struct HeaderScanConfiguration {
         singleQuotes: true,
         backticks: true
     )
+    /// Go generics use `[…]`; `<-chan` and `a < b` must not nest.
+    static let go = HeaderScanConfiguration(
+        singleQuotes: true,
+        backticks: true,
+        angles: false,
+        newlineTerminates: true
+    )
+
 }
 
 /// Scans the declaration header starting at `lower`: the bytes up to the
@@ -455,6 +473,11 @@ private func scanHeader(
             let previous = index > lower ? bytes[index - 1] : 0
             if previous != 0x2D, previous != 0x3D { angle = max(0, angle - 1) }
         case 0x3B where depth == 0:
+            return (index, nil)
+        case 0x0A where configuration.newlineTerminates && depth == 0:
+            return (index, nil)
+        case 0x2F where configuration.newlineTerminates && depth == 0
+            && index + 1 < limit && bytes[index + 1] == 0x2F:
             return (index, nil)
         case 0x3A where configuration.colonTerminates && depth == 0:
             return (index, nil)
@@ -952,6 +975,236 @@ func linkingTypeScriptDocReferences(_ markdown: String) -> String {
             withTemplate: "[$1](\(symbolLinkScheme):$1)"
         )
     }.joined(separator: "\n")
+}
+
+// MARK: - Go declarations
+
+private func goSymbolDoc(
+    at range: ByteRange,
+    in document: ReaderDocument,
+    location: String?
+) -> SymbolDoc {
+    SymbolDoc(
+        location: location,
+        signature: goSignature(at: range, in: document),
+        signatureLanguage: "go",
+        markdown: linkingIntraDocReferences(
+            markdownFromGoDoc(goDocComment(above: range, in: document)?.lines ?? [])
+        ),
+        source: .syntactic
+    )
+}
+
+/// The declaration up to its body: `{` of a function, the newline after a
+/// `var`, field or interface method. `struct {…}` and `interface {…}` types
+/// show their body like Rust aggregates; in other positions
+/// (`func F() map[string]struct{} {`) their braces belong to the header.
+private func goSignature(
+    at range: ByteRange,
+    in document: ReaderDocument
+) -> String? {
+    let bytes = document.bytes
+    guard let start = document.lineTable.lineColumn(at: range.lowerBound),
+          let lineStart = document.lineTable.byteOffset(line: start.line, column: 1)
+    else { return nil }
+    var lower = Int(range.lowerBound)
+    var first = Int(lineStart)
+    while first < lower, bytes[first] == 0x20 || bytes[first] == 0x09 { first += 1 }
+    // A range may open at the name; its keyword or receiver belongs in the signature.
+    let prefix = String(decoding: bytes[first..<lower], as: UTF8.self)
+        .trimmingCharacters(in: .whitespaces)
+    if prefix.isEmpty || prefix == "type" || prefix == "var" || prefix == "const"
+        || prefix.hasPrefix("func")
+    {
+        lower = first
+    }
+    let limit = min(bytes.count, lower + maximumSignatureBytes)
+    guard lower < limit else { return nil }
+
+    let isFunction = bytes[lower...].starts(with: "func".utf8)
+    var cursor = lower
+    var end = limit
+    var aggregateOpen: Int?
+    var elided = false
+    while let header = scanHeader(from: cursor, in: bytes, limit: limit, configuration: .go) {
+        guard let open = header.bodyOpen else {
+            end = header.headerEnd
+            break
+        }
+        let before = String(decoding: bytes[lower..<open], as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let keyword = ["struct", "interface"].first { endsWithWord(before, $0) }
+        if let keyword, isGoTypeHead(before.dropLast(keyword.count)) {
+            aggregateOpen = open
+            end = open
+            break
+        }
+        // A function's body opens here; other braces (`map[string]struct{}`,
+        // `T{…}` values) belong to the declaration.
+        if isFunction, keyword == nil {
+            end = open
+            break
+        }
+        guard let close = matchingBrace(from: open, in: bytes, limit: limit) else {
+            end = open
+            break
+        }
+        if !isFunction, bytes[open..<close].contains(0x0A) {
+            // A multi-line value such as `var root = &Command{…}` is elided.
+            end = open
+            elided = true
+            break
+        }
+        cursor = close + 1
+    }
+    var signature = String(decoding: bytes[lower..<end], as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !signature.isEmpty else { return nil }
+    if let aggregateOpen {
+        signature += " " + aggregateBody(from: aggregateOpen, in: document)
+    } else if elided {
+        signature += "{ … }"
+    }
+    return dedentContinuationLines(signature, declarationStart: UInt32(lower), in: document)
+}
+
+private func endsWithWord(_ text: String, _ word: String) -> Bool {
+    guard text.hasSuffix(word) else { return false }
+    let before = text.dropLast(word.count).last
+    return before.map { !($0.isLetter || $0.isNumber || $0 == "_") } ?? true
+}
+
+/// `type Name`, `Name` or `Name[T any]`: the text before a type's `struct`
+/// or `interface` when the declaration is that type.
+private func isGoTypeHead(_ head: Substring) -> Bool {
+    var rest = head.trimmingCharacters(in: .whitespaces)[...]
+    if rest.hasPrefix("type ") { rest = rest.dropFirst(5).drop { $0 == " " } }
+    let name = rest.prefix { $0.isLetter || $0.isNumber || $0 == "_" }
+    let tail = rest.dropFirst(name.count).trimmingCharacters(in: .whitespaces)
+    return !name.isEmpty && (tail.isEmpty || (tail.hasPrefix("[") && tail.hasSuffix("]")))
+}
+
+private func matchingBrace(from open: Int, in bytes: [UInt8], limit: Int) -> Int? {
+    var depth = 0
+    for index in open..<limit {
+        if bytes[index] == 0x7B { depth += 1 }
+        if bytes[index] == 0x7D {
+            depth -= 1
+            if depth == 0 { return index }
+        }
+    }
+    return nil
+}
+
+/// The doc comment above a Go declaration: the `//` lines directly above it
+/// without a blank line between, or a `/* … */` block ending on that line.
+/// Directives (`//go:generate`, `//nolint:…`, `//line …`) are not text.
+private func goDocComment(
+    above range: ByteRange,
+    in document: ReaderDocument
+) -> (firstLine: Int, lines: [String])? {
+    guard let start = document.lineTable.lineColumn(at: range.lowerBound) else {
+        return nil
+    }
+    let last = Int(start.line) - 2
+    guard last >= 0 else { return nil }
+    let lastText = sourceLine(last, in: document).trimmingCharacters(in: .whitespaces)
+    if lastText.hasSuffix("*/") {
+        var opening = last
+        while opening >= 0, !sourceLine(opening, in: document).contains("/*") { opening -= 1 }
+        guard opening >= 0,
+              sourceLine(opening, in: document).trimmingCharacters(in: .whitespaces).hasPrefix("/*")
+        else { return nil }
+        let joined = (opening...last).map { sourceLine($0, in: document) }.joined(separator: "\n")
+        guard let open = joined.range(of: "/*"),
+              let close = joined.range(of: "*/", options: .backwards),
+              open.upperBound <= close.lowerBound
+        else { return nil }
+        let body = String(joined[open.upperBound..<close.lowerBound])
+        return (opening, normalizedDocLines(body.components(separatedBy: "\n")).components(separatedBy: "\n"))
+    }
+    var index = last
+    var lines: [String] = []
+    while index >= 0 {
+        let trimmed = sourceLine(index, in: document).trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("//") else { break }
+        lines.append(String(trimmed.dropFirst(2)))
+        index -= 1
+    }
+    guard !lines.isEmpty else { return nil }
+    var text = lines.reversed()
+        .filter { !isGoDirective($0) }
+        .map { $0.hasPrefix(" ") ? String($0.dropFirst()) : $0 }
+    while text.first?.isEmpty == true { text.removeFirst() }
+    while text.last?.isEmpty == true { text.removeLast() }
+    return (index + 1, text)
+}
+
+/// go/doc's directive rule: `//` then `[a-z0-9]+:[a-z0-9]`, or `//line `,
+/// `//extern `, `//export `.
+private func isGoDirective(_ text: String) -> Bool {
+    if text.hasPrefix("line ") || text.hasPrefix("extern ") || text.hasPrefix("export ") {
+        return true
+    }
+    let scalars = Array(text.unicodeScalars)
+    func isLowerAlphanumeric(_ index: Int) -> Bool {
+        index < scalars.count
+            && ((0x61...0x7A).contains(scalars[index].value) || (0x30...0x39).contains(scalars[index].value))
+    }
+    var index = 0
+    while isLowerAlphanumeric(index) { index += 1 }
+    return index > 0 && index < scalars.count && scalars[index] == ":" && isLowerAlphanumeric(index + 1)
+}
+
+/// Go doc comment syntax as Markdown. An indented span is a code block, or
+/// a list when it opens with a list marker; `# Heading` becomes a heading.
+/// Paragraphs and `[Name]` doc links already read as Markdown.
+func markdownFromGoDoc(_ lines: [String]) -> String {
+    func isIndented(_ line: String) -> Bool { line.first == " " || line.first == "\t" }
+    func isListItem(_ trimmed: String) -> Bool {
+        if ["- ", "* ", "+ ", "• "].contains(where: trimmed.hasPrefix) { return true }
+        let digits = trimmed.prefix { $0.isASCII && $0.isNumber }
+        let rest = trimmed.dropFirst(digits.count)
+        return !digits.isEmpty && (rest.hasPrefix(". ") || rest.hasPrefix(") "))
+    }
+    var result: [String] = []
+    var index = 0
+    while index < lines.count {
+        let line = lines[index]
+        guard isIndented(line) else {
+            result.append(line.hasPrefix("# ") ? "### " + line.dropFirst(2) : line)
+            index += 1
+            continue
+        }
+        var span: [String] = []
+        while index < lines.count {
+            let current = lines[index]
+            let blank = current.trimmingCharacters(in: .whitespaces).isEmpty
+            if isIndented(current) && !blank {
+                span.append(current)
+            } else if blank, index + 1 < lines.count, isIndented(lines[index + 1]) {
+                span.append("")
+            } else {
+                break
+            }
+            index += 1
+        }
+        if isListItem(span[0].trimmingCharacters(in: .whitespaces)) {
+            for item in span {
+                let trimmed = item.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty { continue }
+                let marked = trimmed.hasPrefix("• ") ? "- " + trimmed.dropFirst(2) : trimmed
+                result.append(isListItem(trimmed) ? marked : "  " + trimmed)
+            }
+        } else {
+            let indent = span.filter { !$0.isEmpty }
+                .map { $0.prefix { $0 == " " || $0 == "\t" }.count }.min() ?? 0
+            result.append("```")
+            result += span.map { $0.isEmpty ? $0 : String($0.dropFirst(indent)) }
+            result.append("```")
+        }
+    }
+    return result.joined(separator: "\n")
 }
 
 private func firstLineSignature(
