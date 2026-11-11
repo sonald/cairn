@@ -486,7 +486,14 @@ public final class ExactCoordinator {
                 tsserverURL: tsserver,
                 borrowedFromWorkspace: dependencies.borrowedFromWorkspace
             )
-        case .javascript, .go:
+        case .go:
+            guard let gopls = GoplsProvider.findExecutable(named: "gopls", projectURL: projectURL),
+                  let go = GoplsProvider.findExecutable(named: "go", projectURL: projectURL)
+            else {
+                throw ExactError.unavailable(localized("model.exact.goplsMissing"))
+            }
+            return try GoplsProvider(projectURL: projectURL, executableURL: gopls, goURL: go)
+        case .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),

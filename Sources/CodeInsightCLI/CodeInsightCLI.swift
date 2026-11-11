@@ -290,7 +290,7 @@ extension CodeInsight {
         @Option(name: .long, help: "Git worktree root.")
         var project: String
 
-        @Option(name: .long, help: "Language: rust, python or typescript.")
+        @Option(name: .long, help: "Language: rust, python, typescript or go.")
         var language: String = "rust"
 
         @Option(name: .long, help: "Project-relative source file.")
@@ -314,10 +314,7 @@ extension CodeInsight {
         func run() throws {
             let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
             guard let languageID = parsedLanguage(language) else {
-                throw ValidationError("--language must be rust, python or typescript.")
-            }
-            guard languageID != .go else {
-                throw ValidationError("Go has no Exact session in this build yet.")
+                throw ValidationError("--language must be rust, python, typescript or go.")
             }
             let prefix = unit.split(separator: "/").joined(separator: "/")
             let unitFile = prefix.isEmpty ? file : String(file.dropFirst(prefix.count + 1))
@@ -455,10 +452,15 @@ extension CodeInsight {
                 )
                 .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
             case .go:
-                // ponytail: the gopls provider lands with the Exact slice.
-                throw ValidationError("Go has no Exact session in this build yet.")
+                guard let gopls = GoplsProvider.findExecutable(named: "gopls", projectURL: root),
+                      let go = GoplsProvider.findExecutable(named: "go", projectURL: root)
+                else {
+                    throw ValidationError("gopls or go not found")
+                }
+                return try GoplsProvider(projectURL: root, executableURL: gopls, goURL: go)
+                    .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
             case .javascript:
-                throw ValidationError("--language must be rust, python or typescript.")
+                throw ValidationError("--language must be rust, python, typescript or go.")
             }
         }
     }
