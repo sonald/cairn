@@ -153,6 +153,171 @@ func typeScriptReaderCallsRemainDistinctFromShadowedBindingsInTsx() throws {
     expectDisjointSpans(result.spans, source: source)
 }
 
+@Test
+func goReaderRolesOutlineAndLocalScopesFollowGoSemantics() throws {
+    let source = #"""
+        // Package demo reads things.
+        package demo
+
+        import (
+        	"fmt"
+        	str "strings"
+        )
+
+        const (
+        	Idle = iota
+        	Ready
+        )
+
+        type Store[K comparable] struct {
+        	*Base
+        	Count, Limit int `json:"count"`
+        }
+
+        type Reader interface {
+        	Read(p []byte) (n int, err error)
+        }
+
+        func (s *Store[K]) Read(value string) (n int, err error) {
+        	local := value
+        	n, err = fmt.Sscan(local)
+        	if v, err := s.parse(local); err != nil {
+        		return v, err
+        	}
+        	switch local {
+        	case "a":
+        		s.Count = len(local)
+        	}
+        	cfg := Config{Name: local, Count: n}
+        	return str.Count(cfg.Name, "x"), nil
+        }
+        """#
+    let result = try goReaderHighlightWithFolds(bytes: Array(source.utf8))
+
+    #expect(role("demo", within: "package demo", source: source, spans: result.spans) == .declarationEmphasis)
+    #expect(role("str", within: "str \"strings\"", source: source, spans: result.spans) == .declarationEmphasis)
+    #expect(role("Idle", within: "Idle = iota", source: source, spans: result.spans) == .declarationEmphasis)
+    #expect(role("iota", within: "Idle = iota", source: source, spans: result.spans) == .keyword)
+    #expect(role("Store", within: "type Store", source: source, spans: result.spans) == .declarationTitle)
+    #expect(role("K", within: "[K comparable]", source: source, spans: result.spans) == .typeName)
+    #expect(role("int", within: "Limit int", source: source, spans: result.spans) == .typeName)
+    #expect(role("Count", within: "Count, Limit", source: source, spans: result.spans) == .property)
+    #expect(role("Read", within: "Read(p []byte)", source: source, spans: result.spans) == .functionName)
+    #expect(role("Read", within: "Read(value", source: source, spans: result.spans) == .functionName)
+    #expect(role("Sscan", within: "fmt.Sscan", source: source, spans: result.spans) == .functionCall)
+    #expect(role("parse", within: "s.parse", source: source, spans: result.spans) == .functionCall)
+    #expect(role("len", within: "len(local)", source: source, spans: result.spans) == .functionCall)
+    #expect(role("Count", within: "s.Count =", source: source, spans: result.spans) == .property)
+    #expect(role("value", within: "value string", source: source, spans: result.spans) == .parameter)
+    #expect(role("value", within: "local := value", source: source, spans: result.spans) == .parameter)
+    #expect(role("local", within: "local := value", source: source, spans: result.spans) == .localBinding)
+    #expect(role("local", within: "Sscan(local)", source: source, spans: result.spans) == .localBinding)
+    #expect(role("err", within: "n, err = fmt", source: source, spans: result.spans) == .parameter)
+    #expect(role("err", within: "err != nil", source: source, spans: result.spans) == .localBinding)
+    #expect(role("Name", within: "Config{Name", source: source, spans: result.spans) == nil,
+            "a struct literal key names a field, not a local")
+    #expect(role("local", within: "Name: local", source: source, spans: result.spans) == .localBinding)
+    let ifScoped = try #require(result.bindings.indices.first { index in
+        result.bindings[index].kind == .letBinding
+            && result.bindings[index].declarationRange.lowerBound
+                == UInt32(source[..<source.range(of: "err := s")!.lowerBound].utf8.count)
+    })
+    #expect(result.referencesByBinding[ifScoped].count == 2, "`err` in the condition and the return")
+
+    #expect(result.outlineFacets.map(\.name)
+        == ["Idle", "Ready", "Store", "Base", "Count", "Limit", "Reader", "Read", "Read"])
+    #expect(result.outlineFacets.map(\.kind)
+        == [.const, .const, .struct, .field, .field, .field, .trait, .method, .method])
+    #expect(result.outlineFacets.map(\.depth) == [0, 0, 0, 1, 1, 1, 0, 1, 0])
+    #expect(result.outlineFacets.last?.detail == "(value string) (n int, err error)")
+    #expect(result.outlineFacets.first { $0.name == "Store" }?.detail == "[K comparable]")
+    #expect(result.outlineFacets.first { $0.name == "Count" }?.detail == "int")
+    expectDisjointSpans(result.spans, source: source)
+}
+
+/// Every prefix of a Go file, including ones that end mid-token, must still
+/// produce sorted, disjoint spans and folds that nest as a tree (no
+/// compatibility relations), so cut-off and error-node input degrades cleanly.
+@Test
+func goReaderFoldsNestAsATreeForEveryPrefix() throws {
+    let source = #"""
+        package demo
+
+        import "fmt"
+        import "os"
+
+        /* Block
+           comment */
+        type (
+        	Alias = int
+        	Pair struct {
+        		Key string
+        		Val struct {
+        			N int
+        		}
+        	}
+        )
+
+        var (
+        	a = 1
+        	b = []Pair{
+        		{Key: "x"},
+        		{
+        			Key: "y",
+        		},
+        	}
+        )
+
+        func run(xs []int) error {
+        	p := new(T{})
+        	for _, x := range xs {
+        		if x > 0 {
+        			fmt.Println(x)
+        		} else {
+        			os.Exit(1)
+        		}
+        	}
+        	select {
+        	case <-done:
+        		return nil
+        	default:
+        	}
+        	go func() {
+        		_ = p
+        	}()
+        	return nil
+        }
+        """#
+    let bytes = Array(source.utf8)
+    func load(_ prefix: ArraySlice<UInt8>) throws -> ReaderDocument {
+        try DocumentLoader(source: { _ in Array(prefix) })
+            .load(file: URL(fileURLWithPath: "/demo.go"), languageMode: LanguageMode(language: .go)).document
+    }
+    let full = try load(bytes[...])
+    func header(_ fragment: String) -> UInt32 {
+        UInt32(source[..<source.range(of: fragment)!.lowerBound].utf8.count)
+    }
+    let expected: [(String, FoldKind)] = [
+        ("import \"fmt\"", .imports), ("/* Block", .comment), ("type (", .container),
+        ("Pair struct", .container), ("Val struct", .container), ("var (", .container),
+        ("[]Pair{", .block), ("{\n\t\t\tKey", .block), ("func run", .declaration),
+        ("for _", .block), ("if x", .block), ("else {", .block), ("select {", .block),
+        ("case <-done", .block), ("func() {", .declaration),
+    ]
+    for (fragment, kind) in expected {
+        #expect(full.foldRegions.contains { $0.kind == kind && $0.headerRange.lowerBound == header(fragment) },
+                "\(fragment)")
+    }
+    for end in stride(from: 0, through: bytes.count, by: 7) {
+        let document = try load(bytes[..<end])
+        let topology = try #require(document.foldTopology, "prefix \(end)")
+        #expect(!topology.usesCompatibilityRelations, "prefix \(end)")
+        for (left, right) in zip(document.highlightSpans, document.highlightSpans.dropFirst()) {
+            #expect(left.range.upperBound <= right.range.lowerBound, "prefix \(end)")
+        }
+    }
+}
+
 private func role(
     _ token: String,
     within fragment: String,

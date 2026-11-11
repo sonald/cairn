@@ -10,6 +10,7 @@ func readonlyIdentifierIndexMatchesFrozenOracleAtEveryByte() throws {
         ("def f(value):\r\n    # value\r\n    return value + value\r\n", .init(language: .python)),
         ("function f($value: number) { return $value; } // $value", .init(language: .typescript)),
         ("const C = () => <div title=\"value\">{value}</div>;", .init(language: .typescript, variant: "tsx")),
+        ("package p\n// café\nfunc f(café int) (r int) { r, ok := café, true; _ = `café` + \"中文🚀\"; return r }", .init(language: .go)),
         ("", .init(language: .rust)),
         ("a", .init(language: .rust)),
     ]
@@ -67,7 +68,7 @@ func readonlyIdentifierIndexMatchesSeededAdversarialTokens() throws {
         source += atoms[Int(seed % UInt64(atoms.count))] + " "
     }
     let bytes = Array(source.utf8)
-    for language: LanguageID in [.rust, .python, .typescript, .javascript] {
+    for language: LanguageID in [.rust, .python, .typescript, .go, .javascript] {
         let document = ReaderDocument(bytes: bytes, languageMode: .init(language: language),
             lineTable: LineTable(bytes: bytes), byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
             highlightSpans: [], outlineFacets: [])

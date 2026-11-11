@@ -982,11 +982,11 @@ public struct DocumentLoader: Sendable {
 
     private static func requireSupported(_ languageMode: LanguageMode) throws {
         switch languageMode.language {
-        case .rust, .python:
+        case .rust, .python, .go:
             return
         case .typescript:
             try requireSupportedTypeScriptReaderMode(languageMode)
-        case .javascript, .go:
+        case .javascript:
             throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }
@@ -1053,12 +1053,19 @@ public struct DocumentLoader: Sendable {
                     shouldCancel: shouldCancel
                 )
             }
-        case .javascript, .go:
+        case .go:
+            return try onLargeStack {
+                try goReaderHighlightWithFolds(
+                    bytes: bytes,
+                    shouldCancel: shouldCancel
+                )
+            }
+        case .javascript:
             throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }
 
-    /// The Python and TypeScript walks recurse once per syntax node, and a
+    /// The Python, TypeScript and Go walks recurse once per syntax node, and a
     /// long `+` chain nests thousands deep; the Rust highlighter keeps its
     /// own stack. Cooperative and Dispatch threads have 512 KB stacks, so
     /// the walk runs on a thread with a large stack while the caller waits,

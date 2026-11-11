@@ -20,6 +20,7 @@ func readonlyIdentifierOracleMatchesEveryByteInMultilingualFixtures() throws {
         ("def f(value):\r\n    # value\r\n    return value + value\r\n", .init(language: .python)),
         ("function f($value: number) { return $value; } // $value", .init(language: .typescript)),
         ("const C = () => <div title=\"value\">{value}</div>;", .init(language: .typescript, variant: "tsx")),
+        ("package p\n// café\nfunc f(café int) (r int) { r, ok := café, true; _ = `café` + \"中文🚀\"; return r }", .init(language: .go)),
         (readonlyFixture(seed: 0xCA17, count: 100), .init(language: .rust)),
         ("", .init(language: .rust)),
     ]

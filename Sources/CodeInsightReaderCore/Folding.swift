@@ -436,7 +436,7 @@ internal struct FoldCandidateAccumulator {
         }
     }
 
-    private mutating func appendRuns(
+    internal mutating func appendRuns(
         in children: [Node],
         matching predicate: (Node) -> Bool,
         kind: FoldKind,

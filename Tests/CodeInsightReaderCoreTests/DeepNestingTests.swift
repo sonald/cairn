@@ -15,6 +15,7 @@ func readerSyntaxSurvivesDeeplyNestedExpressions() throws {
         ("deep.rs", "fn f() -> i32 { \(terms) }\n", LanguageMode(language: .rust)),
         ("deep.py", "s = \(terms)\n", LanguageMode(language: .python)),
         ("deep.ts", "const s = \(terms);\n", LanguageMode(language: .typescript)),
+        ("deep.go", "package p\nvar s = \(terms)\n", LanguageMode(language: .go)),
     ] {
         let bytes = Array(source.utf8)
         let document = try DocumentLoader(source: { _ in bytes })

@@ -36,11 +36,16 @@ struct ReadonlyIdentifierOracle {
     "readonly", "return", "satisfies", "set", "static", "super", "switch",
     "throw", "type", "typeof", "var", "void", "while", "with", "yield",
 ]
+    private static let goKeywords: Set<String> = [
+        "break", "case", "chan", "const", "continue", "default", "defer", "else",
+        "fallthrough", "for", "func", "go", "goto", "if", "import", "interface",
+        "map", "package", "range", "return", "select", "struct", "switch", "type", "var",
+    ]
     func occurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
         switch languageMode.language {
-        case .rust, .python, .typescript:
+        case .rust, .python, .typescript, .go:
             break
-        case .javascript, .go:
+        case .javascript:
             return []
         }
         guard byteOffset < bytes.count,
@@ -77,7 +82,9 @@ struct ReadonlyIdentifierOracle {
             guard !Self.pythonKeywords.contains(selected) else { return [] }
         case .typescript:
             guard !Self.typeScriptKeywords.contains(selected) else { return [] }
-        case .javascript, .go:
+        case .go:
+            guard !Self.goKeywords.contains(selected) else { return [] }
+        case .javascript:
             return []
         }
 
