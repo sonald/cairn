@@ -316,6 +316,9 @@ extension CodeInsight {
             guard let languageID = parsedLanguage(language) else {
                 throw ValidationError("--language must be rust, python or typescript.")
             }
+            guard languageID != .go else {
+                throw ValidationError("Go has no Exact session in this build yet.")
+            }
             let prefix = unit.split(separator: "/").joined(separator: "/")
             let unitFile = prefix.isEmpty ? file : String(file.dropFirst(prefix.count + 1))
             guard prefix.isEmpty || file.hasPrefix(prefix + "/") else {
