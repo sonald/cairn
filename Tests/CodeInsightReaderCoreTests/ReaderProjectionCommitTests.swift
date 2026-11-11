@@ -522,3 +522,38 @@ func readonlyProjectionStructureSwitchKeepsViewportInsideShorterDocument(wrap: B
     let row = try #require(ReaderViewportGeometry.rowRect(containingDisplayLocation: header, in: reader.view))
     #expect(reader.view.visibleRect.intersects(row))
 }
+
+// Regression: a caret set through accessibility moves TextKit's viewport to
+// the caret line while the clip stays put. Folding nearly the whole document
+// then restored the scroll through that relocated viewport: four lines were
+// laid out ~800pt down in an oversized frame, and the reader showed nothing.
+@MainActor @Test
+func readonlyProjectionFoldToAFewLinesKeepsThemMeasuredAtTheTop() throws {
+    _ = NSApplication.shared
+    let source = "{\n  \"items\": [\n" + (0..<1000).map { "    \($0)" }.joined(separator: ",\n") + "\n  ]\n}\n"
+    let document = TextFormat.previewDocument(bytes: Array(source.utf8), format: .json)
+    let reader = ReaderTextView(settings: ReaderSettings())
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 1000, height: 760))
+    scroll.hasVerticalScroller = true
+    scroll.hasHorizontalScroller = true
+    scroll.documentView = reader.view
+    let window = NSWindow(contentRect: scroll.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+    window.contentView = scroll
+    defer { reader.stopPendingReaderWork(); window.close() }
+    reader.configureGutter(in: scroll, lineNumbers: true)
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/items.json"))
+    window.displayIfNeeded()
+    reader.view.setAccessibilitySelectedTextRange(NSRange(location: 4, length: 0))
+
+    #expect(reader.toggleFold(atLine: 2))
+    window.displayIfNeeded()
+
+    let clip = scroll.contentView
+    let usage = try #require(reader.view.textLayoutManager?.usageBoundsForTextContainer)
+    #expect(reader.view.string.utf16.count < 40)
+    #expect(usage.height < 200, "usage=\(usage)")
+    #expect(reader.view.frame.height <= clip.bounds.height + 0.5, "frame=\(reader.view.frame.height)")
+    #expect(abs(clip.bounds.minY) < 0.5, "clip=\(clip.bounds.minY)")
+}

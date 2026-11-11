@@ -2925,17 +2925,13 @@ public final class ReaderTextView {
                   )
             else { return }
             let range = NSRange(location: location, length: 0)
-            if let manager = view.textLayoutManager,
-               let content = manager.textContentManager,
-               let target = content.location(content.documentRange.location, offsetBy: location) {
-                // A partial edit can leave the old viewport beyond the new
-                // document extent. Relocate lazy layout to the source target
-                // before asking AppKit for its native line rectangle.
-                let controller = manager.textViewportLayoutController
-                let y = controller.relocateViewport(to: target)
-                scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: y))
-                controller.layoutViewport()
-            }
+            // A partial edit can leave the old viewport beyond the new
+            // document extent. Lay it out on the new text first, so the frame
+            // and clip are legal before AppKit scrolls to the line. Never
+            // relocate the viewport by hand here: TextKit's suggested position
+            // is an estimate, and it lays the target out at that position (a
+            // fold down to 4 lines measured ~880pt and the reader went blank).
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             view.scrollRangeToVisible(range)
             view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             let screenRect = view.firstRect(
