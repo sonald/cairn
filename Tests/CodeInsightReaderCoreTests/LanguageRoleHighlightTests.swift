@@ -189,6 +189,7 @@ func goReaderRolesOutlineAndLocalScopesFollowGoSemantics() throws {
         		s.Count = len(local)
         	}
         	cfg := Config{value: local, Count: n}
+        	_ = map[string]int{local: n}
         	return str.Count(cfg.Name, "x"), nil
         }
         """#
@@ -217,6 +218,8 @@ func goReaderRolesOutlineAndLocalScopesFollowGoSemantics() throws {
     #expect(role("value", within: "Config{value", source: source, spans: result.spans) == nil,
             "a struct literal key names a field, not the `value` parameter")
     #expect(role("local", within: "value: local", source: source, spans: result.spans) == .localBinding)
+    #expect(role("local", within: "{local: n}", source: source, spans: result.spans) == .localBinding,
+            "a map literal key is an expression")
     let ifScoped = try #require(result.bindings.indices.first { index in
         result.bindings[index].kind == .letBinding
             && result.bindings[index].declarationRange.lowerBound
@@ -244,8 +247,15 @@ func goReaderFoldsNestAsATreeForEveryPrefix() throws {
         package demo
 
         import "fmt"
-        import "os"
+        import (
+        	"io"
+        	"os"
+        )
 
+        /* Lead
+           block */
+
+        // Run
         /* Block
            comment */
         type (
@@ -298,7 +308,8 @@ func goReaderFoldsNestAsATreeForEveryPrefix() throws {
         UInt32(source[..<source.range(of: fragment)!.lowerBound].utf8.count)
     }
     let expected: [(String, FoldKind)] = [
-        ("import \"fmt\"", .imports), ("/* Block", .comment), ("type (", .container),
+        ("import \"fmt\"", .imports), ("import (", .imports), ("/* Lead", .comment),
+        ("/* Block", .comment), ("type (", .container),
         ("Pair struct", .container), ("Val struct", .container), ("var (", .container),
         ("[]Pair{", .block), ("{\n\t\t\tKey", .block), ("func run", .declaration),
         ("for _", .block), ("if x", .block), ("else {", .block), ("select {", .block),
@@ -308,6 +319,10 @@ func goReaderFoldsNestAsATreeForEveryPrefix() throws {
         #expect(full.foldRegions.contains { $0.kind == kind && $0.headerRange.lowerBound == header(fragment) },
                 "\(fragment)")
     }
+    // Top-level folds are siblings at one depth, as Rust's are, so "fold
+    // siblings" treats imports, comments, types, groups and functions alike.
+    let topLevel = ["import \"fmt\"", "/* Lead", "type (", "var (", "func run"].map(header)
+    #expect(Set(full.foldRegions.filter { topLevel.contains($0.headerRange.lowerBound) }.map(\.outlineDepth)).count == 1)
     for end in stride(from: 0, through: bytes.count, by: 7) {
         let document = try load(bytes[..<end])
         let topology = try #require(document.foldTopology, "prefix \(end)")

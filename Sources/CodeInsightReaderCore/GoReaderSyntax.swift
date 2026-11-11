@@ -53,9 +53,10 @@ func goReaderHighlightWithFolds(
     return (spans, walk.facets, folds, references.bindings, references.referencesByBinding)
 }
 
-/// Where a body's fold header starts and what kind of fold it is, passed from
-/// the declaration or statement to the child that holds the braces.
-private typealias FoldOwner = (headerStart: UInt32, kind: FoldKind)
+/// Where a body's fold header starts, what kind of fold it is and the fold
+/// depth of its declaration or statement, passed to the child holding the
+/// braces so top-level functions, types and groups share one depth.
+private typealias FoldOwner = (headerStart: UInt32, kind: FoldKind, depth: Int)
 
 /// One recursive pass for spans, outline facets and fold candidates; it runs
 /// on `DocumentLoader`'s large-stack thread like the Python and TypeScript walks.
@@ -80,7 +81,7 @@ private struct GoReaderWalk {
         let kind = node.kind
         if let region = contentRegionKind(nodeKind: kind, language: .go) {
             emit(node, region == .comment ? .comment : .string)
-            if region == .comment { foldBlockComment(node, foldDepth: foldDepth + 1) }
+            if region == .comment { foldBlockComment(node, foldDepth: owner?.depth ?? foldDepth) }
             return
         }
         switch kind {
@@ -106,20 +107,20 @@ private struct GoReaderWalk {
             }
         }
 
-        let folded = visitFold(node, owner: owner, foldDepth: foldDepth)
+        // Whatever lies inside a fold sits one level deeper, so the topology stays a tree.
+        let childFoldDepth = visitFold(node, owner: owner, foldDepth: foldDepth).map { $0 + 1 } ?? foldDepth
         if !inFunction { appendFacets(node, depth: depth) }
 
-        let runDepth = foldDepth + (folded ? 1 : 0)
         let named = node.namedChildren
         if named.count >= 2 {
             candidates.appendRuns(
                 in: named, matching: { $0.kind == "comment" },
-                kind: .comment, foldDepth: runDepth, bytes: bytes
+                kind: .comment, foldDepth: childFoldDepth, bytes: bytes
             )
             if kind == "source_file" {
                 candidates.appendRuns(
                     in: named, matching: { $0.kind == "import_declaration" },
-                    kind: .imports, foldDepth: runDepth, bytes: bytes
+                    kind: .imports, foldDepth: childFoldDepth, bytes: bytes
                 )
             }
         }
@@ -136,6 +137,7 @@ private struct GoReaderWalk {
         let typeRange = node.child(namedField: "type")?.byteRange
         let singleType = kind == "type_declaration" && isSingleSpec(node)
         var elseStart: UInt32?
+        var previousNamedKind: String?
         let childDepth = depth + (kind == "struct_type" || kind == "interface_type" ? 1 : 0)
         for index in 0..<node.childCount {
             guard let child = node.child(at: index) else { continue }
@@ -161,37 +163,42 @@ private struct GoReaderWalk {
             default:
                 childRole = nil
             }
-            let childOwner: FoldOwner?
+            var childOwner: FoldOwner?
             switch kind {
             case "function_declaration", "method_declaration", "func_literal":
-                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .declaration) : nil
+                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .declaration, foldDepth) : nil
             case "for_statement":
-                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .block) : nil
+                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .block, foldDepth) : nil
             case "if_statement":
                 if range == consequenceRange {
-                    childOwner = (node.byteRange.lowerBound, .block)
+                    childOwner = (node.byteRange.lowerBound, .block, foldDepth)
                 } else if range == alternative?.byteRange, let elseStart {
-                    childOwner = (elseStart, .block)
+                    childOwner = (elseStart, .block, foldDepth)
                 } else {
                     childOwner = nil
                 }
             case "type_declaration":
                 // `type T struct {` folds from `type`; grouped specs fold from their name.
-                childOwner = singleType ? (node.byteRange.lowerBound, .container) : nil
+                childOwner = singleType ? (node.byteRange.lowerBound, .container, foldDepth) : nil
             case "type_spec", "type_alias", "field_declaration":
                 childOwner = range == typeRange
-                    ? (owner?.headerStart ?? node.byteRange.lowerBound, .container) : nil
+                    ? (owner?.headerStart ?? node.byteRange.lowerBound, .container, owner?.depth ?? foldDepth) : nil
             case "composite_literal":
-                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .block) : nil
+                childOwner = range == bodyRange ? (node.byteRange.lowerBound, .block, foldDepth) : nil
             default:
                 childOwner = nil
             }
+            if child.kind == previousNamedKind, child.kind == "comment" || child.kind == "import_declaration" {
+                // Inside a run's body, so its own fold must nest deeper than the run.
+                childOwner = (range.lowerBound, .comment, childFoldDepth + 1)
+            }
+            if child.isNamed { previousNamedKind = child.kind }
             visit(
                 child,
                 role: childRole,
                 owner: childOwner,
                 depth: childDepth,
-                foldDepth: runDepth + 1,
+                foldDepth: childFoldDepth,
                 inFunction: inFunction || kind == "block"
             )
         }
@@ -205,40 +212,42 @@ private struct GoReaderWalk {
 
     // MARK: Folds
 
-    /// Appends the candidates `node` owns; true when it tried, so nested
-    /// folds get a deeper fold depth and the topology stays a tree.
-    private mutating func visitFold(_ node: Node, owner: FoldOwner?, foldDepth: Int) -> Bool {
+    /// Appends the candidates `node` owns and returns their fold depth. A body
+    /// folds at its owner's depth; the owner itself folds nothing.
+    private mutating func visitFold(_ node: Node, owner: FoldOwner?, foldDepth: Int) -> Int? {
         let start = node.byteRange.lowerBound
+        let headerStart = owner?.headerStart ?? start
+        let ownedDepth = owner?.depth ?? foldDepth
         switch node.kind {
         case "block":
             // Function and statement bodies fold from their owner's header.
             return braced(
-                owner?.kind ?? .block, headerStart: owner?.headerStart ?? start,
+                owner?.kind ?? .block, headerStart: headerStart,
                 open: node.byteRange.lowerBound, close: node.byteRange.upperBound - 1,
-                foldDepth: foldDepth
+                foldDepth: ownedDepth
             )
         case "literal_value":
             return braced(
-                .block, headerStart: owner?.headerStart ?? start,
+                .block, headerStart: headerStart,
                 open: node.byteRange.lowerBound, close: node.byteRange.upperBound - 1,
-                foldDepth: foldDepth
+                foldDepth: ownedDepth
             )
         case "struct_type":
             guard let list = node.namedChildren.first(where: { $0.kind == "field_declaration_list" })
-            else { return false }
+            else { return nil }
             return braced(
-                .container, headerStart: owner?.headerStart ?? start,
+                .container, headerStart: headerStart,
                 open: list.byteRange.lowerBound, close: list.byteRange.upperBound - 1,
-                foldDepth: foldDepth
+                foldDepth: ownedDepth
             )
         case "interface_type":
-            guard let braces = delimiters(of: node, open: "{", close: "}") else { return false }
+            guard let braces = delimiters(of: node, open: "{", close: "}") else { return nil }
             return braced(
-                .container, headerStart: owner?.headerStart ?? start,
-                open: braces.open, close: braces.close, foldDepth: foldDepth
+                .container, headerStart: headerStart,
+                open: braces.open, close: braces.close, foldDepth: ownedDepth
             )
         case "expression_switch_statement", "type_switch_statement", "select_statement":
-            guard let braces = delimiters(of: node, open: "{", close: "}") else { return false }
+            guard let braces = delimiters(of: node, open: "{", close: "}") else { return nil }
             return braced(.block, headerStart: start, open: braces.open, close: braces.close, foldDepth: foldDepth)
         case "expression_case", "type_case", "communication_case", "default_case":
             var colon: UInt32?
@@ -248,7 +257,7 @@ private struct GoReaderWalk {
                     break
                 }
             }
-            guard let colon else { return false }
+            guard let colon else { return nil }
             candidates.appendCandidate(
                 kind: .block,
                 headerRange: CodeInsightCore.ByteRange(lowerBound: start, upperBound: colon),
@@ -256,22 +265,24 @@ private struct GoReaderWalk {
                 foldDepth: foldDepth,
                 bytes: bytes
             )
-            return true
+            return foldDepth
         case "import_declaration", "const_declaration", "var_declaration", "type_declaration":
             let list = node.namedChildren.first {
                 $0.kind == "import_spec_list" || $0.kind == "var_spec_list"
             }
-            guard let parens = delimiters(of: list ?? node, open: "(", close: ")") else { return false }
+            guard let parens = delimiters(of: list ?? node, open: "(", close: ")") else { return nil }
+            // A grouped import inside a run of imports gets a deeper owner depth.
+            let depth = owner?.depth ?? foldDepth
             candidates.appendCandidate(
                 kind: node.kind == "import_declaration" ? .imports : .container,
                 headerRange: CodeInsightCore.ByteRange(lowerBound: start, upperBound: parens.open + 1),
                 bodyRange: CodeInsightCore.ByteRange(lowerBound: parens.open + 1, upperBound: parens.close),
-                foldDepth: foldDepth,
+                foldDepth: depth,
                 bytes: bytes
             )
-            return true
+            return depth
         default:
-            return false
+            return nil
         }
     }
 
@@ -282,12 +293,12 @@ private struct GoReaderWalk {
         open: UInt32,
         close: UInt32,
         foldDepth: Int
-    ) -> Bool {
+    ) -> Int? {
         guard open < close,
               Int(close) < bytes.count,
               bytes[Int(open)] == UInt8(ascii: "{"),
               bytes[Int(close)] == UInt8(ascii: "}")
-        else { return false }
+        else { return nil }
         candidates.appendCandidate(
             kind: kind,
             headerRange: CodeInsightCore.ByteRange(lowerBound: headerStart, upperBound: open + 1),
@@ -295,7 +306,7 @@ private struct GoReaderWalk {
             foldDepth: foldDepth,
             bytes: bytes
         )
-        return true
+        return foldDepth
     }
 
     /// A `/* … */` spanning lines folds to its first line.
@@ -460,6 +471,8 @@ private func goLocalReferences(
     var scopes: [[String: Int]] = [[:]]
     var scopeIDs: [UInt32] = [0]
     var nextScopeID: UInt32 = 1
+    /// Per enclosing composite literal: map, slice and array keys are expressions.
+    var keysAreExpressions: [Bool] = []
 
     /// `reusing`: `a, err := f()` assigns an `err` already declared in this scope.
     func declare(_ node: Node, kind: BindingKind, reusing: Bool = false) {
@@ -548,10 +561,24 @@ private func goLocalReferences(
             for name in node.namedChildren where name.kind == "identifier" {
                 declare(name, kind: .letBinding)
             }
+        case "composite_literal":
+            let type = node.child(namedField: "type")
+            if let type { visit(type) }
+            keysAreExpressions.append(
+                ["map_type", "slice_type", "array_type", "implicit_length_array_type"].contains(type?.kind ?? "")
+            )
+            if let body = node.child(namedField: "body") { visit(body) }
+            keysAreExpressions.removeLast()
+        case "literal_element" where node.namedChildren.first?.kind == "literal_value":
+            // ponytail: an elided inner type (`map[K]T{k: {Name: v}}`) is read as a struct.
+            keysAreExpressions.append(false)
+            node.namedChildren.forEach(visit)
+            keysAreExpressions.removeLast()
         case "keyed_element":
-            // A bare `Name:` key names a struct field, not a local.
+            // A bare `Name:` key of a struct literal names a field, not a local.
             if let key = node.child(namedField: "key"),
-               !(key.namedChildren.count == 1 && key.namedChildren[0].kind == "identifier")
+               keysAreExpressions.last == true
+                || !(key.namedChildren.count == 1 && key.namedChildren[0].kind == "identifier")
             {
                 visit(key)
             }
