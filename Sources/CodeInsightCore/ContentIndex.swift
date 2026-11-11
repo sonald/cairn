@@ -55,7 +55,7 @@ public struct LanguageMode: Codable, Hashable, Sendable {
     }
 
     /// Languages a project can be analyzed in, in `rawValue` order.
-    public static let supported: [LanguageID] = [.rust, .python, .typescript]
+    public static let supported: [LanguageID] = [.rust, .python, .typescript, .go]
 
     /// Classifies against every supported language. Only snapshot language
     /// detection uses this; everything else classifies against the

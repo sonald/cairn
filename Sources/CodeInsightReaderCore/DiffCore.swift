@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightGoExtractor
 import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
 import CodeInsightTypeScriptExtractor
@@ -346,9 +347,18 @@ public struct DiffCore: Sendable {
                 interner: ExtractionInterners(names: names, strings: strings)
             )
         }
+        // Go methods have no parent facet; their receiver type comes from the
+        // method's own impl relation.
+        let receivers = Dictionary(
+            contentIndex.implRelations.map { ($0.implFacetIndex, $0.typeNameID) },
+            uniquingKeysWith: { first, _ in first }
+        )
         var result: [FunctionKey: [ExtractedFunction]] = [:]
-        for facet in contentIndex.symbols where facet.kind.shape == .function {
+        for (index, facet) in contentIndex.symbols.enumerated() where facet.kind.shape == .function {
             var chain = [names.resolve(facet.nameID)]
+            if facet.kind == .goMethod, let receiver = receivers[UInt32(index)] {
+                chain.append(names.resolve(receiver))
+            }
             var parent = facet.parentFacetIndex
             while let parentIndex = parent,
                   contentIndex.symbols.indices.contains(Int(parentIndex))
@@ -377,7 +387,7 @@ public struct DiffCore: Sendable {
 
     private func requireSupported(_ languageMode: LanguageMode) throws {
         switch languageMode.language {
-        case .rust, .python:
+        case .rust, .python, .go:
             return
         case .typescript:
             guard languageMode.variant == nil || languageMode.variant == "tsx" else {
@@ -387,7 +397,7 @@ public struct DiffCore: Sendable {
                 ])
             }
             return
-        case .javascript, .go:
+        case .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "DiffCore does not support \(String(describing: languageMode.language))",
@@ -403,7 +413,9 @@ public struct DiffCore: Sendable {
             RustExtractor()
         case .typescript:
             TypeScriptExtractor()
-        case .javascript, .go:
+        case .go:
+            GoExtractor()
+        case .javascript:
             preconditionFailure("DiffCore requireSupported must reject \(languageMode.language)")
         }
     }

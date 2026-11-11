@@ -148,6 +148,26 @@ func typeScriptFunctionDiffUsesDotSeparatedClassMethodChain() throws {
 }
 
 @Test
+func goMethodsAreKeyedByReceiverSoSameNamedMethodsStayApart() throws {
+    let left = Array("""
+        package shape
+        func (c Circle) String() string { return "circle" }
+        func (r *Rect) String() string { return "rect" }
+        """.utf8)
+    let right = Array("""
+        package shape
+        func (c Circle) String() string { return "round" }
+        func (r *Rect) String() string { return "rect" }
+        """.utf8)
+    let changes = try DiffCore().functionChanges(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .go)
+    )
+    #expect(changes.map { "\($0.kind):\($0.displayName)" } == ["bodyChanged:Circle.String"])
+}
+
+@Test
 func typeScriptArrowComponentAndTsxJsxBodyChangesAreDetected() throws {
     let left = Array("""
         const Button = ({ label }: { label: string }) => {

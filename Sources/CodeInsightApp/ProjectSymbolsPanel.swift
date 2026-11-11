@@ -550,8 +550,9 @@ final class ProjectSymbolsPanel: NSViewController, NSOutlineViewDataSource, NSOu
         }
         // The owner shows only where the row stands alone in its group.
         let parentIsGroup = node.parent.flatMap(model.node).map { if case .group = $0.content { true } else { false } } ?? false
-        if !narrow, parentIsGroup, let parent = row.parentRow.flatMap(model.row), row.group == .method || row.group == .field || row.group == .enumMember {
-            text.append(NSAttributedString(string: parent.name + row.kind.qualifiedNameSeparator, attributes: secondary))
+        if !narrow, parentIsGroup, let owner = row.parentRow.flatMap(model.row)?.name ?? row.symbol.receiverTypeName,
+           row.group == .method || row.group == .field || row.group == .enumMember {
+            text.append(NSAttributedString(string: owner + row.kind.qualifiedNameSeparator, attributes: secondary))
         }
         let name: String
         if row.kind == .rustImpl {

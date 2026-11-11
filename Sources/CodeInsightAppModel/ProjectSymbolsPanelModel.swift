@@ -108,7 +108,8 @@ struct ProjectSymbolsData: Sendable {
     static func group(of kind: DeclarationKind, parentKind: DeclarationKind?) -> ProjectSymbolGroup {
         switch kind.shape {
         case .function:
-            guard let parentKind else { return .function }
+            // Go receiver methods have no parent facet; the receiver names the owner.
+            guard let parentKind else { return kind == .goMethod ? .method : .function }
             return [.struct, .enum, .class, .trait, .impl].contains(parentKind.shape) ? .method : .function
         case .struct, .class: return .type
         case .enum: return .enumeration
@@ -119,7 +120,7 @@ struct ProjectSymbolsData: Sendable {
         case .macro: return .macro
         case .value:
             switch kind {
-            case .rustField: return .field
+            case .rustField, .goField: return .field
             case .rustEnumVariant: return .enumMember
             default: return .value
             }
@@ -716,6 +717,7 @@ public final class ProjectSymbolsPanelModel {
             chain.append(data.rows[current].name)
             parent = data.rows[current].parentRow
         }
+        if row.parentRow == nil, let receiver = row.symbol.receiverTypeName { chain.append(receiver) }
         return (module + chain.reversed()).joined(separator: row.kind.qualifiedNameSeparator)
     }
 }
