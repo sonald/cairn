@@ -1135,6 +1135,87 @@ func foldResolverDeduplicatesTruthAndRejectsContradictorySummaries() {
     #expect(resolveFoldCandidates([first, contradiction]).isEmpty)
 }
 
+/// The pre-shortcut resolver: greedy acceptance in winner order, checked
+/// pairwise, then final order. Kept as the reference for the laminar shortcut.
+private func referenceResolvedFolds(_ input: [FoldCandidate]) -> [FoldRegion] {
+    func key(_ c: FoldCandidate) -> [Int] {
+        [Int(c.kind.rawValue), Int(c.headerRange.lowerBound), Int(c.headerRange.upperBound),
+         Int(c.bodyRange.lowerBound), Int(c.bodyRange.upperBound), c.outlineDepth]
+    }
+    var groups: [[Int]: [FoldCandidate]] = [:]
+    for c in input where c.bodyRange.lowerBound < c.bodyRange.upperBound { groups[key(c), default: []].append(c) }
+    let consistent = groups.values.compactMap { g in g.allSatisfy { $0.summary == g[0].summary } ? g[0] : nil }
+    func winner(_ c: FoldCandidate) -> [Int] {
+        [Int(c.kind.rawValue), -c.summary.hiddenLineCount, Int(c.headerRange.lowerBound),
+         Int(c.headerRange.upperBound), Int(c.bodyRange.lowerBound), Int(c.bodyRange.upperBound), c.outlineDepth]
+    }
+    func laminar(_ a: ByteRange, _ b: ByteRange) -> Bool {
+        a.upperBound <= b.lowerBound || b.upperBound <= a.lowerBound || (a != b
+            && ((a.lowerBound <= b.lowerBound && b.upperBound <= a.upperBound)
+                || (b.lowerBound <= a.lowerBound && a.upperBound <= b.upperBound)))
+    }
+    var accepted: [FoldCandidate] = []
+    for c in consistent.sorted(by: { winner($0).lexicographicallyPrecedes(winner($1)) })
+    where accepted.allSatisfy({ laminar(c.bodyRange, $0.bodyRange) }) { accepted.append(c) }
+    accepted.sort {
+        [Int($0.bodyRange.lowerBound), -Int($0.bodyRange.upperBound), Int($0.kind.rawValue)]
+            .lexicographicallyPrecedes([Int($1.bodyRange.lowerBound), -Int($1.bodyRange.upperBound), Int($1.kind.rawValue)])
+    }
+    return accepted.enumerated().map {
+        FoldRegion(id: FoldID(rawValue: UInt32($0.offset)), kind: $0.element.kind,
+                   headerRange: $0.element.headerRange, bodyRange: $0.element.bodyRange,
+                   outlineDepth: $0.element.outlineDepth, summary: $0.element.summary)
+    }
+}
+
+@Test
+func foldResolverMatchesTheGreedyReferenceOnLaminarAndConflictingCandidates() {
+    var state: UInt64 = 0xF01D
+    func next(_ bound: Int) -> Int {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return Int((state >> 33) % UInt64(bound))
+    }
+    let kinds: [FoldKind] = [.container, .declaration, .block, .comment]
+    func candidate(_ lower: Int, _ upper: Int) -> FoldCandidate {
+        // Mostly one summary per geometry; sometimes a contradicting duplicate.
+        foldCandidate(kinds[next(kinds.count)], header: max(0, lower - 1)..<lower, body: lower..<upper,
+                      depth: next(3), summary: FoldSummary(hiddenLineCount: next(8) == 0 ? next(5) : upper - lower))
+    }
+    // Nested forests: boundaries shared between parents and children, gaps between siblings.
+    func forest(_ lower: Int, _ upper: Int, depth: Int, into out: inout [FoldCandidate]) {
+        var cursor = lower
+        while depth < 5, cursor < upper - 1, next(4) != 0 {
+            let start = cursor + next(min(3, upper - cursor - 1))
+            let end = start + 1 + next(upper - start)
+            guard start < end, end <= upper else { break }
+            out.append(candidate(start, end))
+            forest(start, end, depth: depth + 1, into: &out)
+            cursor = end
+        }
+    }
+    var laminarCases = 0
+    for round in 0..<400 {
+        var candidates: [FoldCandidate] = []
+        forest(0, 30 + next(60), depth: 0, into: &candidates)
+        if round % 2 == 1 {
+            // Crossing, equal and repeated bodies.
+            for _ in 0..<(1 + next(4)) {
+                let lower = next(60)
+                candidates.append(candidate(lower, lower + 1 + next(30)))
+            }
+            candidates.append(candidates[next(candidates.count)])
+        }
+        if round == 0 { candidates = [] }
+        let expected = referenceResolvedFolds(candidates)
+        if expected.count == Set(candidates.map { [$0.bodyRange.lowerBound, $0.bodyRange.upperBound] }).count {
+            laminarCases += 1
+        }
+        #expect(resolveFoldCandidates(candidates) == expected, "round \(round)")
+        #expect(resolveFoldCandidates(permuted(candidates, seed: UInt64(round))) == expected, "round \(round)")
+    }
+    #expect(laminarCases > 100)
+}
+
 @Test
 func foldTransportSeamKeepsPublicInitializationEmptyAndLoadsBothPaths() async throws {
     let source = """

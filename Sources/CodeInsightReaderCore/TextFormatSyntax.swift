@@ -1023,9 +1023,10 @@ struct TextLexer {
             let le = lineEnd(i)
             i = le + 1
             guard ls < le else { continue }
+            let first = spans.count
             if s[ls] == 0x09 {
                 shell(ls + 1, le, dockerfile: false)
-                makeVariables(ls, le)
+                makeVariables(ls, le, lineSpans: first)
                 continue
             }
             let p = skipSpaces(ls, le)
@@ -1038,7 +1039,7 @@ struct TextLexer {
             while w < le, !Self.isSpace(s[w]), s[w] != 0x3A, s[w] != 0x3D { w += 1 }
             if Self.makeDirectives.contains(word(p, w)) {
                 emit(p, w, .keyword)
-                makeVariables(w, le)
+                makeVariables(w, le, lineSpans: first)
                 continue
             }
             var j = p
@@ -1050,21 +1051,23 @@ struct TextLexer {
                 var keyEnd = trimEnd(p, j)
                 if keyEnd > p, [0x3F, 0x2B, 0x21, 0x3A].contains(s[keyEnd - 1]) { keyEnd -= 1 }
                 emit(p, trimEnd(p, keyEnd), .property)
-                makeVariables(j, le)
+                makeVariables(j, le, lineSpans: first)
             } else if j < le, s[j] == 0x3A {
                 emit(p, trimEnd(p, j), s[p] == 0x2E ? .keyword : .functionName)
-                makeVariables(j, le)
+                makeVariables(j, le, lineSpans: first)
                 var comment = j
                 while comment < le, s[comment] != 0x23 { comment += 1 }
                 if comment < le { emit(comment, trimEnd(comment, le), .comment) }
             } else {
-                makeVariables(p, le)
+                makeVariables(p, le, lineSpans: first)
             }
         }
         spans.sort { $0.range.lowerBound < $1.range.lowerBound }
     }
 
-    mutating func makeVariables(_ start: Int, _ end: Int) {
+    /// `lineSpans` is where this line's spans begin; earlier lines' spans
+    /// end before it, so only this line's can overlap a variable.
+    mutating func makeVariables(_ start: Int, _ end: Int, lineSpans first: Int) {
         var j = start
         while j < end {
             guard s[j] == 0x24, j + 1 < end else { j += 1; continue }
@@ -1079,7 +1082,8 @@ struct TextLexer {
                     k += 1
                 }
                 k = min(end, k + 1)
-                spans.removeAll { $0.range.overlaps(j..<k) }
+                let kept = spans[first...].filter { !$0.range.overlaps(j..<k) }
+                spans.replaceSubrange(first..., with: kept)
                 emit(j, k, .parameter)
                 j = k
             } else if [0x40, 0x3C, 0x5E, 0x2A, 0x3F, 0x25, 0x2B].contains(open) {

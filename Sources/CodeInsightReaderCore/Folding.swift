@@ -540,21 +540,21 @@ internal func resolveFoldCandidates(_ input: [FoldCandidate]) -> [FoldRegion] {
         index = end
     }
 
-    var accepted: [FoldCandidate] = []
-    for candidate in consistent.sorted(by: winnerPrecedes) {
-        guard accepted.allSatisfy({ laminar(candidate.bodyRange, $0.bodyRange) }) else {
-            continue
+    // Parser and indentation output is normally laminar already: then the
+    // greedy pass below would accept every candidate, so skip its O(n²) scan.
+    var accepted = consistent.sorted(by: finalPrecedes)
+    if !isLaminarInFinalOrder(accepted) {
+        accepted = []
+        // ponytail: O(n²) only for candidate sets that really cross or repeat a body.
+        for candidate in consistent.sorted(by: winnerPrecedes) {
+            guard accepted.allSatisfy({ laminar(candidate.bodyRange, $0.bodyRange) }) else {
+                continue
+            }
+            accepted.append(candidate)
         }
-        accepted.append(candidate)
+        accepted.sort(by: finalPrecedes)
     }
-    #if DEBUG
-    for left in accepted.indices {
-        for right in accepted.indices where left < right {
-            assert(laminar(accepted[left].bodyRange, accepted[right].bodyRange))
-        }
-    }
-    #endif
-    accepted.sort(by: finalPrecedes)
+    assert(isLaminarInFinalOrder(accepted))
     return accepted.enumerated().map { offset, candidate in
         FoldRegion(
             id: FoldID(rawValue: UInt32(offset)),
@@ -607,6 +607,19 @@ private func finalPrecedes(_ lhs: FoldCandidate, _ rhs: FoldCandidate) -> Bool {
         ?? compare(rhs.bodyRange.upperBound, lhs.bodyRange.upperBound)
         ?? compare(lhs.kind.rawValue, rhs.kind.rawValue)
         ?? false
+}
+
+/// Whether candidates sorted by start, then longest first, pairwise satisfy
+/// `laminar`: each must close inside the innermost still-open body and differ from it.
+internal func isLaminarInFinalOrder(_ sorted: [FoldCandidate]) -> Bool {
+    var open: [CodeInsightCore.ByteRange] = []
+    for candidate in sorted {
+        let range = candidate.bodyRange
+        while let last = open.last, last.upperBound <= range.lowerBound { open.removeLast() }
+        if let last = open.last, range.upperBound > last.upperBound || range == last { return false }
+        open.append(range)
+    }
+    return true
 }
 
 private func laminar(
