@@ -282,6 +282,10 @@ extension LSPLanguageSpec {
     static var gopls: LSPLanguageSpec {
         LSPLanguageSpec(
             serverName: "gopls",
+            // gopls holds requests while it loads the workspace (13 s for
+            // the standard library, evidence §6) and says when it is done.
+            requestFlow: .awaitQuiescence,
+            workspaceLoad: (title: "Setting up workspace", limit: 300),
             capabilities: {
                 advertisedCapabilities($0, [
                     "definitionProvider": .definition,

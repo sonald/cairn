@@ -7,9 +7,9 @@ enum LSPRequestFlow {
     /// Pyright, TypeScript: one request per call; the parsed response,
     /// empty or not, is the answer.
     case direct
-    /// rust-analyzer: before every attempt, wait outside the operation lock
-    /// until the server reports quiescence (stops when the batch goes stale
-    /// or the session is cancelled). Inside the lock, an empty result from a
+    /// rust-analyzer, gopls: before every attempt, wait outside the
+    /// operation lock until the server reports quiescence (stops when the
+    /// batch goes stale or the session is cancelled). Inside the lock, an empty result from a
     /// server that was not quiescent retries without using the retry budget;
     /// `-32801` (content modified) retries while fewer than two such retries
     /// have been used.
@@ -43,6 +43,11 @@ struct LSPLanguageSpec {
     /// Sent with every `initialize`, including after a restart.
     var initializationOptions: [String: Any] = [:]
     var requestFlow: LSPRequestFlow = .direct
+    /// For `.awaitQuiescence` servers that report loading with a
+    /// `$/progress` instead of `experimental/serverStatus`: its title, and
+    /// how long a request may wait for it to end (instead of the request
+    /// timeout, which a large workspace's load outlasts).
+    var workspaceLoad: (title: String, limit: TimeInterval)?
     /// nil: a warm switch is ready as soon as the changes are sent.
     var switchReadiness: LSPSwitchReadiness?
     /// `initialize` result → negotiated capabilities.
@@ -212,6 +217,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         closeGrace: TimeInterval,
         attribution: ExactAttribution
     ) throws -> LSPLanguageSession {
+        if let load = language.workspaceLoad {
+            client.trackLoadProgress(title: load.title)
+        }
         let initializeResult = try client.initialize(
             rootURL: projectURL,
             initializationOptions: language.initializationOptions,
@@ -822,7 +830,7 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
                 if awaitsQuiescence {
                     try readyClient.waitForQuiescence(
                         method: method,
-                        timeout: requestTimeout,
+                        timeout: language.workspaceLoad?.limit ?? requestTimeout,
                         shouldContinue: { [weak self] in
                             guard let self else { return false }
                             return batch?.isCurrent != false && !self.isCancelled
@@ -1038,6 +1046,9 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         openedFiles.removeAll()
         stateLock.unlock()
         observe(newClient)
+        if let load = language.workspaceLoad {
+            newClient.trackLoadProgress(title: load.title)
+        }
         do {
             _ = try newClient.initialize(
                 rootURL: projectURL,
@@ -1102,6 +1113,10 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
             if watchesQuiescence, observedClient.isQuiescent {
                 markLoaded(observedClient)
             }
+        }
+        // The load may have ended before anything reached the observer.
+        if watchesQuiescence, observedClient.isQuiescent {
+            markLoaded(observedClient)
         }
     }
 

@@ -136,6 +136,114 @@ func goplsAnswersDefinitionReferencesAndImplementationsAcrossFiles() throws {
     print("gopls cross-file: \(session.attribution.toolVersion)")
 }
 
+/// A session on `.gopls` talking to a fake server over pipes, with
+/// `main.go` = "package main\n\nfunc main() {}\n".
+private func withFakeGoplsSession(
+    requestTimeout: TimeInterval = 5,
+    requestResponder: @escaping (_ method: String, _ mainURI: String) -> PipeFakeRequestResponse
+        = { _, _ in .useDefault },
+    body: (LSPLanguageSession, PipeFakeLSPServer) throws -> Void
+) throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("package main\n\nfunc main() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.go"))
+    let mainURI = root.appendingPathComponent("main.go").absoluteString
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        serverStatusQuiescent: false,
+        requestResponder: { method, _ in requestResponder(method, mainURI) },
+        done: { done.signal() }
+    )
+    server.start()
+    let session = try LSPLanguageSession.start(
+        client: LSPClient(
+            readHandle: serverToClient.fileHandleForReading,
+            writeHandle: clientToServer.fileHandleForWriting
+        ),
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: try DirectorySnapshot(root: root, files: ["main.go"]),
+        language: .gopls,
+        requestTimeout: requestTimeout,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-gopls")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    try body(session, server)
+}
+
+private func sendWorkspaceLoad(_ kind: String, to server: PipeFakeLSPServer) throws {
+    try server.sendNotification("$/progress", [
+        "token": "1",
+        "value": kind == "begin"
+            ? ["kind": "begin", "title": "Setting up workspace"]
+            : ["kind": "end", "message": "Finished loading packages."],
+    ])
+}
+
+/// gopls answers nothing until its workspace load ends, which on a large
+/// workspace outlasts the request timeout; requests wait for the load's
+/// `$/progress` end instead of timing out.
+@Test
+func goplsRequestsWaitOutAWorkspaceLoadLongerThanTheRequestTimeout() throws {
+    let loaded = NSLockedFlag()
+    try withFakeGoplsSession(
+        requestTimeout: 0.5,
+        requestResponder: { method, mainURI in
+            guard method == "textDocument/definition" else { return .useDefault }
+            // Held while loading, as gopls does; the client gives up first.
+            return loaded.value
+                ? .result([
+                    "uri": mainURI,
+                    "range": [
+                        "start": ["line": 2, "character": 5],
+                        "end": ["line": 2, "character": 9],
+                    ],
+                ])
+                : .noResponse
+        }
+    ) { session, server in
+        try sendWorkspaceLoad("begin", to: server)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
+            loaded.set()
+            try? sendWorkspaceLoad("end", to: server)
+        }
+
+        let location = try onlyDefinitionLocation(try session.definition(
+            file: "main.go",
+            byteOffset: "package main\n\nfunc ".utf8.count
+        ))
+
+        #expect(location.file == "main.go")
+        #expect(location.line == 3)
+        #expect(session.readiness == .ready)
+    }
+}
+
+/// The status bar says preparing while gopls loads and ready once it is
+/// done, without a request in between.
+@Test
+func goplsSessionIsPreparingUntilTheWorkspaceLoadEnds() throws {
+    try withFakeGoplsSession { session, server in
+        let ready = DispatchSemaphore(value: 0)
+        session.onReady = { ready.signal() }
+        try sendWorkspaceLoad("begin", to: server)
+        #expect(session.readiness == .preparing)
+        #expect(ready.wait(timeout: .now() + 0.5) == .timedOut)
+        try sendWorkspaceLoad("end", to: server)
+        #expect(ready.wait(timeout: .now() + 5) == .success)
+        #expect(session.readiness == .ready)
+    }
+}
+
 /// Messages as gopls v0.19.1 logged them in the feasibility probes.
 @Test
 func goplsOutputMarksMissingModulesAndNamesTheToolchainGoNeeds() {

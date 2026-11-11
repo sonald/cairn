@@ -5463,7 +5463,7 @@ private func exactTestMilliseconds(
         + Double(duration.components.attoseconds) / 1_000_000_000_000_000
 }
 
-private func exactTestAttribution(provider: String) -> ExactAttribution {
+func exactTestAttribution(provider: String) -> ExactAttribution {
     ExactAttribution(
         provider: provider,
         toolVersion: "fake",
@@ -5926,7 +5926,7 @@ private func inBackground(
     }
 }
 
-private final class NSLockedFlag: @unchecked Sendable {
+final class NSLockedFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var stored = false
     var value: Bool {

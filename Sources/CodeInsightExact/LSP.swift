@@ -375,6 +375,14 @@ public final class LSPClient: @unchecked Sendable {
     private var stderr = Data()
     private var serverDiagnostics = ""
     private var serverIsQuiescent = false
+    /// A `$/progress` title whose end makes the server quiescent (gopls's
+    /// workspace load), and that progress's token once it began.
+    private var loadProgressTitle: String?
+    private var loadProgressToken: String?
+    private var loadProgressBegan = false
+    /// A server tracked by `loadProgressTitle` that has not begun it this
+    /// long after `initialized` is taken as loaded.
+    static let loadProgressWindow: TimeInterval = 5
     /// Readiness signals in arrival order (`$/progress` begin/end,
     /// `experimental/serverStatus`, `window/logMessage`) for confirming a
     /// warm switch; `signalBase` counts the entries trimmed from the front.
@@ -568,7 +576,37 @@ public final class LSPClient: @unchecked Sendable {
             "trace": "off",
         ], timeout: timeout)
         try notify("initialized", params: [:])
+        condition.lock()
+        let tracksLoad = loadProgressTitle != nil
+        condition.unlock()
+        if tracksLoad {
+            DispatchQueue.global().asyncAfter(
+                deadline: .now() + Self.loadProgressWindow
+            ) { [weak self] in self?.loadProgressNeverBegan() }
+        }
         return result
+    }
+
+    /// Call before `initialize`: the server is quiescent once a `$/progress`
+    /// with this title ends.
+    func trackLoadProgress(title: String) {
+        condition.lock()
+        loadProgressTitle = title
+        condition.unlock()
+    }
+
+    private func loadProgressNeverBegan() {
+        condition.lock()
+        guard !loadProgressBegan, !serverIsQuiescent else {
+            condition.unlock()
+            return
+        }
+        serverIsQuiescent = true
+        let observer = diagnosticObserver
+        let diagnostic = diagnosticTextLocked
+        condition.broadcast()
+        condition.unlock()
+        observer?(diagnostic)
     }
 
     public func notify(_ method: String, params: Any? = nil) throws {
@@ -839,6 +877,7 @@ public final class LSPClient: @unchecked Sendable {
         var serverRequests: [(id: Any, method: String, params: Any?)] = []
         var diagnosticsChanged = false
         condition.lock()
+        let wasQuiescent = serverIsQuiescent
         do {
             for message in try decoder.append(data) {
                 if let method = message["method"] as? String,
@@ -874,6 +913,8 @@ public final class LSPClient: @unchecked Sendable {
         } catch {
             readError = error
         }
+        // Quiescence observers (the session's readiness) hear every change.
+        if serverIsQuiescent != wasQuiescent { diagnosticsChanged = true }
         let diagnosticObserver = diagnosticsChanged ? diagnosticObserver : nil
         let diagnostic = diagnosticsChanged ? diagnosticTextLocked : ""
         condition.broadcast()
@@ -902,6 +943,17 @@ public final class LSPClient: @unchecked Sendable {
                params["token"] as? String == "rustAnalyzer/Fetching"
             {
                 serverIsQuiescent = false
+            }
+            let token = "\(params["token"] ?? "")"
+            if kind == "begin", let loadProgressTitle,
+               (params["value"] as? [String: Any])?["title"] as? String == loadProgressTitle
+            {
+                loadProgressToken = token
+                loadProgressBegan = true
+                serverIsQuiescent = false
+            } else if kind == "end", token == loadProgressToken {
+                loadProgressToken = nil
+                serverIsQuiescent = true
             }
         case "experimental/serverStatus", "window/logMessage":
             break
