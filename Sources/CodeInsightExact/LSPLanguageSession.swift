@@ -9,8 +9,9 @@ enum LSPRequestFlow {
     case direct
     /// rust-analyzer, gopls: before every attempt, wait outside the
     /// operation lock until the server reports quiescence (stops when the
-    /// batch goes stale or the session is cancelled). Inside the lock, an empty result from a
-    /// server that was not quiescent retries without using the retry budget;
+    /// batch goes stale or the session is cancelled). Inside the lock, an
+    /// empty result from a server that was not quiescent retries without
+    /// using the retry budget;
     /// `-32801` (content modified) retries while fewer than two such retries
     /// have been used.
     case awaitQuiescence
