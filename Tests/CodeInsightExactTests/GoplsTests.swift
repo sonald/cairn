@@ -254,6 +254,10 @@ func goplsOutputMarksMissingModulesAndNamesTheToolchainGoNeeds() {
     #expect(goplsEnvironment(base: base, diagnostic: lookup).limitations
         == [.dependenciesUnavailableOffline])
     #expect(goplsEnvironment(base: base, diagnostic: "Created View (#1)").limitations.isEmpty)
+    let missingImport = "textDocument/publishDiagnostics: could not import "
+        + #"github.com/spf13/pflag (no required module provides package "github.com/spf13/pflag")"#
+    #expect(goplsEnvironment(base: base, diagnostic: missingImport).limitations
+        == [.dependenciesUnavailableOffline])
 
     let toolchain = #"window/logMessage: Optional(["message": "go/packages.Load #1: err: "#
         + #"exit status 1: stderr: go: go.mod requires go >= 1.99 (running go 1.27.3; "#
