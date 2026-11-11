@@ -872,5 +872,5 @@
 "main.deps.note.terminal" = "安装会运行依赖包自带的脚本并写入仓库，请在终端中自行执行。回到 Cairn 时会自动重新检测。";
 "main.deps.note.fetch.go" = "点“下载依赖”时 Cairn 只联网这一次：按 go.sum 把模块下载到 Go 模块缓存，不运行项目代码，也不改动仓库（用的是 go.mod 和 go.sum 的副本）。完成后自动重启分析。";
 "main.deps.note.unlocked.go" = "仓库没有 go.sum，这条命令会新建它，所以 Cairn 不替你执行。请在终端中自行运行。";
-"main.deps.note.remaining.go" = "模块已下载，但分析仍报告缺口：仓库的 go.sum 可能不完整，或 go.mod 要求更新的 Go；状态详情里有 go 的原始报错。";
+"main.deps.note.remaining.go" = "模块已下载，但分析仍报告缺口：仓库的 go.sum 可能不完整，或代码导入了 go.mod 没有声明的模块。";
 "main.deps.note.remaining" = "项目依赖已下载，但分析仍报告缺口，多半来自 Rust 标准库自身的依赖；项目代码不受影响。";
