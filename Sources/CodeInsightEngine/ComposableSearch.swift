@@ -15,7 +15,7 @@ extension SnapshotSearchService {
         }
         let nonSourceCount = source.manifest.nonSourcePathCount ?? source.manifest.files.filter { file in
             guard let path = source.path(for: file.pathID) else { return false }
-            return ![LanguageID.rust, .python, .typescript].contains {
+            return ![LanguageID.rust, .python, .typescript, .go].contains {
                 LanguageMode.classify(path: path, language: $0) != nil
             }
         }.count
@@ -362,8 +362,9 @@ extension SnapshotSearchService {
     private func symbolFacets(index: ContentIndex?) -> [Int] {
         guard let index else { return [] }
         return index.symbols.indices.filter { i in
-            [.rustFn, .rustMethod, .pythonFunction, .typescriptFunction,
-             .rustStruct, .rustEnum, .rustTrait, .rustImpl, .rustMod, .pythonClass, .typescriptClass]
+            [.rustFn, .rustMethod, .pythonFunction, .typescriptFunction, .goFunction, .goMethod,
+             .rustStruct, .rustEnum, .rustTrait, .rustImpl, .rustMod, .pythonClass, .typescriptClass,
+             .goStruct, .goInterface]
                 .contains(index.symbols[i].kind)
         }.sorted { index.symbols[$0].range.lowerBound < index.symbols[$1].range.lowerBound }
     }
@@ -388,9 +389,17 @@ extension SnapshotSearchService {
         guard let ownName = name(of: closest), !ownName.isEmpty else { return nil }
         // Functions display their name; methods add only their immediate owning
         // type. Module and outer-function chains are not method ownership.
-        guard [.rustFn, .rustMethod, .pythonFunction, .typescriptFunction].contains(facet.kind),
+        // A Go method's owner is its receiver type, not a parent facet.
+        if facet.kind == .goMethod, facet.parentFacetIndex == nil {
+            guard let relation = index.implRelations.first(where: { $0.implFacetIndex == UInt32(closest) }),
+                  let owner = source.searchName(for: relation.typeNameID), !owner.isEmpty
+            else { return ownName }
+            return owner + "." + ownName
+        }
+        guard [.rustFn, .rustMethod, .pythonFunction, .typescriptFunction, .goMethod].contains(facet.kind),
               let parent = facet.parentFacetIndex.map(Int.init), index.symbols.indices.contains(parent),
-              [.rustImpl, .rustStruct, .rustEnum, .rustTrait, .pythonClass, .typescriptClass].contains(index.symbols[parent].kind),
+              [.rustImpl, .rustStruct, .rustEnum, .rustTrait, .pythonClass, .typescriptClass, .goInterface]
+                .contains(index.symbols[parent].kind),
               let owner = name(of: parent), !owner.isEmpty else { return ownName }
         return owner + (language == .rust ? "::" : ".") + ownName
 

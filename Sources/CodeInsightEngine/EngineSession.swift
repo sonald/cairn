@@ -398,7 +398,9 @@ public final class EngineSession: Sendable {
         context: QueryContext
     ) throws -> [ResolutionCandidate] {
         try validate(context)
-        let kinds: Set<DeclarationKind> = [.pythonClass, .typescriptClass, .typescriptInterface, .rustTrait]
+        let kinds: Set<DeclarationKind> = [
+            .pythonClass, .typescriptClass, .typescriptInterface, .rustTrait, .goInterface, .goStruct,
+        ]
         guard declaration.snapshotID == snapshotID,
               let base = facet(for: declaration),
               kinds.contains(base.kind)
@@ -731,7 +733,8 @@ public final class EngineSession: Sendable {
                   let index = content(at: candidate.target.pathID)?.1,
                   index.symbols.indices.contains(Int(candidate.target.localIndex))
             else { return false }
-            return index.symbols[Int(candidate.target.localIndex)].kind == .rustField
+            let kind = index.symbols[Int(candidate.target.localIndex)].kind
+            return kind == .rustField || kind == .goField
         }
     }
 
@@ -782,7 +785,7 @@ public final class EngineSession: Sendable {
         guard firstHop.target.localKind == .declarationFacet,
               let index = content(at: firstHop.target.pathID)?.1,
               index.symbols.indices.contains(Int(firstHop.target.localIndex)),
-              index.symbols[Int(firstHop.target.localIndex)].kind == .rustField,
+              [.rustField, .goField].contains(index.symbols[Int(firstHop.target.localIndex)].kind),
               let bytes = sourceBytes(at: firstHop.target.pathID)
         else { return nil }
         let facet = index.symbols[Int(firstHop.target.localIndex)]
@@ -1082,8 +1085,9 @@ public final class EngineSession: Sendable {
                 return .strong
             case let .sameFile(pathID):
                 guard let (_, index) = content(at: pathID) else { continue }
+                // A Go method has no parent but is not a package-level name.
                 let matches = index.symbols.filter {
-                    $0.parentFacetIndex == nil && $0.nameID == definitionNameID
+                    $0.parentFacetIndex == nil && $0.nameID == definitionNameID && $0.kind != .goMethod
                 }
                 if matches.count == 1 { return .strong }
             case .lexicalBinding, .memberBinding, .nameOnly, .methodNameOnly, .receiverType:

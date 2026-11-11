@@ -10,7 +10,10 @@ public struct ModuleMap: Sendable {
     private let pythonModuleFiles: [String: [PathID]]
     private let pathsByID: [PathID: String]
     private let pythonRootsByFile: [PathID: String]
+    private var go: GoPackages?
 
+    /// `goModules` maps each `go.mod` directory, relative to the unit root
+    /// (`.` for the root), to the module path it declares.
     init(
         manifest: SnapshotManifest,
         language: LanguageID,
@@ -18,7 +21,8 @@ public struct ModuleMap: Sendable {
         bytesByContent: [ContentID: [UInt8]],
         names: Interner<NameID>,
         paths: Interner<PathID>,
-        projectRoot: String
+        projectRoot: String,
+        goModules: [String: String] = [:]
     ) {
         let files = manifest.files
         switch language {
@@ -73,9 +77,87 @@ public struct ModuleMap: Sendable {
             })
             pythonRootsByFile = [:]
             moduleChildren = [:]
-        case .javascript, .go:
+        case .go:
+            self.language = .go
+            parentModules = [:]
+            crateRoots = []
+            pythonModuleFiles = [:]
+            pathsByID = [:]
+            pythonRootsByFile = [:]
+            moduleChildren = [:]
+            go = GoPackages(files: files.map {
+                (
+                    $0.pathID,
+                    Self.relativePath(paths.resolve($0.pathID), root: projectRoot),
+                    bytesByContent[$0.contentID].flatMap(Self.goPackageClause)
+                )
+            }, modules: goModules)
+        case .javascript:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
+    }
+
+    /// Go: the files of the package an import path names, its test files
+    /// left out; nil when no module of the unit holds such a package (the
+    /// standard library, other modules), which leaves the import to Exact.
+    func goPackageFiles(importPath: String) -> [PathID]? {
+        go?.importable[importPath]
+    }
+
+    /// Go: the files of `file`'s own package (its directory and package
+    /// clause, so an external `_test` package is another), the file included.
+    func goPackageFiles(containing file: PathID) -> [PathID] {
+        go.flatMap { go in go.packageKeyByFile[file].flatMap { go.filesByPackage[$0] } } ?? [file]
+    }
+
+    /// The `module` directive of a `go.mod`.
+    static func goModulePath(inGoMod bytes: [UInt8]) -> String? {
+        for line in String(decoding: bytes, as: UTF8.self).split(whereSeparator: \.isNewline) {
+            var line = Substring(line)
+            if let comment = line.range(of: "//") { line = line[..<comment.lowerBound] }
+            let words = line.split(whereSeparator: \.isWhitespace)
+            guard words.count == 2, words[0] == "module" else { continue }
+            let path = words[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"`"))
+            return path.isEmpty ? nil : path
+        }
+        return nil
+    }
+
+    /// The name in a Go file's package clause: the first token after
+    /// comments must be `package`.
+    static func goPackageClause(_ bytes: [UInt8]) -> String? {
+        var index = 0
+        func isSpace(_ byte: UInt8) -> Bool { byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D }
+        while index < bytes.count {
+            if isSpace(bytes[index]) {
+                index += 1
+            } else if bytes[index] == 0x2F, index + 1 < bytes.count, bytes[index + 1] == 0x2F {
+                while index < bytes.count, bytes[index] != 0x0A { index += 1 }
+            } else if bytes[index] == 0x2F, index + 1 < bytes.count, bytes[index + 1] == 0x2A {
+                index += 2
+                while index + 1 < bytes.count, !(bytes[index] == 0x2A && bytes[index + 1] == 0x2F) { index += 1 }
+                index += 2
+            } else if bytes[index] == 0xEF, index + 2 < bytes.count, bytes[index + 1] == 0xBB, bytes[index + 2] == 0xBF {
+                index += 3
+            } else {
+                break
+            }
+        }
+        let keyword = Array("package".utf8)
+        guard index + keyword.count < bytes.count,
+              bytes[index..<index + keyword.count].elementsEqual(keyword),
+              isSpace(bytes[index + keyword.count])
+        else { return nil }
+        index += keyword.count
+        while index < bytes.count, isSpace(bytes[index]) { index += 1 }
+        let start = index
+        while index < bytes.count,
+              bytes[index] >= 0x80 || bytes[index] == 0x5F
+                || (bytes[index] | 0x20 >= 0x61 && bytes[index] | 0x20 <= 0x7A)
+                || (bytes[index] >= 0x30 && bytes[index] <= 0x39)
+        { index += 1 }
+        guard start < index else { return nil }
+        return String(decoding: bytes[start..<index], as: UTF8.self)
     }
 
     private static func rustModuleMap(
@@ -222,7 +304,10 @@ public struct ModuleMap: Sendable {
                 from: source,
                 strings: strings
             )
-        case .javascript, .go:
+        case .go:
+            // A Go import names a package of many files: `goPackageFiles`.
+            return nil
+        case .javascript:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
     }
@@ -445,7 +530,9 @@ public struct ModuleMap: Sendable {
             return components
         case .typescript:
             return pathsByID[file].map { $0.split(separator: "/").map(String.init) }
-        case .javascript, .go:
+        case .go:
+            return go?.importPathByFile[file].map { $0.split(separator: "/").map(String.init) }
+        case .javascript:
             return nil
         }
     }
@@ -459,5 +546,46 @@ public struct ModuleMap: Sendable {
             current = parent
         }
         return nil
+    }
+}
+
+/// Go's "a directory is a package": files group by directory and package
+/// clause; a package's import path is its nearest `go.mod`'s module path
+/// plus the directory below it.
+private struct GoPackages: Sendable {
+    let packageKeyByFile: [PathID: String]
+    let filesByPackage: [String: [PathID]]
+    let importPathByFile: [PathID: String]
+    /// Import path to the files an importer sees (no `_test.go` files).
+    let importable: [String: [PathID]]
+
+    init(files: [(PathID, String, String?)], modules: [String: String]) {
+        var packageKeyByFile: [PathID: String] = [:]
+        var filesByPackage: [String: [PathID]] = [:]
+        var importPathByFile: [PathID: String] = [:]
+        var importable: [String: [PathID]] = [:]
+        for (pathID, path, packageName) in files {
+            let components = path.split(separator: "/").dropLast().map(String.init)
+            let directory = components.joined(separator: "/")
+            let key = directory + "\0" + (packageName ?? "")
+            packageKeyByFile[pathID] = key
+            filesByPackage[key, default: []].append(pathID)
+            // The nearest go.mod at or above the directory.
+            var importPath = directory
+            for depth in stride(from: components.count, through: 0, by: -1) {
+                let candidate = depth == 0 ? "." : components[..<depth].joined(separator: "/")
+                guard let module = modules[candidate] else { continue }
+                importPath = ([module] + components[depth...]).joined(separator: "/")
+                break
+            }
+            importPathByFile[pathID] = importPath
+            if !path.hasSuffix("_test.go"), packageName?.hasSuffix("_test") != true {
+                importable[importPath, default: []].append(pathID)
+            }
+        }
+        self.packageKeyByFile = packageKeyByFile
+        self.filesByPackage = filesByPackage
+        self.importPathByFile = importPathByFile
+        self.importable = importable
     }
 }

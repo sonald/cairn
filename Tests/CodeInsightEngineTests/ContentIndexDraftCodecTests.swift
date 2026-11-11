@@ -1,6 +1,7 @@
 import CodeInsightCore
 @testable import CodeInsightEngine
 import CodeInsightGit
+import CodeInsightGoExtractor
 import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
 import CodeInsightTypeScriptExtractor
@@ -18,7 +19,7 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
 func binaryDraftCodecRoundTripsRealExtractionsInEveryLanguage() throws {
     let drafts = try fixtureDrafts()
     #expect(Set(drafts.map { "\($0.index.key.languageMode.language)/\($0.index.key.languageMode.variant ?? "")" })
-        == ["rust/", "python/", "typescript/", "typescript/tsx"])
+        == ["rust/", "python/", "typescript/", "typescript/tsx", "go/"])
     for (offset, draft) in drafts.enumerated() {
         try expectRoundTrip(draft, order: offset)
     }
@@ -389,7 +390,7 @@ private func extractor(for language: LanguageID) -> any LanguageExtractor {
     case .rust: RustExtractor()
     case .python: PythonExtractor()
     case .typescript, .javascript: TypeScriptExtractor()
-    case .go: preconditionFailure("Go fixtures need GoExtractor")
+    case .go: GoExtractor()
     }
 }
 
@@ -405,7 +406,7 @@ private func extract(_ bytes: [UInt8], key: ContentIndexKey) throws -> Extractio
     )
 }
 
-/// Every Rust, Python, TypeScript and TSX file in the repository's
+/// Every Rust, Python, TypeScript, TSX and Go file in the repository's
 /// fixtures, extracted once per test process. The multi-megabyte layout
 /// stress files are left out; the opt-in corpus test covers scale.
 private func fixtureDrafts() throws -> [ExtractionDraft] {
@@ -422,7 +423,8 @@ private func extractFixtures() throws -> [ExtractionDraft] {
             .compactMap { $0 as? URL }
             .sorted { $0.path < $1.path }
         for file in files {
-            guard let mode = LanguageMode.classify(path: file.lastPathComponent) else { continue }
+            guard let mode = LanguageMode.classify(path: file.lastPathComponent, languages: LanguageMode.supported + [.go])
+            else { continue }
             let bytes = try [UInt8](Data(contentsOf: file))
             guard bytes.count <= 512 * 1024 else { continue }
             let probe = extractor(for: mode.language)

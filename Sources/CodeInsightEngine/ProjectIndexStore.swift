@@ -163,8 +163,34 @@ struct SnapshotView: Sendable {
             bytesByContent: storeState.sourceBytesByContent,
             names: store.names,
             paths: store.paths,
-            projectRoot: rootPath
+            projectRoot: rootPath,
+            goModules: analysisProfile.language == .go
+                ? Self.goModules(manifest: manifest, paths: store.paths, root: rootPath, bytes: storeState.sourceBytesByContent)
+                : [:]
         )
+    }
+
+    /// The unit's `go.mod` directories (relative to `root`, `.` for the root)
+    /// and the module paths they declare.
+    private static func goModules(
+        manifest: SnapshotManifest,
+        paths: Interner<PathID>,
+        root: String,
+        bytes: [ContentID: [UInt8]]
+    ) -> [String: String] {
+        var modules: [String: String] = [:]
+        for file in manifest.files {
+            let path = paths.resolve(file.pathID)
+            guard path == "go.mod" || path.hasSuffix("/go.mod"), isWithin(root: root, path: path),
+                  let module = bytes[file.contentID].flatMap(ModuleMap.goModulePath(inGoMod:))
+            else { continue }
+            var directory = String(path.dropLast("go.mod".count).dropLast())
+            if root != ".", !root.isEmpty {
+                directory = directory == root ? "" : String(directory.dropFirst(root.count + 1))
+            }
+            modules[directory.isEmpty ? "." : directory] = module
+        }
+        return modules
     }
 
     init(

@@ -154,7 +154,10 @@ enum ProfileDetector {
             return name == "pyrightconfig.json" || name == "pyproject.toml"
         case .typescript:
             return URL(fileURLWithPath: path).lastPathComponent == "tsconfig.json"
-        case .javascript, .go:
+        case .go:
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            return name == "go.mod" || name == "go.work"
+        case .javascript:
             return false
         }
     }
@@ -200,7 +203,13 @@ enum ProfileDetector {
                 projectRoot: projectRoot,
                 reader: reader
             )
-        case .javascript, .go:
+        case .go:
+            return goProfile(
+                projectRootName: projectRootName,
+                projectRoot: projectRoot,
+                reader: reader
+            )
+        case .javascript:
             return fallback(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,
@@ -221,6 +230,30 @@ enum ProfileDetector {
             projectUnitName: reader("tsconfig.json") == nil
                 ? projectRootName
                 : "tsconfig.json",
+            configFingerprint: fingerprints.config,
+            environmentFingerprint: fingerprints.environment,
+            featureSelection: .defaultFeatures,
+            featureNames: [],
+            edition: nil,
+            trustMode: .safe
+        )
+    }
+
+    /// A workspace unit is named `go.work`, a module unit by its module
+    /// path, anything else by its directory.
+    private static func goProfile(
+        projectRootName: String,
+        projectRoot: PathID,
+        reader: @escaping (String) -> [UInt8]?
+    ) -> AnalysisProfile {
+        let fingerprints = goConfigIdentity(readBytes: reader)
+        let unitName = reader("go.work") != nil
+            ? "go.work"
+            : reader("go.mod").flatMap(ModuleMap.goModulePath(inGoMod:)) ?? projectRootName
+        return AnalysisProfile(
+            language: .go,
+            projectRoot: projectRoot,
+            projectUnitName: unitName,
             configFingerprint: fingerprints.config,
             environmentFingerprint: fingerprints.environment,
             featureSelection: .defaultFeatures,

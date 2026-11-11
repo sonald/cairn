@@ -53,11 +53,15 @@ public struct ProjectSymbol: Sendable {
     public let parentFacetIndex: UInt32?
     /// For an impl row, the implemented trait (`impl Engine for BitCask`).
     public let implTraitName: String?
+    /// For a Go method declared with a receiver, the receiver's base type
+    /// (`Command` for `func (c *Command) Execute()`); such a method has no
+    /// parent facet.
+    public let receiverTypeName: String?
 
     public init(
         occurrence: SymbolOccurrenceID, fileIndex: Int, name: String, kind: DeclarationKind,
         visibility: DeclarationVisibility?, nameRange: ByteRange, range: ByteRange, line: UInt32,
-        parentFacetIndex: UInt32?, implTraitName: String?
+        parentFacetIndex: UInt32?, implTraitName: String?, receiverTypeName: String? = nil
     ) {
         self.occurrence = occurrence
         self.fileIndex = fileIndex
@@ -69,6 +73,7 @@ public struct ProjectSymbol: Sendable {
         self.line = line
         self.parentFacetIndex = parentFacetIndex
         self.implTraitName = implTraitName
+        self.receiverTypeName = receiverTypeName
     }
 }
 
@@ -98,6 +103,14 @@ extension EngineSession {
                 },
                 uniquingKeysWith: { first, _ in first }
             )
+            let receivers = Dictionary(
+                index.implRelations.compactMap { relation in
+                    index.symbols.indices.contains(Int(relation.implFacetIndex))
+                        && index.symbols[Int(relation.implFacetIndex)].kind == .goMethod
+                        ? (relation.implFacetIndex, names.resolve(relation.typeNameID)) : nil
+                },
+                uniquingKeysWith: { first, _ in first }
+            )
             for (offset, facet) in index.symbols.enumerated()
                 .sorted(by: { $0.element.range.lowerBound < $1.element.range.lowerBound })
             {
@@ -117,7 +130,8 @@ extension EngineSession {
                     range: facet.range,
                     line: index.lineTable.lineColumn(at: facet.nameRange.lowerBound)?.line ?? 1,
                     parentFacetIndex: facet.parentFacetIndex,
-                    implTraitName: traits[facetIndex]
+                    implTraitName: traits[facetIndex],
+                    receiverTypeName: receivers[facetIndex]
                 ))
             }
         }

@@ -1,0 +1,32 @@
+# A package-level function is visible in every file of its package, without an import.
+def shape.go:12:21 -> math.go:3:6
+strong shape.go:12:21
+# An in-package test file is the same package.
+def shape_test.go:6:5 -> math.go:3:6
+# An external `_test` package is another package with its own `pi`.
+def shape_ext_test.go:12:23 -> shape_ext_test.go:9:6
+callers math.go:3:6 == shape.go:12:21,shape_test.go:6:5
+# Build-tag variants both answer (each `.probable`, checked in GoResolutionTests).
+def5 math.go:8:9 -> platform_linux.go:3:6
+def5 math.go:8:9 -> platform_darwin.go:3:6
+# `pkg.F` resolves inside the package the import path names.
+def shape_ext_test.go:12:13 -> shape.go:15:6
+def cmd/app/main.go:12:31 -> shape.go:15:6
+strong cmd/app/main.go:12:31
+# `pkg.T` outside a call.
+def cmd/app/main.go:11:15 -> shape.go:7:6
+# The standard library and modules outside the unit stay for the Exact layer;
+# vendor/ is not indexed.
+unresolved cmd/app/main.go:12:6
+unresolved cmd/app/main.go:13:6
+# `x.M()` through the receiver's spelled or constructed type.
+def shape.go:20:11 -> shape.go:4:2
+strong shape.go:20:11
+def cmd/app/main.go:12:16 -> shape.go:11:18
+# A method on a call result falls back to the method name.
+def5 cmd/app/main.go:12:44 -> shape.go:11:18
+nostrong cmd/app/main.go:12:44
+# The receiver is a parameter typed by its receiver type.
+bind shape.go:12:9 -> shape.go:11:7
+type shape.go:20:9 -> shape.go:3:6
+type cmd/app/main.go:12:14 -> shape.go:7:6

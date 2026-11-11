@@ -38,6 +38,12 @@ struct Resolver {
                 context: context
             )
         }
+        let isGo = session.analysisProfile.language == .go
+        if isGo, let selected = goSelectorCandidates(
+            located: (located.range, located.nameID, located.call), file: file, index: index, context: context
+        ) {
+            return selected
+        }
         if case .methodCall? = kind {
             if session.analysisProfile.language == .python
                 || session.analysisProfile.language == .typescript
@@ -149,7 +155,44 @@ struct Resolver {
             return members
         }
 
-        let sameFile = index.symbols.enumerated().compactMap {
+        if isGo {
+            // A declaration's own name is that declaration (a method is not
+            // in the package's name space).
+            if located.call == nil,
+               let facetIndex = index.symbols.firstIndex(where: { $0.nameRange == located.range }),
+               let localIndex = UInt32(exactly: facetIndex)
+            {
+                return [candidate(
+                    pathID: file, localIndex: localIndex, certainty: .strong, dispatch: .direct,
+                    evidence: [.sameFile(pathID: file)], context: context
+                )]
+            }
+            // Every file of the package sees its package-level names.
+            let found = goPackageLevel(named: located.nameID, in: session.moduleMap.goPackageFiles(containing: file))
+            if !found.isEmpty {
+                let certainty = found.count == 1 ? capped(.strong, for: kind) : .probable
+                return sorted(found.map {
+                    candidate(
+                        pathID: $0.0, localIndex: $0.1, certainty: certainty, dispatch: dispatch(for: kind),
+                        evidence: [.sameFile(pathID: $0.0)], context: context
+                    )
+                }, from: file)
+            }
+            let dotImported = index.imports.enumerated().flatMap { offset, binding -> [ResolutionCandidate] in
+                guard binding.flags.contains(.wildcard), let importIndex = UInt32(exactly: offset),
+                      let files = session.moduleMap.goPackageFiles(importPath: session.strings.resolve(binding.moduleSpecifier))
+                else { return [] }
+                return goPackageLevel(named: located.nameID, in: files).map {
+                    candidate(
+                        pathID: $0.0, localIndex: $0.1, certainty: .probable, dispatch: dispatch(for: kind),
+                        evidence: [.uniqueImport(importBindingIndex: importIndex)], context: context
+                    )
+                }
+            }
+            if !dotImported.isEmpty { return sorted(dotImported, from: file) }
+        }
+
+        let sameFile = isGo ? [] : index.symbols.enumerated().compactMap {
             facetIndex, facet -> ResolutionCandidate? in
             guard facet.parentFacetIndex == nil,
                   facet.space != .macro,
@@ -217,7 +260,10 @@ struct Resolver {
         let admitted = fallbackDefinitions(
             session.definitionOccurrences(named: located.nameID),
             qualifier: pathQualifier(before: located.range, in: session.sourceBytes(at: file))
-        )
+        ).filter {
+            // A bare Go name is never a method or a field.
+            !isGo || ($0.1.kind != .goMethod && $0.1.kind != .goField)
+        }
         let definitions = admitted.filter {
             guard located.identifierFallback else { return true }
             switch $0.1.space {
@@ -407,7 +453,9 @@ struct Resolver {
         context: QueryContext
     ) -> [ResolutionCandidate] {
         let isTs = session.analysisProfile.language == .typescript
-        if isTs && (binding.flags.contains(.typeOnly)
+        // A Go import names a package, not a declaration; `pkg.F` resolves
+        // through `goSelectorCandidates`.
+        if session.analysisProfile.language == .go || isTs && (binding.flags.contains(.typeOnly)
             || binding.kind == .default
             || (binding.kind == .namespace
                 && !binding.flags.contains(.reexport)))
@@ -640,6 +688,157 @@ struct Resolver {
         }
         return result.isEmpty ? nil : result
     }
+
+    // MARK: Go
+
+    /// Go selectors: `pkg.F` through the imported package, `x.M` through
+    /// the receiver's type when its binding spells one, else by member
+    /// name. Nil leaves a name that is not a selector to the lexical and
+    /// package lookup in `resolve`.
+    private func goSelectorCandidates(
+        located: (range: ByteRange, nameID: NameID, call: UnresolvedCall?),
+        file: PathID,
+        index: ContentIndex,
+        context: QueryContext
+    ) -> [ResolutionCandidate]? {
+        guard let bytes = session.sourceBytes(at: file) else { return nil }
+        let kind = located.call?.syntacticKind
+        let operand: ByteRange?
+        switch kind {
+        case .qualifiedCall?: operand = located.call?.qualifierRange
+        case .methodCall?: operand = located.call?.receiverRange
+        case nil: operand = selectorOperand(before: located.range, in: bytes)
+        default: return nil
+        }
+        guard let operand else {
+            return kind == .methodCall ? goMembers(named: located.nameID, from: file, context: context) : nil
+        }
+        let operandText = Int(operand.upperBound) <= bytes.count
+            ? Array(bytes[Int(operand.lowerBound)..<Int(operand.upperBound)]) : []
+        if !operandText.isEmpty, operandText.allSatisfy(isIdentifierByte) {
+            let operandName = session.names.intern(String(decoding: operandText, as: UTF8.self))
+            let lexical = lexicalBinding(
+                named: operandName, at: operand.lowerBound,
+                scopes: scopeChain(at: operand.lowerBound, in: index), in: index
+            )
+            if lexical == nil || lexical?.binding.kind == .importBinding,
+               let (offset, binding) = index.imports.enumerated().first(where: { $0.element.localName == operandName }),
+               let importIndex = UInt32(exactly: offset)
+            {
+                return goPackageMember(
+                    named: located.nameID, binding: binding, importIndex: importIndex,
+                    from: file, kind: kind, context: context
+                )
+            }
+            if let hint = lexical?.binding.targetHint,
+               let typed = goMembers(named: located.nameID, ofType: hint, from: file, context: context)
+            {
+                return typed
+            }
+        }
+        return goMembers(named: located.nameID, from: file, context: context)
+    }
+
+    /// `F` in the package an import names; an import outside the unit's
+    /// modules, or a name its package does not declare, stays unresolved.
+    private func goPackageMember(
+        named nameID: NameID,
+        binding: ImportBinding,
+        importIndex: UInt32,
+        from file: PathID,
+        kind: CallKind?,
+        context: QueryContext
+    ) -> [ResolutionCandidate] {
+        let found = session.moduleMap.goPackageFiles(importPath: session.strings.resolve(binding.moduleSpecifier))
+            .map { goPackageLevel(named: nameID, in: $0) } ?? []
+        guard !found.isEmpty else {
+            return [candidate(
+                pathID: file, localKind: .importBinding, localIndex: importIndex, certainty: .unresolved,
+                dispatch: dispatch(for: kind), evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                context: context
+            )]
+        }
+        // Build-tag variants declare the name once per file.
+        let certainty: Certainty = found.count == 1 ? .strong : .probable
+        return sorted(found.map {
+            candidate(
+                pathID: $0.0, localIndex: $0.1, certainty: certainty, dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: importIndex)], context: context
+            )
+        }, from: file)
+    }
+
+    /// Package-level declarations named `nameID` in `files`. Methods have
+    /// no parent facet but are not package-level names.
+    private func goPackageLevel(named nameID: NameID, in files: [PathID]) -> [(PathID, UInt32)] {
+        files.flatMap { file -> [(PathID, UInt32)] in
+            guard let (_, index) = session.content(at: file) else { return [] }
+            return index.symbols.enumerated().compactMap { offset, facet in
+                facet.parentFacetIndex == nil && facet.kind != .goMethod && facet.nameID == nameID
+                    ? UInt32(exactly: offset).map { (file, $0) } : nil
+            }
+        }
+    }
+
+    /// Methods and fields named `nameID`: those of the receiver's type
+    /// (`ofType`; nil when the type has none), else all of them at
+    /// `.possible`.
+    private func goMembers(
+        named nameID: NameID,
+        ofType hint: UnresolvedSymbolRef? = nil,
+        from file: PathID,
+        context: QueryContext
+    ) -> [ResolutionCandidate]? {
+        var interfaceMembers = Set<SymbolOccurrenceID>()
+        let members = session.definitionOccurrences(named: nameID).filter { occurrence, facet, pathID in
+            guard facet.kind == .goMethod || facet.kind == .goField,
+                  let (_, target) = session.content(at: pathID)
+            else { return false }
+            if let parent = facet.parentFacetIndex, target.symbols.indices.contains(Int(parent)) {
+                if target.symbols[Int(parent)].kind == .goInterface { interfaceMembers.insert(occurrence) }
+                return hint.map { target.symbols[Int(parent)].nameID == $0.nameID } ?? true
+            }
+            return hint.map { hint in
+                target.implRelations.contains {
+                    $0.implFacetIndex == occurrence.localIndex && $0.typeNameID == hint.nameID
+                }
+            } ?? true
+        }
+        guard !members.isEmpty else { return hint == nil ? [] : nil }
+        let certainty: Certainty
+        let evidence: [ResolutionEvidence]
+        if let hint {
+            certainty = hint.hintKind == .unqualified && members.count == 1 ? .strong : .probable
+            evidence = [.receiverType(nameID: hint.nameID)]
+        } else {
+            certainty = .possible
+            evidence = [.methodNameOnly(nameID: nameID)]
+        }
+        return sorted(members.map { occurrence, _, pathID in
+            candidate(
+                pathID: pathID, localIndex: occurrence.localIndex, certainty: certainty,
+                dispatch: hint == nil || interfaceMembers.contains(occurrence) ? .dynamicDispatch : .direct,
+                evidence: evidence, context: context
+            )
+        }, from: file)
+    }
+
+    /// `x` in `x.name` (spaces allowed around the dot) ending right before
+    /// `range`; nil when no identifier-ended operand precedes it.
+    private func selectorOperand(before range: ByteRange, in bytes: [UInt8]) -> ByteRange? {
+        var cursor = Int(range.lowerBound)
+        guard cursor <= bytes.count else { return nil }
+        func isSpace(_ byte: UInt8) -> Bool { byte == 0x20 || byte == 0x09 }
+        while cursor > 0, isSpace(bytes[cursor - 1]) { cursor -= 1 }
+        guard cursor > 0, bytes[cursor - 1] == UInt8(ascii: ".") else { return nil }
+        cursor -= 1
+        while cursor > 0, isSpace(bytes[cursor - 1]) { cursor -= 1 }
+        let end = cursor
+        while cursor > 0, isIdentifierByte(bytes[cursor - 1]) { cursor -= 1 }
+        guard cursor < end else { return nil }
+        return ByteRange(lowerBound: UInt32(cursor), upperBound: UInt32(end))
+    }
+
 
     /// Whether `.` (spaces allowed) comes right before byte `start`.
     private func precededByDot(_ start: Int, in bytes: [UInt8]) -> Bool {

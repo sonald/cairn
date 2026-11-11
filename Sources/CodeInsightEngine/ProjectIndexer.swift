@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightGoExtractor
 import CodeInsightGit
 import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
@@ -159,6 +160,25 @@ public struct ProjectIndexer: Sendable {
             ))
         }
 
+        if language == .go {
+            // Go packages take their import paths from the module files.
+            var moduleBytes: [ContentID: [UInt8]] = [:]
+            for fileURL in walked.files where fileURL.lastPathComponent == "go.mod" {
+                let bytes = try [UInt8](Data(contentsOf: fileURL))
+                let contentID = ContentID.sha256(of: bytes)
+                moduleBytes[contentID] = bytes
+                occurrences.append(FileOccurrence(
+                    occurrenceID: FileOccurrenceID(rawValue: UInt32(occurrences.count)),
+                    pathID: store.paths.intern(relativePath(of: fileURL, under: root)),
+                    contentID: contentID,
+                    detectedLanguage: nil,
+                    sourceKind: .untracked,
+                    fileMode: .regular,
+                    size: UInt64(bytes.count)
+                ))
+            }
+            store.insert(moduleBytes)
+        }
         let manifest = SnapshotManifest(
             snapshotID: SnapshotID(rawValue: UUID()),
             files: occurrences,
@@ -167,7 +187,7 @@ public struct ProjectIndexer: Sendable {
         )
         let indexes = store.contentIndexes
         let stats = IndexStats(
-            fileCount: occurrences.count,
+            fileCount: fileInputs.count,
             uniqueContentCount: indexes.count,
             scopeCount: indexes.values.reduce(0) { $0 + $1.scopes.count },
             bindingCount: indexes.values.reduce(0) { $0 + $1.bindings.count },
@@ -255,6 +275,7 @@ public struct ProjectIndexer: Sendable {
             // where previews and the manifest read them by path.
             if mode != nil
                 || snapshot.configurationPaths.contains(file.path)
+                || (languages.contains(.go) && (file.path == "go.mod" || file.path.hasSuffix("/go.mod")))
             {
                 capturedBytes[file.contentID] = bytes
             }
@@ -532,7 +553,9 @@ public struct ProjectIndexer: Sendable {
             return PythonExtractor()
         case .typescript:
             return TypeScriptExtractor()
-        case .javascript, .go:
+        case .go:
+            return GoExtractor()
+        case .javascript:
             throw unsupportedLanguage(language)
         }
     }
@@ -571,13 +594,13 @@ public struct ProjectIndexer: Sendable {
                 language: language,
                 projectRoot: projectRoot
             )
-        case .typescript:
+        case .typescript, .go:
             profile = ProfileDetector.detect(
                 projectURL: root,
                 language: language,
                 projectRoot: projectRoot
             )
-        case .javascript, .go:
+        case .javascript:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)
