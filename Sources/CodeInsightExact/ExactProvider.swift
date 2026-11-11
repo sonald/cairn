@@ -505,9 +505,9 @@ public protocol ExactSession: AnyObject, Sendable {
     var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get set
     }
-    /// Called when a started server finishes loading on its own (readiness
-    /// goes from preparing to ready without a request); called at once when
-    /// set on a ready session.
+    /// Called when a started server finishes loading (readiness goes from
+    /// preparing to ready, with or without a request waiting on it);
+    /// called at once when set on a ready session.
     var onReady: (@Sendable () -> Void)? { get set }
     /// The server process, for the standby memory limit; nil when unknown.
     var processIdentifier: Int32? { get }

@@ -244,6 +244,31 @@ func goplsSessionIsPreparingUntilTheWorkspaceLoadEnds() throws {
     }
 }
 
+/// A request that waited out the load and then failed (a module gopls
+/// could not load) publishes nothing, so the status bar hears that the
+/// load ended only from `onReady`.
+@Test
+func goplsSessionReportsReadyWhenARequestWaitedOutTheLoadAndFailed() throws {
+    try withFakeGoplsSession(
+        requestResponder: { method, _ in
+            method == "textDocument/definition"
+                ? .error(code: 0, message: "no package metadata for file")
+                : .useDefault
+        }
+    ) { session, server in
+        let ready = DispatchSemaphore(value: 0)
+        session.onReady = { ready.signal() }
+        try sendWorkspaceLoad("begin", to: server)
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            try? sendWorkspaceLoad("end", to: server)
+        }
+        #expect(throws: LSPError.self) {
+            try session.definition(file: "main.go", byteOffset: 0)
+        }
+        #expect(ready.wait(timeout: .now() + 5) == .success)
+    }
+}
+
 /// Messages as gopls v0.19.1 logged them in the feasibility probes.
 @Test
 func goplsOutputMarksMissingModulesAndNamesTheToolchainGoNeeds() {

@@ -1330,10 +1330,19 @@ final class LSPLanguageSession: ExactSession, @unchecked Sendable {
         stateLock.unlock()
     }
 
+    /// A request that waited out the load can get here before the load's
+    /// own `markLoaded`; it tells the ready observer then, since a failed
+    /// answer reaches no one else.
     private func markReady() {
         stateLock.lock()
-        if !switching, state == .preparing || state == .ready { state = .ready }
+        guard !switching, state == .preparing || state == .ready else {
+            stateLock.unlock()
+            return
+        }
+        let observer = state == .preparing ? readyObserver : nil
+        state = .ready
         stateLock.unlock()
+        observer?()
     }
 
     private func exhaustedError() -> ExactError {
