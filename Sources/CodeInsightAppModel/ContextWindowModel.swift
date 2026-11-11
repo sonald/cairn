@@ -2119,7 +2119,7 @@ private func dependencyCrateName(_ path: String) -> String? {
 
 /// `…/pkg/mod/github.com/spf13/pflag@v1.0.9/…` → `github.com/spf13/pflag`.
 /// The cache spells an upper-case letter as `!` plus its lower case.
-private func goModuleCachePath(_ ancestors: [String]) -> String? {
+func goModuleCachePath(_ ancestors: [String]) -> String? {
     guard let versioned = ancestors.lastIndex(where: { $0.contains("@v") }),
           let mod = ancestors[..<versioned].lastIndex(of: "mod"),
           mod > 0, ancestors[mod - 1] == "pkg"

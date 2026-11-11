@@ -4082,3 +4082,17 @@ func exactCoordinatorReportsTheStatusReasonWithoutASession() async throws {
         file: "main.rs", byteOffset: 0, generation: 1, batch: ExactRequestBatch()
     ) == .cancelled)
 }
+
+@Test
+func goModuleCachePathNamesTheModuleAndUnescapesUpperCase() {
+    func name(_ path: String) -> String? {
+        goModuleCachePath(Array(URL(fileURLWithPath: path).pathComponents.dropLast()))
+    }
+    #expect(name("/Users/me/go/pkg/mod/github.com/spf13/pflag@v1.0.9/flag.go")
+        == "github.com/spf13/pflag")
+    #expect(name("/g/pkg/mod/github.com/cpuguy83/go-md2man/v2@v2.0.6/md2man/md2man.go")
+        == "github.com/cpuguy83/go-md2man/v2")
+    #expect(name("/g/pkg/mod/github.com/!burnt!sushi/toml@v1.3.2/decode.go")
+        == "github.com/BurntSushi/toml")
+    #expect(name("/Users/me/src/mod/x@v1/a.go") == nil)
+}
