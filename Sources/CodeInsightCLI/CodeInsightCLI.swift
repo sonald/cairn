@@ -34,7 +34,7 @@ struct ProjectOptions: ParsableArguments {
 
     @Option(
         name: .long,
-        help: "Project language: rust, python, or typescript (default: resolve infers it from the position's file; otherwise the language with the most source files)."
+        help: "Project language: rust, python, typescript, or go (default: resolve infers it from the position's file; otherwise the language with the most source files)."
     )
     var language: String?
 
@@ -57,6 +57,7 @@ private func parsedLanguage(_ option: String) -> LanguageID? {
     case "rust", "rs": .rust
     case "python", "py": .python
     case "typescript", "ts": .typescript
+    case "go", "golang": .go
     default: nil
     }
 }
@@ -67,7 +68,7 @@ private func parsedLanguage(_ option: String) -> LanguageID? {
 private func resolvedLanguage(_ option: String?, project: String) throws -> LanguageID {
     if let option {
         guard let language = parsedLanguage(option) else {
-            throw ValidationError("Unknown --language \(option); use rust, python, or typescript.")
+            throw ValidationError("Unknown --language \(option); use rust, python, typescript, or go.")
         }
         return language
     }
@@ -450,7 +451,10 @@ extension CodeInsight {
                     borrowedFromWorkspace: borrowed
                 )
                 .prepare(snapshot: snapshot, profile: profile, trustMode: .safe)
-            case .javascript, .go:
+            case .go:
+                // ponytail: the gopls provider lands with the Exact slice.
+                throw ValidationError("Go has no Exact session in this build yet.")
+            case .javascript:
                 throw ValidationError("--language must be rust, python or typescript.")
             }
         }
@@ -1211,7 +1215,8 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                     file: listing.files[symbol.fileIndex].path,
                     line: symbol.line,
                     module: listing.files[symbol.fileIndex].modulePath,
-                    implTrait: symbol.implTraitName
+                    implTrait: symbol.implTraitName,
+                    receiver: symbol.receiverTypeName
                 )
             }
             if options.global.json {
@@ -1474,7 +1479,11 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                         "corpus is missing tsconfig.json, package.json, or bun.lockb: \(url.path)\n"
                     )
                 }
-            case .javascript, .go:
+            case .go:
+                guard fm.fileExists(atPath: url.appendingPathComponent("go.mod").path) else {
+                    throw ValidationError("corpus has no go.mod: \(url.path)\n")
+                }
+            case .javascript:
                 throw ValidationError("unsupported language: \(language)")
             }
         }
@@ -1631,6 +1640,7 @@ private struct ProjectSymbolJSON: Codable {
     let line: UInt32
     let module: [String]?
     let implTrait: String?
+    let receiver: String?
 }
 
 private struct SymbolSearchJSON: Codable {
