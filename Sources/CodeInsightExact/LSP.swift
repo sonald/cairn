@@ -101,10 +101,26 @@ public struct LSPFrameDecoder {
     }
 }
 
+/// A location's file as read once per response: its reported path, the
+/// URL named in errors, and its position map.
+typealias ExactLocationFiles = [String: (file: String?, url: URL, map: LSPPositionMap)]
+
 func parseExactLocation(
     _ object: [String: Any],
     projectURL: URL,
     snapshot: any Snapshot
+) throws -> ExactLocation {
+    var files: ExactLocationFiles = [:]
+    return try parseExactLocation(object, projectURL: projectURL, snapshot: snapshot, files: &files)
+}
+
+/// `files` keeps each file read and mapped once while one response with
+/// many locations (references, call sites) is converted.
+func parseExactLocation(
+    _ object: [String: Any],
+    projectURL: URL,
+    snapshot: any Snapshot,
+    files: inout ExactLocationFiles
 ) throws -> ExactLocation {
     guard let uri = (object["targetUri"] ?? object["uri"]) as? String,
           let range = (object["targetSelectionRange"] ?? object["range"])
@@ -116,7 +132,30 @@ func parseExactLocation(
     else {
         throw ExactError.invalidDefinitionResponse(String(describing: object))
     }
+    if files[uri] == nil {
+        files[uri] = try exactLocationFile(url, projectURL: projectURL, snapshot: snapshot)
+    }
+    let (relative, targetURL, map) = files[uri]!
+    guard let byteOffset = map.byteOffset(
+        for: LSPPosition(line: line, character: character)
+    ), let coordinate = map.lineAndByteColumn(at: byteOffset) else {
+        throw ExactError.invalidDefinitionResponse(
+            "position \(line):\(character) is outside \(targetURL.path)"
+        )
+    }
+    return ExactLocation(
+        file: relative ?? targetURL.path,
+        byteOffset: byteOffset,
+        line: coordinate.line,
+        column: coordinate.column
+    )
+}
 
+private func exactLocationFile(
+    _ url: URL,
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> (file: String?, url: URL, map: LSPPositionMap) {
     var targetURL = url.standardizedFileURL
     var relative = projectRelativePath(
         of: targetURL,
@@ -136,19 +175,7 @@ func parseExactLocation(
     guard let map = LSPPositionMap(utf8: bytes) else {
         throw ExactError.invalidUTF8(targetURL.path)
     }
-    guard let byteOffset = map.byteOffset(
-        for: LSPPosition(line: line, character: character)
-    ), let coordinate = map.lineAndByteColumn(at: byteOffset) else {
-        throw ExactError.invalidDefinitionResponse(
-            "position \(line):\(character) is outside \(targetURL.path)"
-        )
-    }
-    return ExactLocation(
-        file: relative ?? targetURL.path,
-        byteOffset: byteOffset,
-        line: coordinate.line,
-        column: coordinate.column
-    )
+    return (relative, targetURL, map)
 }
 
 func projectRelativePath(of url: URL, projectURL: URL) -> String? {
@@ -182,11 +209,13 @@ func parseCallHierarchyItems(
     guard let objects = value as? [[String: Any]] else {
         throw ExactError.invalidDefinitionResponse(String(describing: value))
     }
+    var files: ExactLocationFiles = [:]
     return try objects.map {
         try parseCallHierarchyItem(
             $0,
             projectURL: projectURL,
-            snapshot: snapshot
+            snapshot: snapshot,
+            files: &files
         )
     }
 }
@@ -194,7 +223,8 @@ func parseCallHierarchyItems(
 func parseCallHierarchyItem(
     _ object: [String: Any],
     projectURL: URL,
-    snapshot: any Snapshot
+    snapshot: any Snapshot,
+    files: inout ExactLocationFiles
 ) throws -> ExactCallHierarchyItem {
     guard let name = object["name"] as? String,
           let kind = (object["kind"] as? NSNumber)?.intValue,
@@ -220,12 +250,14 @@ func parseCallHierarchyItem(
         range: try parseExactLocation(
             ["uri": uri, "range": range],
             projectURL: projectURL,
-            snapshot: snapshot
+            snapshot: snapshot,
+            files: &files
         ),
         selectionRange: try parseExactLocation(
             ["uri": uri, "range": selectionRange],
             projectURL: projectURL,
-            snapshot: snapshot
+            snapshot: snapshot,
+            files: &files
         ),
         data: data
     )
@@ -242,6 +274,7 @@ func parseCallRelations(
     guard let objects = value as? [[String: Any]] else {
         throw ExactError.invalidDefinitionResponse(String(describing: value))
     }
+    var files: ExactLocationFiles = [:]
     return try objects.map { object in
         guard let itemObject = object[itemKey] as? [String: Any],
               let ranges = object["fromRanges"] as? [[String: Any]]
@@ -253,7 +286,8 @@ func parseCallRelations(
         let item = try parseCallHierarchyItem(
             itemObject,
             projectURL: projectURL,
-            snapshot: snapshot
+            snapshot: snapshot,
+            files: &files
         )
         let uri = callSiteURI(item)
         return ExactCallRelation(
@@ -262,7 +296,8 @@ func parseCallRelations(
                 try parseExactLocation(
                     ["uri": uri, "range": $0],
                     projectURL: projectURL,
-                    snapshot: snapshot
+                    snapshot: snapshot,
+                    files: &files
                 )
             }
         )
@@ -314,11 +349,13 @@ func exactLocations(
     } else {
         throw ExactError.invalidDefinitionResponse(String(describing: value))
     }
+    var files: ExactLocationFiles = [:]
     return try objects.map {
         try parseExactLocation(
             $0,
             projectURL: projectURL,
-            snapshot: snapshot
+            snapshot: snapshot,
+            files: &files
         )
     }
 }
