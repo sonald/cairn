@@ -1559,6 +1559,26 @@ func extractorVersionsCoexistInSchemaTwoCache() throws {
 }
 
 @Test
+func writeLockHeldByAnotherProcessKeepsTheCache() throws {
+    // Another window or the CLI holding the write lock surfaces SQLITE_BUSY;
+    // that once deleted the whole shared cache.
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let cache = try IndexCache(fileURL: cacheURL)
+    cache.storeSynchronously([("kept", Data([1]), 1)])
+
+    var other: OpaquePointer?
+    #expect(sqlite3_open_v2(cacheURL.path, &other, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
+    #expect(sqlite3_exec(other, "BEGIN IMMEDIATE", nil, nil, nil) == SQLITE_OK)
+    cache.storeSynchronously([("blocked", Data([2]), 2)])
+    sqlite3_exec(other, "ROLLBACK", nil, nil, nil)
+    sqlite3_close_v2(other)
+
+    #expect(cache.payload(for: "kept") == Data([1]))
+    #expect(cache.payload(for: "blocked") == nil)
+}
+
+@Test
 func testRunnersNeverResolveTheUsersIndexCache() {
     // Test targets without their own cache root once filled Application Support.
     let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

@@ -38,7 +38,7 @@ final class IndexCache: @unchecked Sendable {
         )
         do {
             try openAndPrepare()
-        } catch {
+        } catch where Self.indicatesCorruption(error, opening: true) {
             closeAndRemoveDatabase()
             try openAndPrepare()
         }
@@ -85,7 +85,7 @@ final class IndexCache: @unchecked Sendable {
                 }
                 return payloads
             } catch {
-                try? rebuild()
+                recover(from: error)
                 return [:]
             }
         }
@@ -95,7 +95,7 @@ final class IndexCache: @unchecked Sendable {
                 do {
                     try self.touch(touchedKeys, at: Self.now)
                 } catch {
-                    try? self.rebuild()
+                    self.recover(from: error)
                 }
             }
         }
@@ -112,7 +112,7 @@ final class IndexCache: @unchecked Sendable {
                 try self.bind(key, at: 1, to: statement)
                 try self.stepDone(statement)
             } catch {
-                try? self.rebuild()
+                self.recover(from: error)
             }
         }
     }
@@ -133,7 +133,7 @@ final class IndexCache: @unchecked Sendable {
             do {
                 try self.write(entries)
             } catch {
-                try? self.rebuild()
+                self.recover(from: error)
             }
         }
         if DispatchQueue.getSpecific(key: queueKey) != nil {
@@ -238,28 +238,34 @@ final class IndexCache: @unchecked Sendable {
 
     private func evictIfNeeded() throws {
         var total = try payloadBytes()
+        guard total > quotaBytes else { return }
+        // One ordered pass picks every victim; a query per victim rescanned
+        // the whole table each time (seconds per batch near quota).
+        var victims: [String] = []
+        let statement = try prepare("""
+            SELECT contentKey, length(payload)
+            FROM contents
+            ORDER BY lastAccess ASC, contentKey ASC
+            """)
+        defer { sqlite3_finalize(statement) }
         while total > quotaBytes {
-            let statement = try prepare("""
-                SELECT contentKey, length(payload)
-                FROM contents
-                ORDER BY lastAccess ASC, contentKey ASC
-                LIMIT 1
-                """)
-            defer { sqlite3_finalize(statement) }
             let code = sqlite3_step(statement)
-            if code == SQLITE_DONE { return }
+            if code == SQLITE_DONE { break }
             guard code == SQLITE_ROW,
                   let keyBytes = sqlite3_column_text(statement, 0)
             else { throw IndexCacheError.sqlite(code) }
-            let key = String(cString: keyBytes)
-            let bytes = sqlite3_column_int64(statement, 1)
-            let deletion = try prepare(
-                "DELETE FROM contents WHERE contentKey = ?1"
-            )
-            defer { sqlite3_finalize(deletion) }
+            victims.append(String(cString: keyBytes))
+            total -= sqlite3_column_int64(statement, 1)
+        }
+        sqlite3_reset(statement)
+        let deletion = try prepare(
+            "DELETE FROM contents WHERE contentKey = ?1"
+        )
+        defer { sqlite3_finalize(deletion) }
+        for key in victims {
+            sqlite3_reset(deletion)
             try bind(key, at: 1, to: deletion)
             try stepDone(deletion)
-            total -= bytes
         }
     }
 
@@ -340,6 +346,28 @@ final class IndexCache: @unchecked Sendable {
     private func stepDone(_ statement: OpaquePointer) throws {
         let code = sqlite3_step(statement)
         guard code == SQLITE_DONE else { throw IndexCacheError.sqlite(code) }
+    }
+
+    /// Only a damaged or foreign database is deleted. Anything else, notably
+    /// SQLITE_BUSY/LOCKED while another window or the CLI writes the same
+    /// file, fails just this call and keeps the shared cache.
+    private func recover(from error: Error) {
+        guard database == nil || Self.indicatesCorruption(error) else { return }
+        try? rebuild()
+    }
+
+    /// Opening also resets on a plain SQLITE_ERROR: a valid file with a
+    /// foreign table layout fails there and would otherwise never be cached.
+    private static func indicatesCorruption(_ error: Error, opening: Bool = false) -> Bool {
+        switch error as? IndexCacheError {
+        case .invalidMetadata, .metadataMismatch:
+            return true
+        case .sqlite(let code):
+            return [SQLITE_CORRUPT, SQLITE_NOTADB, SQLITE_FORMAT].contains(code & 0xff)
+                || (opening && code == SQLITE_ERROR)
+        case nil:
+            return false
+        }
     }
 
     private func rebuild() throws {
