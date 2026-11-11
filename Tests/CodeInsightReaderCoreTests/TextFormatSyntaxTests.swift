@@ -314,6 +314,7 @@ func codeSnippetHighlighterCoversReaderLanguagesAndFormats() {
     #expect(text.contains("\"é\""))
     #expect(!CodeSnippetHighlighter.spans(for: "def f(): pass", languageHint: "python").isEmpty)
     #expect(!CodeSnippetHighlighter.spans(for: "const a = 1", languageHint: "js").isEmpty)
+    #expect(CodeSnippetHighlighter.spans(for: "func f() {}", languageHint: "golang").first?.kind == .keyword)
     #expect(!CodeSnippetHighlighter.spans(for: "a: 1", languageHint: "yaml").isEmpty)
     #expect(!CodeSnippetHighlighter.spans(for: "int main() {}", languageHint: "c").isEmpty)
     #expect(CodeSnippetHighlighter.spans(for: "x", languageHint: "brainfuck").isEmpty)
@@ -325,7 +326,8 @@ func textFormatDetectsSourceLanguagesCairnDoesNotAnalyze() {
     #expect(TextFormat.detect(fileName: "list.h") == .code(.cpp))
     #expect(TextFormat.detect(fileName: "View.mm") == .code(.objectiveC))
     #expect(TextFormat.detect(fileName: "Main.java") == .code(.java))
-    #expect(TextFormat.detect(fileName: "server.go") == .code(.go))
+    #expect(TextFormat.detect(fileName: "server.go") == .syntaxTree(LanguageMode(language: .go)))
+    #expect(TextFormat.detect(fileName: "server_test.go") == .syntaxTree(LanguageMode(language: .go)))
     #expect(TextFormat.detect(fileName: "Unit1.PAS") == .code(.pascal))
     #expect(TextFormat.detect(fileName: "boot.S") == .code(.assembly))
     #expect(TextFormat.detect(fileName: "app.jsx") == .javascript)
@@ -376,8 +378,20 @@ func codeLanguagesUseTheirOwnCommentAndKeywordRules() {
     #expect(kind(.code(.sql), "SELECT 1 -- note", of: "-- note") == .comment)
     #expect(kind(.code(.java), "@Override void f()", of: "@Override") == .attribute)
     #expect(kind(.code(.objectiveC), "@interface Foo", of: "@interface") == .keyword)
-    #expect(kind(.code(.go), "s := `a\n\"b\"`", of: "`a\n\"b\"`") == .string)
     #expect(kind(.code(.kotlin), "val s = \"\"\"\n\"x\"\n\"\"\"", of: "\"\"\"\n\"x\"\n\"\"\"") == .string)
+}
+
+@Test
+func goPreviewUsesTheSyntaxTreeIncludingRawStrings() {
+    let text = "package main\n\nfunc run(n int) string {\n\treturn fmt.Sprint(n) + `a\n\"b\"`\n}\n"
+    let format = TextFormat.syntaxTree(LanguageMode(language: .go))
+    #expect(kind(format, text, of: "`a\n\"b\"`") == .string)
+    #expect(kind(format, text, of: "run") == .functionName)
+    #expect(kind(format, text, of: "Sprint") == .functionCall)
+    #expect(kind(format, text, of: "string") == .typeName)
+    let document = TextFormat.previewDocument(bytes: Array(text.utf8), format: format)
+    #expect(document.languageMode.language == .go)
+    #expect(document.foldRegions.contains { $0.kind == .declaration })
 }
 
 @Test

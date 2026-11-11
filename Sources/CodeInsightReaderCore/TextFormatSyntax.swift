@@ -30,7 +30,7 @@ public enum TextFormat: Equatable, Hashable, Sendable {
     case code(CodeLanguage)
     /// A bundled tree-sitter grammar the project is not analyzing:
     /// `.js`/`.jsx`/`.mjs`/`.cjs` through the TSX grammar (it parses
-    /// JavaScript and JSX without errors), and `.rs`/`.py`/`.ts`/`.tsx`
+    /// JavaScript and JSX without errors), and `.rs`/`.py`/`.ts`/`.tsx`/`.go`
     /// where the worktree had none, e.g. at a commit that adds them.
     case syntaxTree(LanguageMode)
 
@@ -209,6 +209,8 @@ public enum TextFormat: Equatable, Hashable, Sendable {
         "xml": .markup, "plist": .markup, "xsd": .markup, "xsl": .markup,
         "xslt": .markup, "svg": .markup, "html": .markup, "htm": .markup,
         "js": .javascript, "jsx": .javascript, "mjs": .javascript, "cjs": .javascript,
+        // ponytail: until Go joins `LanguageMode.supported`, `classify(path:)` skips `.go`.
+        "go": .syntaxTree(LanguageMode(language: .go)),
     ].merging(CodeLanguage.byExtension.mapValues { .code($0) }) { format, _ in format }
     private static let exactNames: [String: TextFormat] = [
         "cargo.lock": .toml, "pipfile": .toml, "poetry.lock": .toml, "uv.lock": .toml,
@@ -1324,6 +1326,7 @@ public enum CodeSnippetHighlighter {
         case "rust", "rs": mode = LanguageMode(language: .rust)
         case "python", "py", "python3", "pycon": mode = LanguageMode(language: .python)
         case "typescript", "ts", "mts", "cts": mode = LanguageMode(language: .typescript)
+        case "go", "golang": mode = LanguageMode(language: .go)
         case "tsx", "jsx", "javascript", "js", "mjs", "cjs":
             mode = LanguageMode(language: .typescript, variant: "tsx")
         default: return []

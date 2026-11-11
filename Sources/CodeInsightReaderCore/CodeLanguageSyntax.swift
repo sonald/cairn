@@ -2,7 +2,7 @@
 /// the way Source Insight's language files do: a keyword list plus comment
 /// and string delimiters. Nothing here drives navigation.
 public enum CodeLanguage: String, CaseIterable, Hashable, Sendable {
-    case c, cpp, objectiveC, csharp, java, kotlin, go, swift, php, perl
+    case c, cpp, objectiveC, csharp, java, kotlin, swift, php, perl
     case css, sql, pascal, visualBasic, ada, assembly
 
     public var displayName: String {
@@ -13,7 +13,6 @@ public enum CodeLanguage: String, CaseIterable, Hashable, Sendable {
         case .csharp: "C#"
         case .java: "Java"
         case .kotlin: "Kotlin"
-        case .go: "Go"
         case .swift: "Swift"
         case .php: "PHP"
         case .perl: "Perl"
@@ -33,7 +32,7 @@ public enum CodeLanguage: String, CaseIterable, Hashable, Sendable {
         "hpp": .cpp, "hxx": .cpp, "ipp": .cpp, "tpp": .cpp, "inl": .cpp,
         "m": .objectiveC, "mm": .objectiveC,
         "cs": .csharp, "java": .java, "kt": .kotlin, "kts": .kotlin,
-        "go": .go, "swift": .swift, "php": .php, "pl": .perl, "pm": .perl,
+        "swift": .swift, "php": .php, "pl": .perl, "pm": .perl,
         "css": .css, "scss": .css, "less": .css, "sql": .sql,
         "pas": .pascal, "dpr": .pascal, "lpr": .pascal,
         "vb": .visualBasic, "bas": .visualBasic, "vbs": .visualBasic,
@@ -49,7 +48,6 @@ public enum CodeLanguage: String, CaseIterable, Hashable, Sendable {
         case "cs", "csharp", "c#": .csharp
         case "java": .java
         case "kotlin", "kt": .kotlin
-        case "go", "golang": .go
         case "swift": .swift
         case "php": .php
         case "perl", "pl": .perl
@@ -140,17 +138,6 @@ public enum CodeLanguage: String, CaseIterable, Hashable, Sendable {
                 "typealias", "val", "value", "var", "vararg", "when", "where", "while",
             ],
             tripleQuotes: true
-        ),
-        .go: CodeSyntax(
-            keywords: [
-                "break", "case", "chan", "const", "continue", "default", "defer", "else",
-                "fallthrough", "for", "func", "go", "goto", "if", "import", "interface", "map",
-                "package", "range", "return", "select", "struct", "switch", "type", "var",
-                "true", "false", "nil", "iota", "bool", "byte", "rune", "string", "error",
-                "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32",
-                "uint64", "uintptr", "float32", "float64", "complex64", "complex128", "any",
-            ],
-            rawBackticks: true
         ),
         .swift: CodeSyntax(
             keywords: [
@@ -289,8 +276,6 @@ struct CodeSyntax {
     var preprocessor = false
     /// `"""` text blocks spanning lines (C#, Java, Kotlin, Swift).
     var tripleQuotes = false
-    /// Go's backtick raw strings spanning lines.
-    var rawBackticks = false
 }
 
 extension TextLexer {
@@ -334,14 +319,6 @@ extension TextLexer {
                     end += s[end] == 0x5C ? 2 : 1
                 }
                 end = min(n, end + 3)
-                emit(i, end, .string)
-                i = end
-                continue
-            }
-            if syntax.rawBackticks, c == 0x60 {
-                var end = i + 1
-                while end < n, s[end] != 0x60 { end += 1 }
-                end = min(n, end + 1)
                 emit(i, end, .string)
                 i = end
                 continue
