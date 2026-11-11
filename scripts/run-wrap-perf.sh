@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Collect soft-wrap performance evidence (reader-wrap design §7.4).
+# Collect soft-wrap performance evidence.
 #
 # Runs the `--self-test-wrap` runner across fixtures/scenarios and stores the
 # raw JSON plus a jq summary table. Baseline and candidate runs use the same
@@ -9,13 +9,14 @@
 #   bash scripts/run-wrap-perf.sh                      # default matrix, output under .build/wrap-perf/
 #   bash scripts/run-wrap-perf.sh --out DIR
 #   bash scripts/run-wrap-perf.sh --samples 30 --warmup 5
-#   bash scripts/run-wrap-perf.sh --enforce-budgets --baseline-dir DIR   # candidate gates (§7.4.4)
+#   bash scripts/run-wrap-perf.sh --enforce-budgets --baseline-dir DIR   # candidate budget gates
 #
 # Fixtures live in fixtures/wrap/ (scripts/gen-wrap-fixtures.sh --verify).
-# Every fixture uses 5 warmups / 30 samples by default (§7.4.3).
+# Every fixture uses 5 warmups / 30 samples by default.
 # Historical baselines, including unsupported Reading Set, remain unchanged.
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 out_dir=".build/wrap-perf"
 binary=""
@@ -129,7 +130,7 @@ jq -r '.rows[] | [.name, .status,
         (.longestMainThreadStallMs | tostring), (.reflowCount | tostring)]
         | @tsv' "$summary" | column -t >&2
 
-# ---------- budget gates (§7.4.4, candidate acceptance) ----------
+# ---------- budget gates (candidate acceptance) ----------
 
 if [[ "$enforce_budgets" == true ]]; then
     budget_failures=0
@@ -163,7 +164,7 @@ if [[ "$enforce_budgets" == true ]]; then
         # check_budget_aware <file> <path> <budget> <label>
         # Like check_budget, but a candidate that stays at or below a
         # baseline which itself exceeds the absolute budget is reported as
-        # BASELINE-EXCEEDED (recorded, not claimed as a pass — §7.4.4) and
+        # BASELINE-EXCEEDED (recorded, not claimed as a pass) and
         # does not fail the run.
         local file="$out_dir/$1" value base_value
         [[ -f "$file" ]] || { echo "BUDGET-SKIP (no run): $1 $4" >&2; return; }
@@ -177,7 +178,7 @@ if [[ "$enforce_budgets" == true ]]; then
             base_value="$(baseline_metric "$baseline_dir/$1" "$2" 2>/dev/null || true)"
             # Run-to-run noise margin: a candidate within 1.25x baseline + 5
             # of an already-over-budget baseline is the same pre-existing
-            # cost, not a new regression (§7.4.4: record, never claim pass).
+            # cost, not a new regression (record, never claim pass).
             if [[ -n "$base_value" ]] && awk -v v="$value" -v b="$base_value" 'BEGIN { limit = b * 1.25 + 5; exit !(v <= limit) }'; then
                 echo "BUDGET-BASELINE-EXCEEDED: $4 =${value} > ${3} but within noise of baseline ${base_value} (pre-existing cost, recorded)" >&2
                 return
@@ -222,7 +223,7 @@ if [[ "$enforce_budgets" == true ]]; then
             fi
         done
         # Relative toggle budget: candidate must not regress past
-        # max(baseP95 * 1.5, baseP95 + 15ms) even when under 250ms (§7.4.4).
+        # max(baseP95 * 1.5, baseP95 + 15ms) even when under 250ms.
         for config in f1-toggle-wrap-on f1-toggle-wrap-off; do
             base_p95="$(baseline_metric "$baseline_dir/$config.json" '.summary.toggleSettledMs.p95' 2>/dev/null || true)"
             cand_p95="$(jq -r '.summary.toggleSettledMs.p95 // empty' "$out_dir/$config.json" 2>/dev/null || true)"

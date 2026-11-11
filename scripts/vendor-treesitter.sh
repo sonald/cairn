@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# Re-vendor part of the tree-sitter C sources (network required).
+#
+# Usage:
+#   bash scripts/vendor-treesitter.sh                # runtime + Rust grammar only
+#   bash scripts/vendor-treesitter.sh --python-only  # Python grammar only
+#
+# Coverage (see each Sources/CTreeSitter*/VENDORED.md for the recorded provenance):
+# - Sources/CTreeSitter and Sources/CTreeSitterRust: tag archives downloaded
+#   without a checksum; their VENDORED.md records a vendoring from a local cache,
+#   not a run of this script.
+# - Sources/CTreeSitterPython: tag archive verified against the SHA-256 below.
+# - Sources/CTreeSitterTypeScript (TypeScript + TSX) is NOT covered: it was laid
+#   out by hand from the v0.23.2 release tar.xz (archive SHA-256 and file list in
+#   its VENDORED.md).
+# Running this rewrites the covered targets and their VENDORED.md.
 
 set -euo pipefail
 

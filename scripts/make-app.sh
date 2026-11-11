@@ -4,6 +4,32 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT_DIR="${CAIRN_OUTPUT_DIR:-$REPO_ROOT/.build/distribution}"
+SIGNING_IDENTITY="${CAIRN_CODESIGN_IDENTITY:--}"
+BUNDLE_IDENTIFIER="${CAIRN_BUNDLE_IDENTIFIER:-dev.cairn.Cairn}"
+NOTARY_PROFILE="${CAIRN_NOTARY_PROFILE:-}"
+APPLE_ID="${CAIRN_NOTARY_APPLE_ID:-}"
+TEAM_ID="${CAIRN_NOTARY_TEAM_ID:-}"
+PASSWORD="${CAIRN_NOTARY_PASSWORD:-}"
+
+usage() {
+    echo "usage: $0 [--output DIR] [--signing-identity IDENTITY] [--bundle-id ID]"
+    echo "          [--notary-profile PROFILE | --apple-id ID --team-id ID --password VALUE]"
+}
+
+# Parse arguments first so --help works before any libgit2 check.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output) OUTPUT_DIR="$2"; shift 2 ;;
+        --signing-identity) SIGNING_IDENTITY="$2"; shift 2 ;;
+        --bundle-id) BUNDLE_IDENTIFIER="$2"; shift 2 ;;
+        --notary-profile) NOTARY_PROFILE="$2"; shift 2 ;;
+        --apple-id) APPLE_ID="$2"; shift 2 ;;
+        --team-id) TEAM_ID="$2"; shift 2 ;;
+        --password) PASSWORD="$2"; shift 2 ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage >&2; echo "unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
 
 # Release bundles default to the vendored static, network-off libgit2 so the
 # shipped app carries no SSH/TLS stack (the audit-tool security story). Requires
@@ -41,31 +67,6 @@ module CLibGit2 [system] {
 }
 EOF
 fi
-SIGNING_IDENTITY="${CAIRN_CODESIGN_IDENTITY:--}"
-BUNDLE_IDENTIFIER="${CAIRN_BUNDLE_IDENTIFIER:-dev.cairn.Cairn}"
-NOTARY_PROFILE="${CAIRN_NOTARY_PROFILE:-}"
-APPLE_ID="${CAIRN_NOTARY_APPLE_ID:-}"
-TEAM_ID="${CAIRN_NOTARY_TEAM_ID:-}"
-PASSWORD="${CAIRN_NOTARY_PASSWORD:-}"
-
-usage() {
-    echo "usage: $0 [--output DIR] [--signing-identity IDENTITY] [--bundle-id ID]"
-    echo "          [--notary-profile PROFILE | --apple-id ID --team-id ID --password VALUE]"
-}
-
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-        --output) OUTPUT_DIR="$2"; shift 2 ;;
-        --signing-identity) SIGNING_IDENTITY="$2"; shift 2 ;;
-        --bundle-id) BUNDLE_IDENTIFIER="$2"; shift 2 ;;
-        --notary-profile) NOTARY_PROFILE="$2"; shift 2 ;;
-        --apple-id) APPLE_ID="$2"; shift 2 ;;
-        --team-id) TEAM_ID="$2"; shift 2 ;;
-        --password) PASSWORD="$2"; shift 2 ;;
-        -h|--help) usage; exit 0 ;;
-        *) usage >&2; echo "unknown argument: $1" >&2; exit 2 ;;
-    esac
-done
 
 if [[ -n "$NOTARY_PROFILE" && ( -n "$APPLE_ID" || -n "$TEAM_ID" || -n "$PASSWORD" ) ]]; then
     echo "choose a notary profile or Apple ID credentials, not both" >&2

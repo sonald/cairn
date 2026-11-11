@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Generate and verify the reader soft-wrap performance fixtures (F1–F5,
-# docs/development.md).
+# Generate and verify the reader soft-wrap performance fixtures (F1–F5) used by
+# scripts/run-wrap-perf.sh.
 #
 # Usage:
 #   bash scripts/gen-wrap-fixtures.sh                          # generate into fixtures/wrap/
@@ -12,6 +12,7 @@
 # bytes for every fixture.
 
 set -euo pipefail
+cd "$(dirname "$0")/.."
 
 fixture_dir="fixtures/wrap"
 manifest="$fixture_dir/wrap_perf.manifest.json"

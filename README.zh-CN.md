@@ -77,4 +77,4 @@ swift build --product codeinsight
 
 ## 许可证
 
-第一方源码使用 [MIT](LICENSE)。vendored tree-sitter 运行时和语言 grammar 保留上游许可证与来源说明，见各目录的 `LICENSE`、`VENDORED.md`。
+第一方源码使用 [MIT](LICENSE)。vendored tree-sitter 运行时和语言 grammar 保留上游许可证与来源说明，见各目录的 `LICENSE`、`VENDORED.md`。内置 base16 主题的 MIT 许可证见 `Sources/CodeInsightReaderCore/Themes/LICENSE`。应用链接 libgit2（GPL-2.0 附链接例外）：发布包从 `Vendor/libgit2` 静态链接，`scripts/vendor-libgit2.sh` 把它的 `LICENSE` 放在该目录；`CAIRN_LIBGIT2=brew` 打的包把 Homebrew 的 libgit2 及其链接的库复制到 `Contents/Frameworks`。

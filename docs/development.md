@@ -111,9 +111,9 @@ bash scripts/run-fold-perf.sh \
   --manifest fixtures/fold_perf.manifest.json
 ```
 
-fixture 的种子、哈希和重建入口保存在 [fixtures](../fixtures/) 的各自说明中。不要改变 fixture 或阈值来掩盖失败。`run-readonly-workload.sh --enforce-budgets` 目前会明确失败，因为没有已校准的时间/内存预算；不要把该参数当现有性能保证。
+fixture 的哈希记录在 [fixtures](../fixtures/) 下各自的 manifest 中。种子与重建入口：readonly 见其 [README](../fixtures/readonly/README.md)；wrap 由 `scripts/gen-wrap-fixtures.sh` 生成并校验（`--verify`）；ligatures 由 `fixtures/ligatures/generate.py` 生成；`fold_perf.rs` 由 `scripts/provision-corpora.sh --gen-fold-fixture`（`--verify-fold-fixture` 校验）生成。不要改变 fixture 或阈值来掩盖失败。`run-readonly-workload.sh --enforce-budgets` 目前会明确失败，因为没有已校准的时间/内存预算；不要把该参数当现有性能保证。
 
-报告区分准备、操作耗时、实际绘制、稳定可用、源坐标正确性与进程内存。减少工作量不能直接推出所有交互更快，原生绘制调用耗时也不是显示器帧间隔。高成本精确恢复不适用时应记 NOT_RUN，不把 no-op 当 PASS。
+报告区分准备、操作耗时、实际绘制、稳定可用、源坐标正确性与进程内存。减少工作量不能直接推出所有交互更快，原生绘制调用耗时也不是显示器帧间隔。高成本精确恢复不适用时应记 NOT_RUN，不把 no-op 当 PASS。只读负载的每份报告用 `notRunScenarios`、`notRunCount` 列出没有执行的场景，`selectedSuiteRan` 为 false 表示所选套件没有一个自己的场景通过；`run-readonly-workload.sh` 的汇总行和 `result.json` 给出 NOT_RUN 总数。总状态仍只有 pass / blocked / fail，判读时要同时看 NOT_RUN。
 
 [保留证据](evidence/README.md) 中的最终 readonly 配对记录只用于理解既有取舍；普通文件热查询与颜色变化收益和冷路径警戒同时存在。chunked-content 探索因为改变几何未采用，当前没有分块内容框架的实施要求。
 

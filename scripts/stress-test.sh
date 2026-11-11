@@ -298,11 +298,16 @@ for ((run = 1; run <= runs; run++)); do
                 "$log_file" | tail -1
         )"
     fi
-    if [[ -z "$failures" && $command_status -eq 0 ]]; then
-        failures=0
-    elif [[ -z "$failures" ]]; then
-        failures=1
-        errors=$((errors + 1))
+    # A clean run needs exit 0 and the same final success summary ci.sh checks;
+    # exit 0 or an XCTest "Executed 0 tests, with 0 failures" line alone is not a pass.
+    if [[ -z "$failures" || "$failures" -eq 0 ]]; then
+        if [[ $command_status -eq 0 ]] \
+            && grep -Eq '^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites?)? passed after ' "$log_file"; then
+            failures=0
+        else
+            failures=1
+            errors=$((errors + 1))
+        fi
     fi
 
     total_failures=$((total_failures + failures))

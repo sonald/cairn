@@ -77,4 +77,4 @@ Choose checks for the affected behavior; full product and performance gates are 
 
 ## License
 
-First-party source is [MIT](LICENSE). Vendored tree-sitter runtime and grammars retain their upstream licenses and provenance in their own `LICENSE` and `VENDORED.md` files.
+First-party source is [MIT](LICENSE). Vendored tree-sitter runtime and grammars retain their upstream licenses and provenance in their own `LICENSE` and `VENDORED.md` files. The bundled base16 themes keep their MIT license in `Sources/CodeInsightReaderCore/Themes/LICENSE`. The app links libgit2 (GPL-2.0 with a linking exception): release bundles link it statically from `Vendor/libgit2`, where `scripts/vendor-libgit2.sh` places its `LICENSE`; `CAIRN_LIBGIT2=brew` bundles copy Homebrew's libgit2 and the libraries it links into `Contents/Frameworks`.
