@@ -429,7 +429,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             return
         }
         if let scope = model.activeEnclosingScope {
-            onOpenEnclosing?(scope.path, scope.displayRange.lowerBound)
+            onOpenEnclosing?(scope.path, scope.nameOffset)
         }
     }
 

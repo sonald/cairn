@@ -163,6 +163,9 @@ public final class ContextWindowModel {
         public let kind: OutlineKind
         public let name: String
         public let nameLine: UInt32
+        /// Where "open" lands: on the name, so the caret stays inside the
+        /// scope (the display range starts at the doc comment above it).
+        public let nameOffset: UInt32
         public let displayRange: CodeInsightCore.ByteRange
         public let signatureEndLine: UInt32
         public let bodyFirstLine: UInt32
@@ -856,6 +859,7 @@ public final class ContextWindowModel {
             kind: facet.kind,
             name: facet.name,
             nameLine: nameLine,
+            nameOffset: facet.nameRange.lowerBound,
             displayRange: ByteRange(lowerBound: lower, upperBound: facet.range.upperBound),
             signatureEndLine: signatureEndLine,
             bodyFirstLine: bodyFirstLine,

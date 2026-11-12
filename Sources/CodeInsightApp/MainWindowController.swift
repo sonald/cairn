@@ -556,6 +556,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.referencePane?.byteOffset = offset
             sidebarController.highlightOutline(at: offset)
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+            handleReaderCaretReport(offset: offset, from: secondaryReaderController)
         }
         for reader in [readerController, secondaryReaderController] {
             reader.onCaretFollow = { [weak self, weak reader] offset in
@@ -649,6 +650,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.tabStrip.updateActiveSelection(offset)
             captureActiveTabState()
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+            handleReaderCaretReport(offset: offset, from: readerController)
         }
         readerController.onDocumentChange = { [weak self] file, document in
             guard let self else { return }
@@ -4210,6 +4212,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
+    /// Every caret report of the focused pane, jumps and restores included
+    /// (definition jumps, outline, history, tab switches). The enclosing
+    /// mode follows them all, as the breadcrumb does; the symbol mode keeps
+    /// to the user's own clicks and moves (R4) and only remembers the
+    /// position for a later switch.
+    private func handleReaderCaretReport(offset: UInt32, from reader: ReaderViewController) {
+        guard reader === (focusedPane == .reference ? secondaryReaderController : readerController),
+              let file = paneFile(for: reader),
+              // A file still loading reports nothing usable for the new path.
+              reader.displayedFile?.standardizedFileURL == file.standardizedFileURL
+        else { return }
+        if model.contextWindow.tracking == .enclosing {
+            handleReaderCaret(offset: offset, from: reader)
+        } else {
+            lastLensCaret = (offset, reader)
+        }
+    }
+
     /// P1.6: ⌘⇧+click / ⌃⌘J / context menu — jump to the type definition of
     /// the binding under the position; failures surface as a brief status.
     private func handleReaderTypeDefinition(offset: UInt32, from reader: ReaderViewController) {
@@ -4919,8 +4939,9 @@ extension MainWindowController: ProjectSymbolsPanelHost {
             caretFollowTask?.cancel()
             model.contextWindow.tokenClicked(file: path, offset: nameRange.lowerBound)
         } else if readerController.displayedContentID == contentID {
-            // ponytail: the enclosing mode needs the shown document; a file
-            // still loading keeps the previous scope until the next caret move.
+            // The enclosing mode needs the shown document. A file still
+            // loading is followed when its reveal reports the caret
+            // (handleReaderCaretReport).
             handleReaderCaret(offset: nameRange.lowerBound, from: readerController)
         }
         if focusReader { readerController.focusText() }

@@ -862,6 +862,63 @@ func plainReaderClickMovesTheEnclosingLens() async throws {
     #expect(model.contextWindow.activeEnclosingScope?.name == "target")
 }
 
+/// A jump moves the caret without a user caret event. The enclosing lens
+/// follows it, as the breadcrumb does, and the jump's destination is the
+/// caret a later switch to that mode shows.
+@MainActor
+@Test
+func enclosingLensFollowsJumps() async throws {
+    _ = NSApplication.shared
+    let source = """
+    pub fn first() {
+        let _ = 1;
+    }
+    pub fn second() {
+        let _ = 2;
+    }
+    pub fn main() {
+        first();
+        second();
+    }
+
+    """
+    let root = try mainWindowTemporaryProject(["src/main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    let main = root.appendingPathComponent("src/main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+    func offset(of needle: String) throws -> UInt32 {
+        let range = try #require(source.range(of: needle))
+        return UInt32(source.utf8.distance(from: source.utf8.startIndex, to: range.lowerBound))
+    }
+
+    // Tracking symbols: a click in `main`, then a jump to `first`. The
+    // switch shows where the caret is now, not where the click was.
+    controller.selfTestReaderClick(offset: try offset(of: "first();"), commandClick: false)
+    controller.selfTestReaderClick(offset: try offset(of: "first();"), commandClick: true)
+    #expect(await mainWindowWaitUntil(model.selectedByteOffset == (try? offset(of: "first()"))))
+    controller.selfTestChooseLensTracking(.enclosing)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "first")
+
+    // Tracking the enclosing function: a jump moves the lens with the caret.
+    controller.selfTestReaderClick(offset: try offset(of: "second();"), commandClick: false)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "main")
+    controller.selfTestReaderClick(offset: try offset(of: "second();"), commandClick: true)
+    #expect(await mainWindowWaitUntil(model.contextWindow.activeEnclosingScope?.name == "second"))
+}
+
 @MainActor
 @Test
 func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
