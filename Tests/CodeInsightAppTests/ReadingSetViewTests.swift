@@ -179,7 +179,7 @@ private func readingSetTestViews(in view: NSView) -> [NSView] {
 }
 
 @MainActor
-@Test
+@Test(.readerFontEnvironment)
 func readingSetWrapUsesActualRowsAndOneHeightConstraint() async throws {
     _ = NSApplication.shared
     let view = ReadingSetView()

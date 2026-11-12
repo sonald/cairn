@@ -10,12 +10,14 @@ import Testing
 @testable import CodeInsightApp
 @testable import CodeInsightAppModel
 
-/// Core Text process registration is global to this test process. Run this suite
-/// alone with --no-parallel; no persistent/session font registration is used.
+/// Core Text process registration is global to this test process; no
+/// persistent/session font registration is used. `ci.sh` runs each test here
+/// in its own process. In a local parallel run they hold `.readerFontEnvironment`
+/// with the other tests that change or depend on the font environment.
 @Suite(.serialized)
 @MainActor
 struct ReadonlyFontRegistrationTests {
-    @Test(.timeLimit(.minutes(2)))
+    @Test(.timeLimit(.minutes(2)), .readerFontEnvironment)
     func readonlyFontProcessReplacementChangesRealFontWithoutChangingReaderSource() async throws {
         _ = NSApplication.shared
         let name = "CairnReadonlyV06Synthetic-Regular"
@@ -133,9 +135,20 @@ struct ReadonlyFontRegistrationTests {
         evidence["sourceUnchanged"] = view.string == source
         evidence["selectionUnchanged"] = view.selectedRanges == selectedRanges && view.selectionAffinity == affinity
         try readonlyWriteFontEvidence(evidence, name: "process-registration")
+        // Unregister here rather than in the deferred cleanup: the refresh it
+        // triggers is asynchronous and must land while this test still holds
+        // the font-environment lock, not inside the next holder.
+        let cleanupRevision = ReaderFontResolver.shared.fontEnvironmentRevision
+        if readonlyUnregisterFont(b).success {
+            registeredB = false
+            #expect(await readonlyFontWait { ReaderFontResolver.shared.fontEnvironmentRevision > cleanupRevision },
+                    "Unregistering the fixture font did not refresh the font environment")
+            // Each live AppDelegate queued its own refresh for that notification.
+            await Task.yield()
+        }
     }
 
-    @Test(.timeLimit(.minutes(1)))
+    @Test(.timeLimit(.minutes(1)), .readerFontEnvironment)
     func readonlyFontDistributedNotificationRoutesToAppDelegateWithoutInstallingFonts() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ReadonlyFontRouting-\(UUID().uuidString)")

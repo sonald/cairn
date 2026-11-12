@@ -50,7 +50,7 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 
 无参数显示帮助并退出，不再隐式全量运行。域选择只缩小执行范围；SwiftPM 发现测试时仍可能编译其他测试目标。
 
-`ci.sh` 从当前构建发现用例，再核对每批完整成功摘要的数量。零测试、命令失败、缺少成功摘要、进程提前退出导致少测都会失败。无需每次新增或删除用例维护固定总数。依赖独立 AppKit 进程的鼠标、字体及窗口测试，以及读取进程级工作计数器的 ownership 测量，均隔离执行。本地并行运行时，刷新进程级字体环境（`ReaderFontResolver.shared.refresh()`）的测试，与经注入验证会被刷新打断的锚点校正测试，都标记 `.readerFontEnvironment` 互斥执行：刷新后已挂载的 Reader 会按设计丢弃排队校正，直到宿主重新应用设置，而测试不会重新应用。并发搜索的同步 gate 场景放在串行 suite 中，但仍和其余引擎检查处于同一批；等待上限不能超过用于证明行为的阻塞或计时器间隔，以免等待放宽后掩盖回归。
+`ci.sh` 从当前构建发现用例，再核对每批完整成功摘要的数量。零测试、命令失败、缺少成功摘要、进程提前退出导致少测都会失败。无需每次新增或删除用例维护固定总数。依赖独立 AppKit 进程的鼠标、字体及窗口测试，以及读取进程级工作计数器的 ownership 测量，均隔离执行。本地并行运行时，刷新进程级字体环境（`ReaderFontResolver.shared.refresh()`）的测试，与经注入验证会被刷新打断的锚点校正测试，都标记 `.readerFontEnvironment` 互斥执行：刷新后已挂载的 Reader 会按设计丢弃排队校正，直到宿主重新应用设置，而测试不会重新应用。App 测试目标有同名的一把锁（每个测试目标是独立进程，两把锁互不相干）：刷新或注册字体、改写 `UserDefaults.standard` 参数域字体偏好的测试，与实测会因此多测量一次的两个阅读集测试持有它；字体注册测试在放锁前注销字体并等刷新落地，因为注销触发的刷新是异步的。并发搜索的同步 gate 场景放在串行 suite 中，但仍和其余引擎检查处于同一批；等待上限不能超过用于证明行为的阻塞或计时器间隔，以免等待放宽后掩盖回归。
 
 测试进程（`swiftpm-testing-helper`、`xctest`）不写用户的索引缓存：未设置 `CODEINSIGHT_INDEX_CACHE_ROOT` 时，`IndexCache` 改用每个进程一个、退出时删除的临时目录；需要跨进程热缓存的 harness 和脚本显式设置该变量。直接 `open` 打包应用做原生验收时仍写 `~/Library/Application Support/CodeInsight/index-cache/`，需要隔离时同样设置该变量。测试和 self-test 的 `UserDefaults` suite 一律命名为 `NSTemporaryDirectory() + "<名字>-<UUID>"`：裸名字会在 `~/Library/Preferences` 留下 plist，`removePersistentDomain` 只清空内容不删文件；`ci.sh static` 拒绝字面量 suite 名。
 

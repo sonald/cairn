@@ -7,7 +7,7 @@ import Testing
 @testable import CodeInsightApp
 
 @MainActor
-@Test
+@Test(.readerFontEnvironment)
 func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() async throws {
     _ = NSApplication.shared
     let view = ReadingSetView()

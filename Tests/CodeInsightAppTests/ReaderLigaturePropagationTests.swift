@@ -8,7 +8,7 @@ import Testing
 @testable import CodeInsightAppModel
 
 @MainActor
-@Test(.timeLimit(.minutes(2)))
+@Test(.timeLimit(.minutes(2)), .readerFontEnvironment)
 func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() async throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("LigaturePropagation-\(UUID().uuidString)")
@@ -164,7 +164,7 @@ private func waitForLigatureSurface(_ condition: () -> Bool) async -> Bool {
 
 
 @MainActor
-@Test(.timeLimit(.minutes(2)))
+@Test(.timeLimit(.minutes(2)), .readerFontEnvironment)
 func appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettings() async throws {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("LigatureBroadcast-\(UUID().uuidString)")
