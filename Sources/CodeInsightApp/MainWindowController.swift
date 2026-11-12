@@ -4218,7 +4218,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// to the user's own clicks and moves (R4) and only remembers the
     /// position for a later switch.
     private func handleReaderCaretReport(offset: UInt32, from reader: ReaderViewController) {
-        guard reader === (focusedPane == .reference ? secondaryReaderController : readerController),
+        // The reference pane can go inactive (compare, focus preset) while
+        // still marked focused; the primary reader is the focused one then.
+        let onReference = focusedPane == .reference && isReferenceActive
+        guard reader === (onReference ? secondaryReaderController : readerController),
               let file = paneFile(for: reader),
               // A file still loading reports nothing usable for the new path.
               reader.displayedFile?.standardizedFileURL == file.standardizedFileURL
