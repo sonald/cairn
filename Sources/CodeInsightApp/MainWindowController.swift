@@ -4536,7 +4536,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 }
             }
         } else {
+            // A plain click reports no caret-follow event, so it is the
+            // lens caret here: the enclosing mode follows it at once, and a
+            // later switch to that mode replays it. It also supersedes a
+            // keyboard move still waiting out its debounce.
+            caretFollowTask?.cancel()
+            lastLensCaret = (offset, reader)
             model.contextWindow.tokenClicked(file: path, offset: offset)
+            replayCaretForLensTracking()
         }
     }
 

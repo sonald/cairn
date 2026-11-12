@@ -822,6 +822,46 @@ func lensSwitchToEnclosingShowsTheCurrentCaretsScope() async throws {
     #expect(model.contextWindow.activeEnclosingScope?.name == "main")
 }
 
+/// A plain reader click is a caret move for the enclosing-function lens.
+/// Clicks arrive as token clicks, not as caret-follow events, so the lens
+/// once ignored them and kept the earlier scope or the placeholder.
+@MainActor
+@Test
+func plainReaderClickMovesTheEnclosingLens() async throws {
+    _ = NSApplication.shared
+    let source = "pub fn target() {\n    let _ = 1;\n}\npub fn main() {\n    target();\n}\n"
+    let root = try mainWindowTemporaryProject(["src/main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    let main = root.appendingPathComponent("src/main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+    func offset(of needle: String) throws -> UInt32 {
+        let range = try #require(source.range(of: needle))
+        return UInt32(source.utf8.distance(from: source.utf8.startIndex, to: range.lowerBound))
+    }
+
+    // A click made while tracking symbols is the caret a later switch shows.
+    controller.selfTestReaderClick(offset: try offset(of: "target();"), commandClick: false)
+    controller.selfTestChooseLensTracking(.enclosing)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "main")
+
+    // A click in another function moves the lens there.
+    controller.selfTestReaderClick(offset: try offset(of: "let _"), commandClick: false)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "target")
+}
+
 @MainActor
 @Test
 func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
