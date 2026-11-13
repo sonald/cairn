@@ -799,6 +799,8 @@
 "docs.failed" = "Couldn’t load the documentation: %@";
 "docs.searching" = "Looking up %@ in Dash…";
 "docs.choose" = "Dash has several entries for %@. Choose one above";
+"docs.noSingleMatch" = "Dash has no single entry for %@. Choose one above";
+"docs.symbolDoc" = "Hover documentation";
 "docs.choose.placeholder" = "Choose a Result";
 "docs.results" = "Dash search results";
 "docs.open.in.dash" = "Open in Dash";

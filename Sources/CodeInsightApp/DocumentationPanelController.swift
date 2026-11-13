@@ -10,8 +10,10 @@ import WebKit
 /// Page scripts are off, nothing is stored, and a content rule list only lets
 /// loopback requests through.
 @MainActor
-final class DocumentationPanelController: NSViewController, WKNavigationDelegate {
+final class DocumentationPanelController: NSViewController, WKNavigationDelegate, NSTextViewDelegate {
     let model: DocumentationPanelModel
+    /// A link clicked in the symbol's own documentation.
+    var onOpenLink: ((URL) -> Void)?
     private let header = NSStackView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(labelWithString: "")
@@ -19,6 +21,12 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     private let openInDashButton = NSButton()
     private let backButton = NSButton()
     private let statusLabel = NSTextField(wrappingLabelWithString: "")
+    /// The symbol's own documentation, shown when Dash has no page for it.
+    private let docScrollView = NSScrollView()
+    private let docTextView = NSTextView(usingTextLayoutManager: false)
+    private var shownDoc: SymbolDoc?
+    /// Why the symbol's own documentation is shown instead of a page.
+    private var docReason: String?
     private var webView: WKWebView?
     private var theme = ReaderTheme(settings: ReaderSettings())
     /// The candidate the web view was last asked to load.
@@ -126,7 +134,25 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         header.wantsLayer = true
         statusLabel.alignment = .center
         statusLabel.font = .systemFont(ofSize: 12)
-        for view in [header, statusLabel] as [NSView] {
+        docTextView.isEditable = false
+        docTextView.isSelectable = true
+        docTextView.drawsBackground = false
+        docTextView.textContainerInset = .zero
+        docTextView.textContainer?.lineFragmentPadding = 0
+        docTextView.textContainer?.widthTracksTextView = true
+        docTextView.isVerticallyResizable = true
+        docTextView.isHorizontallyResizable = false
+        docTextView.autoresizingMask = [.width]
+        docTextView.linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        docTextView.delegate = self
+        docTextView.setAccessibilityLabel(localized("docs.symbolDoc"))
+        docScrollView.drawsBackground = false
+        docScrollView.hasVerticalScroller = true
+        docScrollView.autohidesScrollers = true
+        docScrollView.borderType = .noBorder
+        docScrollView.documentView = docTextView
+        docScrollView.isHidden = true
+        for view in [header, statusLabel, docScrollView] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(view)
         }
@@ -140,6 +166,10 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
             statusLabel.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
             statusLabel.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
             statusLabel.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            docScrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            docScrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            docScrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            docScrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
         ])
         view = root
         observeModel()
@@ -159,6 +189,8 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
             string: "↗ " + localized("docs.open.in.dash"),
             attributes: [.foregroundColor: theme.accentColor, .font: NSFont.systemFont(ofSize: 11)]
         )
+        shownDoc = nil
+        render()
     }
 
     // MARK: - Rendering
@@ -189,17 +221,28 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
             status = localizedFormat("docs.searching", query)
         case let .candidates(all):
             candidates = all
-            status = localizedFormat("docs.choose", model.query)
+            status = localizedFormat(model.fallbackDoc == nil ? "docs.choose" : "docs.noSingleMatch", model.query)
         case let .showing(shown, all):
             candidate = shown
             candidates = all
         }
         if let candidate, candidate != loadedCandidate { load(candidate) }
         if candidate != nil, let loadProblem { status = loadProblem }
-        header.isHidden = candidates.isEmpty
+        let doc = model.fallbackDoc
+        if doc != shownDoc {
+            shownDoc = doc
+            docTextView.textStorage?.setAttributedString(
+                doc.map { SymbolDocCard.content(for: $0, theme: theme) } ?? NSAttributedString())
+            docTextView.selectedTextAttributes = [.backgroundColor: theme.chromeSelectionColor]
+            docTextView.scroll(.zero)
+        }
+        header.isHidden = candidates.isEmpty && doc == nil
+        // The reason Dash shows no page moves to the header's second line.
+        docReason = doc == nil ? nil : status
         renderHeader(candidate: candidate, candidates: candidates)
         statusLabel.stringValue = status ?? ""
-        statusLabel.isHidden = status == nil
+        statusLabel.isHidden = status == nil || doc != nil
+        docScrollView.isHidden = doc == nil
         webView?.isHidden = status != nil || candidate == nil
     }
 
@@ -208,7 +251,8 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
         renderSubtitle()
         backButton.isHidden = candidate == nil
         openInDashButton.isHidden = !DashIntegration.isInstalled
-        candidatesButton.isHidden = candidates.count < 2
+        // One result is listed only while it is not the page shown.
+        candidatesButton.isHidden = candidates.count < (candidate == nil ? 1 : 2)
         shownCandidates = candidates
         // Menu items, not `addItem(withTitle:)`, which drops repeated titles.
         let menu = NSMenu()
@@ -227,6 +271,11 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
     /// The entry's docset, or the page title once the user followed a link
     /// to another page inside the panel.
     private func renderSubtitle() {
+        if let docReason {
+            subtitleLabel.isHidden = false
+            subtitleLabel.stringValue = "\(localized("docs.symbolDoc")) · \(docReason)"
+            return
+        }
         guard let candidate = loadedCandidate else {
             subtitleLabel.isHidden = true
             return
@@ -268,6 +317,12 @@ final class DocumentationPanelController: NSViewController, WKNavigationDelegate
 
     @objc private func goBack(_ sender: Any?) {
         webView?.goBack()
+    }
+
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        guard let url = (link as? URL) ?? (link as? String).flatMap(URL.init(string:)) else { return false }
+        onOpenLink?(url)
+        return true
     }
 
     // MARK: - Loading

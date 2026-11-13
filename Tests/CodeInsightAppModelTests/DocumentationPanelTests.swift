@@ -1,5 +1,6 @@
 import CodeInsightCore
 @testable import CodeInsightAppModel
+import CodeInsightReaderCore
 import Foundation
 import Testing
 
@@ -252,6 +253,35 @@ func documentationPanelModelLoadsSingleAndExactResultsAndWaitsOnAmbiguousOnes() 
     #expect(await settled(model) == .showing(ranked[0], ranked))
     #expect(ranked[0].docset == "Python")
     #expect(await source.languages.last == .python)
+}
+
+@MainActor
+@Test
+func documentationPanelModelFallsBackToTheSymbolDocWithoutAnExactEntry() async {
+    let doc = SymbolDoc(signature: "def create_deep_agent()", markdown: "Create a deep agent.", source: .exact)
+    // Recorded 2026-11-13: Dash's only hit for `FilesystemPermission`.
+    let fuzzy = candidate("permissions", "Function", "C++", "\(dash)/flkkgwpw/en.cppreference.com/cpp/filesystem/permissions.html", platform: "cpp")
+    let model = DocumentationPanelModel(source: StubSource(results: [
+        "FilesystemPermission": [fuzzy],
+        "threading": threadingResults,
+    ]))
+    model.show(query: "create_deep_agent", language: .python, symbolDoc: doc)
+    #expect(model.fallbackDoc == nil, "Nothing replaces the page while searching")
+    #expect(await settled(model) == .unavailable(.noResults))
+    #expect(model.fallbackDoc == doc)
+    model.show(query: "FilesystemPermission", language: .python, symbolDoc: doc)
+    #expect(await settled(model) == .candidates([fuzzy]), "A lone fuzzy hit does not replace the symbol's own doc")
+    #expect(model.fallbackDoc == doc)
+    model.select(fuzzy)
+    #expect(model.fallbackDoc == nil)
+    model.show(query: "threading", language: .python, symbolDoc: doc)
+    #expect(await settled(model) == .showing(threadingResults[0], threadingResults))
+    #expect(model.fallbackDoc == nil, "An exact entry wins")
+    model.show(query: "FilesystemPermission", language: .python)
+    #expect(await settled(model) == .showing(fuzzy, [fuzzy]), "Without a symbol doc the lone hit still loads")
+    model.show(query: "nothing", symbolDoc: SymbolDoc(source: .syntactic, notes: [.exactPending]))
+    #expect(await settled(model) == .unavailable(.noResults))
+    #expect(model.fallbackDoc == nil, "A doc with no content is not a fallback")
 }
 
 @MainActor

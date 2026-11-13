@@ -169,6 +169,9 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         let size = layoutSize()
         panel.setFrame(placement(for: size, anchor: anchor, within: parent.frame), display: true)
         layoutSubviews(size: size)
+        // Only new content starts at the top; a relayout (the footer's link
+        // preview) keeps what the reader scrolled to.
+        if !unchangedContent { textView.scroll(.zero) }
         if self.parent !== parent {
             self.parent?.removeChildWindow(panel)
             parent.addChildWindow(panel, ordered: .above)
@@ -224,7 +227,8 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         applyFooter(notes)
     }
 
-    static func content(
+    /// The card's text: location, signature band, links and Markdown body.
+    public static func content(
         for doc: SymbolDoc,
         theme: ReaderTheme,
         externalLinks: [(title: String, url: URL)] = []
@@ -457,7 +461,6 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
             height: max(textView.frame.height, scrollView.contentSize.height)
         )
         textView.sizeToFit()
-        textView.scroll(.zero)
     }
 
     /// Short content shrinks the card; long lines wrap at the maximum width.

@@ -591,6 +591,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.model.symbolHover.dismiss()
         }
         symbolDocCard.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
+        docsController.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
             primaryOutline = facets
@@ -3942,7 +3943,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func showInDocsPanel(identifier: String, in document: ReaderDocument, byteOffset: UInt32) {
         let query = dashQuery(identifier: identifier, in: document, byteOffset: byteOffset)
         revealDocsPanel()
-        docsController.model.show(query: query, language: document.languageMode.language)
+        docsController.model.show(
+            query: query,
+            language: document.languageMode.language,
+            symbolDoc: shownSymbolDoc(in: document, byteOffset: byteOffset)
+        )
     }
 
     /// Shows the docs panel. The first time it also records the 40% a
@@ -3974,16 +3979,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// exact result is reused when it is showing the identifier; the receiver
     /// before a `.` is read from the document.
     private func dashQuery(identifier: String, in document: ReaderDocument, byteOffset: UInt32) -> String {
-        var doc: SymbolDoc?
-        if case let .showing(token, shown) = model.symbolHover.phase,
-           token.contentID == document.contentID,
-           token.lowerBound <= byteOffset, byteOffset < token.upperBound {
-            doc = shown
-        }
-        return DashIntegration.query(
-            identifier: identifier, doc: doc, language: document.languageMode.language,
+        DashIntegration.query(
+            identifier: identifier,
+            doc: shownSymbolDoc(in: document, byteOffset: byteOffset),
+            language: document.languageMode.language,
             receiver: DashIntegration.receiver(in: document.bytes, identifierAt: byteOffset)
         )
+    }
+
+    /// The hover card's documentation while it shows the identifier at
+    /// `byteOffset`.
+    private func shownSymbolDoc(in document: ReaderDocument, byteOffset: UInt32) -> SymbolDoc? {
+        guard case let .showing(token, shown) = model.symbolHover.phase,
+              token.contentID == document.contentID,
+              token.lowerBound <= byteOffset, byteOffset < token.upperBound
+        else { return nil }
+        return shown
     }
 
     /// Languages with a hover docs layer (hover docs plans Q16, P1);

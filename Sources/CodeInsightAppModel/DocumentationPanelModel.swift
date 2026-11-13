@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightReaderCore
 import Foundation
 import Observation
 
@@ -31,6 +32,18 @@ public final class DocumentationPanelModel {
     /// The text of the latest search.
     public private(set) var query = ""
 
+    /// The symbol's own documentation (the hover card's), kept for the
+    /// latest search.
+    private var symbolDoc: SymbolDoc?
+    /// What to show in place of a page: the symbol's own documentation,
+    /// whenever the source has no page loaded for the query.
+    public var fallbackDoc: SymbolDoc? {
+        switch state {
+        case .unavailable, .candidates: symbolDoc
+        case .idle, .searching, .showing: nil
+        }
+    }
+
     @ObservationIgnored private let source: any DocumentationSource
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var generation: UInt64 = 0
@@ -40,15 +53,18 @@ public final class DocumentationPanelModel {
     }
 
     /// `language` is the reading file's; results for it rank first.
-    public func show(query: String, language: LanguageID? = nil) {
+    /// `symbolDoc` is the hover card's documentation for the symbol, if known.
+    public func show(query: String, language: LanguageID? = nil, symbolDoc: SymbolDoc? = nil) {
         task?.cancel()
         generation &+= 1
         let current = generation
         self.query = query
+        let symbolDoc = symbolDoc.flatMap { $0.isEmpty ? nil : $0 }
+        self.symbolDoc = symbolDoc
         state = .searching(query)
         let source = source
         task = Task { [weak self] in
-            let next = await Self.resolve(query, language: language, source: source)
+            let next = await Self.resolve(query, language: language, source: source, hasSymbolDoc: symbolDoc != nil)
             guard let self, generation == current, !Task.isCancelled else { return }
             state = next
             task = nil
@@ -65,7 +81,12 @@ public final class DocumentationPanelModel {
         }
     }
 
-    private static func resolve(_ query: String, language: LanguageID?, source: any DocumentationSource) async -> State {
+    private static func resolve(
+        _ query: String,
+        language: LanguageID?,
+        source: any DocumentationSource,
+        hasSymbolDoc: Bool
+    ) async -> State {
         switch await source.availability() {
         case .notInstalled: return .unavailable(.notInstalled)
         case .notRunning: return .unavailable(.notRunning)
@@ -77,6 +98,12 @@ public final class DocumentationPanelModel {
             guard !candidates.isEmpty else { return .unavailable(.noResults) }
             let index = autoLoadIndex(query: query, candidates: candidates) {
                 source.isExactMatch($0, for: query)
+            }
+            // A lone fuzzy hit (a C++ `permissions` for `FilesystemPermission`)
+            // is loaded for want of anything better; the symbol's own
+            // documentation is better.
+            if hasSymbolDoc, let index, !source.isExactMatch(candidates[index], for: query) {
+                return .candidates(candidates)
             }
             return index.map { .showing(candidates[$0], candidates) } ?? .candidates(candidates)
         } catch DocumentationSourceError.trialExpired {

@@ -78,6 +78,15 @@ final class ClickTextView: NSTextView, NSTextViewDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
+        // The tracking area still reports moves under a window that covers
+        // this one (the documentation card); text hidden there is not hovered.
+        if let window, NSWindow.windowNumber(
+            at: window.convertPoint(toScreen: event.locationInWindow),
+            belowWindowWithWindowNumber: 0
+        ) != window.windowNumber {
+            hoverHandler?(nil)
+            return
+        }
         hoverHandler?(convert(event.locationInWindow, from: nil))
     }
 

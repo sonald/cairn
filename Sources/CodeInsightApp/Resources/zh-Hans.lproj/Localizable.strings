@@ -799,6 +799,8 @@
 "docs.failed" = "无法加载文档：%@";
 "docs.searching" = "正在 Dash 中查找 %@…";
 "docs.choose" = "Dash 里有多个 %@，在上方选择一个";
+"docs.noSingleMatch" = "Dash 里没有唯一匹配 %@ 的条目，可在上方选择";
+"docs.symbolDoc" = "悬浮文档";
 "docs.choose.placeholder" = "选择一个结果";
 "docs.results" = "Dash 搜索结果";
 "docs.open.in.dash" = "在 Dash 中打开";
