@@ -14,7 +14,7 @@
 - Optional rust-analyzer, Pyright, typescript-language-server, and gopls analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
 - Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes plus bundled and user-supplied base16 themes, and English/Simplified Chinese UI.
-- Read-only Markdown, Jupyter notebook, restricted HTML, image, PDF, and UTF-8 text previews; configuration, scripts, and unanalyzed languages such as C/C++, Java, Go, and JS are syntax-colored.
+- Read-only Markdown, Jupyter notebook, restricted HTML, image, PDF, and UTF-8 text previews; configuration, scripts, and unanalyzed languages such as C/C++, Java, and JS are syntax-colored.
 
 Exact analysis of a past commit runs in a checkout directory Cairn owns (one per window, deleted when the window closes) and borrows the workspace's `node_modules` and virtual environment; language servers follow commit switches without restarting when nothing but the commit and configuration content changed.
 
@@ -48,7 +48,7 @@ Packaging defaults to ad-hoc signing. Developer ID signing, notarization, and st
 
 These are default shortcuts; Settings → Keybindings shows effective bindings. A single file click opens a reusable preview tab; double-click or Keep Open retains it. Fonts, ligatures, and folding change presentation, while copying preserves the original source.
 
-Source indexing currently classifies `.rs`, `.py`, `.ts`, and `.tsx`; JavaScript/JSX and declaration-only or alternate extensions are not full source-analysis modes; dependency `.d.ts` and `.pyi` files open read-only with highlighting as jump targets but are never indexed. Syntax-colored previews fold by syntax, section, or indentation, and Markdown previews fold by heading; HTML and plain-text documents do not fold. Non-source previews do not offer relations, bookmarks, comparison, or search controls. Exact results depend on provider capabilities and the local environment; “Verified” is not a claim of complete runtime knowledge.
+Source indexing currently classifies `.rs`, `.py`, `.ts`, `.tsx`, and `.go`; JavaScript/JSX and declaration-only or alternate extensions are not full source-analysis modes; dependency `.d.ts` and `.pyi` files open read-only with highlighting as jump targets but are never indexed. Syntax-colored previews fold by syntax, section, or indentation, and Markdown previews fold by heading; HTML and plain-text documents do not fold. Non-source previews do not offer relations, bookmarks, comparison, or search controls. Exact results depend on provider capabilities and the local environment; “Verified” is not a claim of complete runtime knowledge.
 
 Use `⇧⌘F` for the project search panel: `lock await same:fn`, `lock OR mutex`, `-path:tests/`, and `in:code` combine text, paths, and syntax regions. Query history restores with the project; `⌥⌘G` / `⇧⌥⌘G` browse results. See [query behavior and current validation limits](docs/product.md#搜索选项).
 

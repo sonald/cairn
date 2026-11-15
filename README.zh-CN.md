@@ -14,7 +14,7 @@
 - 可选 rust-analyzer、Pyright、typescript-language-server、gopls 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
 - 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题及随附与自选的 base16 主题、中英文界面。
-- 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览；配置、脚本，以及 C/C++、Java、Go、JS 等未分析语言按语法着色。
+- 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览；配置、脚本，以及 C/C++、Java、JS 等未分析语言按语法着色。
 
 历史 commit 的精确分析在 Cairn 自有的检出目录中进行（每个窗口一份，关窗即删），并借用工作区的 `node_modules` 与虚拟环境；切换 commit 时若只有 commit 与配置内容变化，语言服务器原地跟随而不重启。
 
@@ -48,7 +48,7 @@ bash scripts/make-app.sh
 
 上述均为默认快捷键，设置 → 快捷键显示当前绑定。单击文件打开可复用的预览标签，双击或 Keep Open 将其保留。字体、连字和折叠只改变显示，复制仍保留原始源码。
 
-源码索引当前识别 `.rs`、`.py`、`.ts`、`.tsx`，JS/JSX、声明文件及其他变体扩展名不等于完整源码分析模式；依赖中的 `.d.ts`、`.pyi` 作为跳转目标只读打开并高亮，但不建索引。着色预览按语法、节或缩进折叠，Markdown 预览按标题折叠；HTML 和纯文本文档不折叠。非源码预览不提供关系、书签、比较和搜索控件。Exact 结果依赖 provider 能力与本地环境，“已验证”不代表掌握全部运行时行为。
+源码索引当前识别 `.rs`、`.py`、`.ts`、`.tsx`、`.go`，JS/JSX、声明文件及其他变体扩展名不等于完整源码分析模式；依赖中的 `.d.ts`、`.pyi` 作为跳转目标只读打开并高亮，但不建索引。着色预览按语法、节或缩进折叠，Markdown 预览按标题折叠；HTML 和纯文本文档不折叠。非源码预览不提供关系、书签、比较和搜索控件。Exact 结果依赖 provider 能力与本地环境，“已验证”不代表掌握全部运行时行为。
 
 `⇧⌘F` 打开项目搜索面板：`lock await same:fn`、`lock OR mutex`、`-path:tests/`、`in:code` 可组合文本、路径和语法区域。查询历史随项目恢复，`⌥⌘G` / `⇧⌥⌘G` 逐条浏览结果。详见[查询行为与当前验收限制](docs/product.md#搜索选项)。
 
