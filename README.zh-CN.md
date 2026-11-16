@@ -14,7 +14,7 @@
 - 可选 rust-analyzer、Pyright、typescript-language-server、gopls 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
 - 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题及随附与自选的 base16 主题、中英文界面。
-- 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览；配置、脚本，以及 C/C++、Java、JS 等未分析语言按语法着色。
+- 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览。Markdown 保留内嵌 HTML 的标题、段落和表格，图片等比缩放，远程图片显示替代文本。配置、脚本，以及 C/C++、Java、JS 等未分析语言按语法着色。
 
 历史 commit 的精确分析在 Cairn 自有的检出目录中进行（每个窗口一份，关窗即删），并借用工作区的 `node_modules` 与虚拟环境；切换 commit 时若只有 commit 与配置内容变化，语言服务器原地跟随而不重启。
 

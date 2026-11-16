@@ -1,5 +1,6 @@
 @preconcurrency import AppKit
 import CodeInsightReaderCore
+@preconcurrency import libxml2
 
 /// Colors code-like excerpts with the reader's syntax palette.
 @MainActor
@@ -498,7 +499,7 @@ package struct MarkdownPreviewRenderer {
         let isLastInContainer = next.map { !sharesContainer(block, $0) } ?? true
 
         guard let leaf = block.leaf else {
-            renderHTMLBlock(block, markdown: markdown, quoteBlocks: quoteBlocks, into: output)
+            renderHTMLBlock(block, markdown: markdown, quoteBlocks: quoteBlocks, state: &state, into: output)
             return
         }
         switch leaf {
@@ -588,27 +589,11 @@ package struct MarkdownPreviewRenderer {
         let style = paragraphStyle(blocks: quoteBlocks, spacing: body * 0.8)
         style.lineHeightMultiple = 1.18
 
+        var headingLevel: Int?
         if case .header(let level) = leaf {
-            let scale: [CGFloat] = compactHeadings
-                ? [1.1, 1.05, 1.0, 1.0, 1.0, 0.92]
-                : [1.9, 1.5, 1.25, 1.08, 1.0, 0.92]
-            baseFont = NSFont.systemFont(ofSize: body * scale[min(max(level, 1), 6) - 1], weight: .semibold)
+            headingLevel = level
+            baseFont = formatHeading(level, style: style, first: output.length == 0)
             if level >= 6 { color = theme.chromeSecondaryColor }
-            style.lineHeightMultiple = 1.05
-            if compactHeadings {
-                style.paragraphSpacingBefore = output.length == 0 ? 0 : body * 0.5
-                style.paragraphSpacing = body * 0.3
-            } else {
-                style.paragraphSpacingBefore = output.length == 0 ? 0 : body * (level <= 2 ? 1.3 : 0.9)
-                style.paragraphSpacing = body * (level <= 2 ? 0.7 : 0.45)
-            }
-            if level <= 2, !compactHeadings {
-                let rule = Self.fullWidthBlock()
-                rule.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)
-                rule.setBorderColor(theme.chromeDividerColor, for: .maxY)
-                rule.setWidth(body * 0.3, type: .absoluteValueType, for: .padding, edge: .maxY)
-                style.textBlocks = quoteBlocks + [rule]
-            }
         }
 
         // Lists: hanging indent with a tab after the marker.
@@ -663,22 +648,56 @@ package struct MarkdownPreviewRenderer {
             var text = String(markdown[run.range].characters)
             if index == 0, taskState != nil { text = String(text.dropFirst(4)) }
             appendInline(text, run: run, baseFont: baseFont, color: color,
-                         quoteDepth: quoteBlocks.count, into: paragraph)
+                         imageInset: max(style.headIndent, style.firstLineHeadIndent), into: paragraph)
         }
         if taskState == true {
             paragraph.addAttribute(.foregroundColor, value: theme.chromeSecondaryColor,
                                    range: NSRange(location: 2, length: max(0, paragraph.length - 2)))
         }
-        paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
-        if case .header(let level) = leaf {
-            paragraph.addAttribute(.markdownHeadingLevel, value: level, range: NSRange(location: 0, length: paragraph.length))
+        appendParagraph(paragraph, style: style, font: baseFont, headingLevel: headingLevel, state: &state, into: output)
+    }
+
+    private func formatHeading(_ level: Int, style: NSMutableParagraphStyle, first: Bool) -> NSFont {
+        let scale: [CGFloat] = compactHeadings
+            ? [1.1, 1.05, 1.0, 1.0, 0.92, 0.9]
+            : [1.9, 1.5, 1.25, 1.08, 1.0, 0.92]
+        style.lineHeightMultiple = 1.05
+        if compactHeadings {
+            style.paragraphSpacingBefore = first ? 0 : body * 0.5
+            style.paragraphSpacing = body * 0.3
+        } else {
+            style.paragraphSpacingBefore = first ? 0 : body * (level <= 2 ? 1.3 : 0.9)
+            style.paragraphSpacing = body * (level <= 2 ? 0.7 : 0.45)
+            if level <= 2, !style.textBlocks.contains(where: { $0 is NSTextTableBlock }) {
+                let rule = Self.fullWidthBlock()
+                rule.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)
+                rule.setBorderColor(theme.chromeDividerColor, for: .maxY)
+                rule.setWidth(body * 0.3, type: .absoluteValueType, for: .padding, edge: .maxY)
+                style.textBlocks += [rule]
+            }
+        }
+        return NSFont.systemFont(ofSize: body * scale[min(max(level, 1), 6) - 1], weight: .semibold)
+    }
+
+    private func appendParagraph(
+        _ paragraph: NSMutableAttributedString,
+        style: NSParagraphStyle,
+        font: NSFont,
+        headingLevel: Int? = nil,
+        state: inout RenderState,
+        into output: NSMutableAttributedString
+    ) {
+        let range = NSRange(location: 0, length: paragraph.length)
+        paragraph.addAttribute(.paragraphStyle, value: style, range: range)
+        if let headingLevel {
+            paragraph.addAttribute(.markdownHeadingLevel, value: headingLevel, range: range)
             var slug = Self.headingSlug(paragraph.string)
             let count = state.anchorCounts[slug, default: 0]
             state.anchorCounts[slug] = count + 1
             if count > 0 { slug += "-\(count)" }
-            paragraph.addAttribute(.markdownAnchor, value: slug, range: NSRange(location: 0, length: paragraph.length))
+            paragraph.addAttribute(.markdownAnchor, value: slug, range: range)
         }
-        paragraph.append(NSAttributedString(string: "\n", attributes: [.paragraphStyle: style, .font: baseFont]))
+        paragraph.append(NSAttributedString(string: "\n", attributes: [.paragraphStyle: style, .font: font]))
         output.append(paragraph)
     }
 
@@ -722,7 +741,7 @@ package struct MarkdownPreviewRenderer {
         run: AttributedString.Runs.Run?,
         baseFont: NSFont,
         color: NSColor,
-        quoteDepth: Int = 0,
+        imageInset: CGFloat = 0,
         into paragraph: NSMutableAttributedString
     ) {
         let inline = run?.inlinePresentationIntent ?? []
@@ -735,8 +754,7 @@ package struct MarkdownPreviewRenderer {
             text = "\u{2028}"
         }
         if let imageURL = run?.imageURL {
-            // Each quote level indents by its 3 pt bar and 14 pt padding.
-            if let attachment = imageAttachment(imageURL, width: nil, inset: CGFloat(quoteDepth) * 17) {
+            if let attachment = imageAttachment(imageURL, width: nil, inset: imageInset) {
                 paragraph.append(NSAttributedString(attachment: attachment))
                 return
             }
@@ -836,23 +854,10 @@ package struct MarkdownPreviewRenderer {
         if let existing = state.tables[tableIdentity] {
             table = existing
         } else {
-            table = NSTextTable()
-            table.setValue(100, type: .percentageValueType, for: .width)
-            table.numberOfColumns = max(1, columns.count)
-            table.layoutAlgorithm = .automaticLayoutAlgorithm
-            table.collapsesBorders = true
-            table.hidesEmptyCells = false
-            table.setWidth(body * 0.9, type: .absoluteValueType, for: .margin, edge: .maxY)
+            table = makeTable(columns: max(1, columns.count), layout: .automaticLayoutAlgorithm)
             state.tables[tableIdentity] = table
         }
-        let cell = NSTextTableBlock(table: table, startingRow: row, rowSpan: 1, startingColumn: column, columnSpan: 1)
-        cell.setWidth(1, type: .absoluteValueType, for: .border)
-        cell.setBorderColor(theme.chromeDividerColor)
-        cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
-        cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
-        cell.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
-        cell.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX)
-        if header { cell.backgroundColor = theme.chromeColor }
+        let cell = makeCell(in: table, row: row, column: column, header: header)
         let style = paragraphStyle(blocks: quoteBlocks + [cell], spacing: 0)
         if column < columns.count {
             switch columns[column].alignment {
@@ -874,111 +879,290 @@ package struct MarkdownPreviewRenderer {
         output.append(paragraph)
     }
 
-    // MARK: HTML blocks and images
+    private func makeTable(columns: Int, layout: NSTextTable.LayoutAlgorithm) -> NSTextTable {
+        let table = NSTextTable()
+        table.setValue(100, type: .percentageValueType, for: .width)
+        table.numberOfColumns = columns
+        table.layoutAlgorithm = layout
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        table.setWidth(body * 0.9, type: .absoluteValueType, for: .margin, edge: .maxY)
+        return table
+    }
 
-    /// README-style HTML (centered logos, badges, headings) renders as its
-    /// text and local images; scripts and remote resources never load.
+    private func makeCell(
+        in table: NSTextTable, row: Int, column: Int, rows: Int = 1, columns: Int = 1, header: Bool
+    ) -> NSTextTableBlock {
+        let cell = NSTextTableBlock(table: table, startingRow: row, rowSpan: rows,
+                                    startingColumn: column, columnSpan: columns)
+        cell.setWidth(1, type: .absoluteValueType, for: .border)
+        cell.setBorderColor(theme.chromeDividerColor)
+        cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .minY)
+        cell.setWidth(6, type: .absoluteValueType, for: .padding, edge: .maxY)
+        cell.setWidth(12, type: .absoluteValueType, for: .padding, edge: .minX)
+        cell.setWidth(12, type: .absoluteValueType, for: .padding, edge: .maxX)
+        if header { cell.backgroundColor = theme.chromeColor }
+        return cell
+    }
+
+    // MARK: HTML blocks
+
+    private typealias HTMLNode = UnsafeMutablePointer<xmlNode>
+
     private func renderHTMLBlock(
         _ block: Block,
         markdown: AttributedString,
         quoteBlocks: [NSTextBlock],
+        state: inout RenderState,
         into output: NSMutableAttributedString
     ) {
         let html = block.runs.map { String(markdown[$0.range].characters) }.joined()
-        let lower = html.lowercased()
-        if lower.hasPrefix("<!--") { return }
-        var headingLevel: Int?
-        for level in 1...6 where lower.contains("<h\(level)") {
-            headingLevel = level
-            break
-        }
-        let style = paragraphStyle(blocks: quoteBlocks, spacing: body * 0.8)
-        if lower.contains("align=\"center\"") || lower.contains("align=center") {
-            style.alignment = .center
-        }
-        let font = headingLevel.map {
-            NSFont.systemFont(ofSize: body * [1.9, 1.5, 1.25, 1.08, 1.0, 0.92][$0 - 1], weight: .semibold)
-        } ?? NSFont.systemFont(ofSize: body)
-        let paragraph = NSMutableAttributedString()
-        var remainder = Substring(html)
-        while let open = remainder.firstIndex(of: "<") {
-            appendHTMLText(remainder[..<open], font: font, into: paragraph)
-            guard let close = remainder[open...].firstIndex(of: ">") else {
-                remainder = remainder[open...]
-                break
-            }
-            let tag = remainder[open...close]
-            let tagLower = tag.lowercased()
-            if tagLower.hasPrefix("<img"), let src = Self.attribute("src", in: tag) {
-                let width = Self.attribute("width", in: tag).flatMap { Double($0) }.map { CGFloat($0) }
-                if let url = URL(string: src, relativeTo: baseURL),
-                   let attachment = imageAttachment(url, width: width)
-                {
-                    paragraph.append(NSAttributedString(attachment: attachment))
-                } else if let alt = Self.attribute("alt", in: tag), !alt.isEmpty {
-                    paragraph.append(NSAttributedString(string: alt, attributes: [
-                        .font: font, .foregroundColor: theme.chromeSecondaryColor,
-                    ]))
-                }
-            } else if tagLower.hasPrefix("<br") || tagLower.hasPrefix("</p") || tagLower.hasPrefix("</div") {
-                if paragraph.length > 0, !paragraph.string.hasSuffix("\u{2028}") {
-                    paragraph.append(NSAttributedString(string: "\u{2028}", attributes: [.font: font]))
-                }
-            }
-            remainder = remainder[remainder.index(after: close)...]
-        }
-        appendHTMLText(remainder, font: font, into: paragraph)
-        while paragraph.string.hasSuffix("\u{2028}") {
-            paragraph.deleteCharacters(in: NSRange(location: paragraph.length - 1, length: 1))
-        }
-        guard paragraph.length > 0 else { return }
-        if let headingLevel {
-            paragraph.addAttribute(.markdownHeadingLevel, value: headingLevel,
-                                   range: NSRange(location: 0, length: paragraph.length))
-        }
-        paragraph.append(NSAttributedString(string: "\n", attributes: [.font: font]))
-        paragraph.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paragraph.length))
-        output.append(paragraph)
+        renderHTMLFragment(html, blocks: quoteBlocks, state: &state, into: output)
     }
 
-    private func appendHTMLText(_ text: Substring, font: NSFont, into paragraph: NSMutableAttributedString) {
-        let collapsed = text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-        guard !collapsed.isEmpty else {
-            if !text.isEmpty, paragraph.length > 0, !paragraph.string.hasSuffix(" ") {
-                paragraph.append(NSAttributedString(string: " ", attributes: [.font: font]))
+    private func renderHTMLFragment(
+        _ html: String, blocks: [NSTextBlock], state: inout RenderState, into output: NSMutableAttributedString
+    ) {
+        // Parse inert HTML with the OS parser. Only the native text and image paths below render it.
+        let options = HTML_PARSE_NONET.rawValue | HTML_PARSE_NOERROR.rawValue
+            | HTML_PARSE_NOWARNING.rawValue | HTML_PARSE_NODEFDTD.rawValue
+        guard let length = Int32(exactly: html.utf8.count),
+              let document = html.withCString({ htmlReadMemory($0, length, nil, "UTF-8", Int32(options)) })
+        else { return }
+        defer { xmlFreeDoc(document) }
+        guard let root = xmlDocGetRootElement(document),
+              let body = Self.htmlChildren(root).first(where: { Self.htmlName($0) == "body" })
+        else { return }
+        renderHTMLChildren(body, blocks: blocks, alignment: .natural, state: &state, into: output)
+    }
+
+    private func renderHTMLChildren(
+        _ node: HTMLNode,
+        blocks: [NSTextBlock],
+        alignment: NSTextAlignment,
+        state: inout RenderState,
+        into output: NSMutableAttributedString
+    ) {
+        let name = Self.htmlName(node)
+        let headingLevel = name.count == 2 && name.hasPrefix("h")
+            ? name.last?.wholeNumberValue.flatMap { (1...6).contains($0) ? $0 : nil } : nil
+        let alignment = Self.htmlAlignment(node) ?? alignment
+        let inCell = blocks.last is NSTextTableBlock
+        let style = paragraphStyle(blocks: blocks, spacing: body * (inCell ? 0.4 : 0.8))
+        style.alignment = alignment
+        style.lineHeightMultiple = 1.18
+        let font: NSFont
+        if let headingLevel {
+            font = formatHeading(headingLevel, style: style, first: output.length == 0)
+        } else {
+            font = NSFont.systemFont(ofSize: body, weight: name == "th" ? .semibold : .regular)
+        }
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: theme.foregroundColor]
+        let paragraph = NSMutableAttributedString()
+
+        func flush() {
+            while paragraph.length > 0,
+                  [0x20, 0x2028].contains(paragraph.mutableString.character(at: paragraph.length - 1)) {
+                paragraph.deleteCharacters(in: NSRange(location: paragraph.length - 1, length: 1))
             }
+            guard paragraph.length > 0 else { return }
+            appendParagraph(paragraph, style: style, font: font, headingLevel: headingLevel, state: &state, into: output)
+            paragraph.deleteCharacters(in: NSRange(location: 0, length: paragraph.length))
+        }
+
+        for child in Self.htmlChildren(node) {
+            let tag = Self.htmlName(child)
+            switch tag {
+            case "table":
+                flush()
+                renderHTMLTable(child, blocks: blocks, alignment: alignment, state: &state, into: output)
+            case "p", "h1", "h2", "h3", "h4", "h5", "h6", "div", "center", "section", "article",
+                 "figure", "figcaption", "blockquote", "details", "summary", "ul", "ol", "li", "pre":
+                flush()
+                renderHTMLChildren(child, blocks: blocks, alignment: alignment, state: &state, into: output)
+            default:
+                appendHTMLInline(child, attributes: attributes, into: paragraph)
+            }
+        }
+        flush()
+    }
+
+    private func renderHTMLTable(
+        _ node: HTMLNode,
+        blocks: [NSTextBlock],
+        alignment: NSTextAlignment,
+        state: inout RenderState,
+        into output: NSMutableAttributedString
+    ) {
+        let rows = Self.htmlChildren(node).flatMap { child -> [HTMLNode] in
+            switch Self.htmlName(child) {
+            case "tr": [child]
+            case "thead", "tbody", "tfoot": Self.htmlChildren(child).filter { Self.htmlName($0) == "tr" }
+            default: []
+            }
+        }
+        let alignment = Self.htmlAlignment(node) ?? alignment
+        if let caption = Self.htmlChildren(node).first(where: { Self.htmlName($0) == "caption" }) {
+            renderHTMLChildren(caption, blocks: blocks, alignment: alignment, state: &state, into: output)
+        }
+        var occupiedThrough: [Int: Int] = [:]
+        var cells: [(node: HTMLNode, row: Int, column: Int, rows: Int, columns: Int)] = []
+        var columnCount = 0
+        for (row, rowNode) in rows.enumerated() {
+            var column = 0
+            for cell in Self.htmlChildren(rowNode) where ["td", "th"].contains(Self.htmlName(cell)) {
+                let rowspan = min(rows.count - row, max(1, Int(Self.htmlAttribute("rowspan", cell) ?? "") ?? 1))
+                let colspan = min(1000, max(1, Int(Self.htmlAttribute("colspan", cell) ?? "") ?? 1))
+                while let occupied = (column..<(column + colspan)).first(where: { occupiedThrough[$0, default: 0] > row }) {
+                    column = occupied + 1
+                }
+                cells.append((cell, row, column, rowspan, colspan))
+                if rowspan > 1 {
+                    for index in column..<(column + colspan) { occupiedThrough[index] = row + rowspan }
+                }
+                column += colspan
+                columnCount = max(columnCount, column)
+            }
+        }
+        guard columnCount > 0 else { return }
+        let table = makeTable(columns: columnCount, layout: .fixedLayoutAlgorithm)
+        for info in cells {
+            let header = Self.htmlName(info.node) == "th"
+            let cell = makeCell(in: table, row: info.row, column: info.column,
+                                rows: info.rows, columns: info.columns, header: header)
+            cell.verticalAlignment = .middleAlignment
+            if let percentage = Self.htmlPercentage(Self.htmlAttribute("width", info.node)) {
+                cell.setValue(percentage, type: .percentageValueType, for: .width)
+            }
+            let start = output.length
+            let cellAlignment = Self.htmlAlignment(rows[info.row]) ?? (header ? .center : alignment)
+            let cellBlocks = blocks + [cell]
+            renderHTMLChildren(info.node, blocks: cellBlocks, alignment: cellAlignment, state: &state, into: output)
+            if output.length == start {
+                appendParagraph(NSMutableAttributedString(string: "\u{00A0}"),
+                                style: paragraphStyle(blocks: cellBlocks, spacing: 0),
+                                font: NSFont.systemFont(ofSize: body), state: &state, into: output)
+            }
+        }
+    }
+
+    private func appendHTMLInline(
+        _ node: HTMLNode, attributes: [NSAttributedString.Key: Any], into paragraph: NSMutableAttributedString
+    ) {
+        if node.pointee.type == XML_TEXT_NODE, let content = node.pointee.content {
+            appendHTMLText(String(cString: content), attributes: attributes, into: paragraph)
             return
         }
-        let decoded = collapsed
-            .replacingOccurrences(of: "&nbsp;", with: "\u{00A0}")
-            .replacingOccurrences(of: "&lt;", with: "<")
-            .replacingOccurrences(of: "&gt;", with: ">")
-            .replacingOccurrences(of: "&quot;", with: "\"")
-            .replacingOccurrences(of: "&#39;", with: "'")
-            .replacingOccurrences(of: "&amp;", with: "&")
-        paragraph.append(NSAttributedString(string: decoded, attributes: [
-            .font: font, .foregroundColor: theme.foregroundColor,
-        ]))
+        guard node.pointee.type == XML_ELEMENT_NODE else { return }
+        var attributes = attributes
+        let font = attributes[.font] as? NSFont ?? NSFont.systemFont(ofSize: body)
+        switch Self.htmlName(node) {
+        case "script", "style", "iframe", "object", "embed", "template", "textarea", "noscript", "head":
+            return
+        case "img":
+            let width = Self.htmlAttribute("width", node)
+            if let source = Self.htmlAttribute("src", node), !source.isEmpty,
+               let url = URL(string: source, relativeTo: baseURL),
+               let attachment = imageAttachment(url, width: width.flatMap(Double.init).map { CGFloat($0) },
+                                                percentage: Self.htmlPercentage(width)) {
+                let image = NSMutableAttributedString(attachment: attachment)
+                if let link = attributes[.link] {
+                    image.addAttribute(.link, value: link, range: NSRange(location: 0, length: image.length))
+                }
+                paragraph.append(image)
+            } else if let alt = Self.htmlAttribute("alt", node) {
+                attributes[.foregroundColor] = theme.chromeSecondaryColor
+                appendHTMLText(alt, attributes: attributes, into: paragraph)
+            }
+            return
+        case "br":
+            paragraph.append(NSAttributedString(string: "\u{2028}", attributes: attributes))
+            return
+        case "a":
+            if let href = Self.htmlAttribute("href", node), !href.isEmpty,
+               let url = URL(string: href, relativeTo: baseURL),
+               url.scheme == nil || ["file", "https", "http"].contains(url.scheme?.lowercased() ?? "") {
+                attributes[.link] = url
+                attributes[.foregroundColor] = theme.accentColor
+            }
+        case "strong", "b":
+            attributes[.font] = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        case "em", "i":
+            attributes[.font] = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+        case "sub", "sup":
+            attributes[.font] = NSFontManager.shared.convert(font, toSize: font.pointSize * 0.82)
+        case "code", "kbd":
+            attributes[.font] = ReaderFontResolver.shared.resolve(theme: theme, size: font.pointSize * 0.88).font
+            attributes[.backgroundColor] = theme.chromeHeaderColor
+        case "del", "s":
+            attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+        default:
+            break
+        }
+        for child in Self.htmlChildren(node) {
+            appendHTMLInline(child, attributes: attributes, into: paragraph)
+        }
     }
 
-    private static func attribute(_ name: String, in tag: Substring) -> String? {
-        let lower = tag.lowercased()
-        guard let range = lower.range(of: name + "=") else { return nil }
-        let offset = lower.distance(from: lower.startIndex, to: range.upperBound)
-        var index = tag.index(tag.startIndex, offsetBy: offset)
-        guard index < tag.endIndex else { return nil }
-        let quote = tag[index]
-        if quote == "\"" || quote == "'" {
-            index = tag.index(after: index)
-            guard let end = tag[index...].firstIndex(of: quote) else { return nil }
-            return String(tag[index..<end])
+    private func appendHTMLText(
+        _ text: String, attributes: [NSAttributedString.Key: Any], into paragraph: NSMutableAttributedString
+    ) {
+        let whitespace: Set<Character> = [" ", "\t", "\r", "\n", "\r\n", "\u{000C}"]
+        guard let first = text.first, let last = text.last else { return }
+        let lastCharacter = paragraph.length == 0 ? 0 : paragraph.mutableString.character(at: paragraph.length - 1)
+        let leading = whitespace.contains(first) && ![0, 0x20, 0x2028].contains(lastCharacter)
+        let words = text.split(whereSeparator: { whitespace.contains($0) }).joined(separator: " ")
+        let trailing = !words.isEmpty && whitespace.contains(last)
+        let collapsed = (leading ? " " : "") + words + (trailing ? " " : "")
+        if !collapsed.isEmpty {
+            paragraph.append(NSAttributedString(string: collapsed, attributes: attributes))
         }
-        let end = tag[index...].firstIndex(where: { $0 == " " || $0 == ">" || $0 == "/" }) ?? tag.endIndex
-        return String(tag[index..<end])
+    }
+
+    private static func htmlChildren(_ node: HTMLNode) -> [HTMLNode] {
+        var children: [HTMLNode] = []
+        var child = node.pointee.children
+        while let current = child {
+            children.append(current)
+            child = current.pointee.next
+        }
+        return children
+    }
+
+    private static func htmlName(_ node: HTMLNode) -> String {
+        guard node.pointee.type == XML_ELEMENT_NODE, let name = node.pointee.name else { return "" }
+        return String(cString: name)
+    }
+
+    private static func htmlAttribute(_ name: String, _ node: HTMLNode) -> String? {
+        guard let value = name.withCString({ xmlGetProp(node, UnsafeRawPointer($0).assumingMemoryBound(to: UInt8.self)) })
+        else { return nil }
+        defer { xmlFree(value) }
+        return String(cString: value)
+    }
+
+    private static func htmlAlignment(_ node: HTMLNode) -> NSTextAlignment? {
+        if htmlName(node) == "center" { return .center }
+        switch htmlAttribute("align", node)?.lowercased() {
+        case "center": return .center
+        case "right": return .right
+        case "left": return .left
+        case "justify": return .justified
+        default: return nil
+        }
+    }
+
+    private static func htmlPercentage(_ value: String?) -> CGFloat? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), value.hasSuffix("%"),
+              let number = Double(value.dropLast()), number.isFinite, number > 0
+        else { return nil }
+        return CGFloat(min(100, number))
     }
 
     /// Local images and base64 data URLs only: previews never reach the network.
-    private func imageAttachment(_ url: URL, width requestedWidth: CGFloat?, inset: CGFloat = 0) -> NSTextAttachment? {
+    private func imageAttachment(
+        _ url: URL, width: CGFloat?, percentage: CGFloat? = nil, inset: CGFloat = 0
+    ) -> NSTextAttachment? {
         let image: NSImage?
         if url.scheme == "data" {
             let string = url.absoluteString
@@ -993,12 +1177,42 @@ package struct MarkdownPreviewRenderer {
                 && ((try? file.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? .max) < 20_000_000
                 ? NSImage(contentsOf: file) : nil
         }
-        guard let image, image.size.width > 0, image.size.height > 0 else { return nil }
-        let maxWidth = min(requestedWidth ?? image.size.width, MarkdownPreviewTextView.readableWidth - 8 - inset)
-        let scale = min(1, maxWidth / image.size.width)
-        let attachment = NSTextAttachment()
-        attachment.image = image
-        attachment.bounds = NSRect(x: 0, y: 0, width: image.size.width * scale, height: image.size.height * scale)
-        return attachment
+        guard let image, image.size.width.isFinite, image.size.height.isFinite,
+              image.size.width > 0, image.size.height > 0 else { return nil }
+        return PreviewImageAttachment(image: image, width: width, percentage: percentage, inset: inset)
+    }
+}
+
+private final class PreviewImageAttachment: NSTextAttachment, @unchecked Sendable {
+    private let requestedWidth: CGFloat?
+    private let widthFraction: CGFloat?
+    private let inset: CGFloat
+
+    init(image: NSImage, width: CGFloat?, percentage: CGFloat?, inset: CGFloat) {
+        requestedWidth = width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        widthFraction = percentage.flatMap { $0.isFinite && $0 > 0 ? min($0 / 100, 1) : nil }
+        self.inset = inset
+        super.init(data: nil, ofType: nil)
+        self.image = image
+    }
+
+    required init?(coder: NSCoder) {
+        requestedWidth = nil
+        widthFraction = nil
+        inset = 0
+        super.init(coder: coder)
+    }
+
+    override func attachmentBounds(
+        for textContainer: NSTextContainer?,
+        proposedLineFragment line: NSRect,
+        glyphPosition: NSPoint,
+        characterIndex: Int
+    ) -> NSRect {
+        guard let size = image?.size, size.width > 0 else { return .zero }
+        // The line fragment already accounts for text blocks, including table cells.
+        let available = max(0, line.width - 2 * (textContainer?.lineFragmentPadding ?? 0) - inset)
+        let width = min(available, widthFraction.map { available * $0 } ?? requestedWidth ?? size.width)
+        return NSRect(x: 0, y: 0, width: width, height: size.height * (width / size.width))
     }
 }

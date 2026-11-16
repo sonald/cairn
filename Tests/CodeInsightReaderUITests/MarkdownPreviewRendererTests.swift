@@ -64,6 +64,132 @@ struct MarkdownPreviewRendererTests {
         #expect(anchored("missing") == nil)
     }
 
+    @Test func readmeHTMLPreservesHeadingParagraphsAndOfflineBadgeText() throws {
+        let file = URL(fileURLWithPath: "/project/README.md")
+        let renderer = MarkdownPreviewRenderer(theme: ReaderTheme(settings: ReaderSettings()), baseURL: file)
+        let output = try #require(renderer.render("""
+        <p align="center">
+          <h1 align="center">Demo</h1>
+          <p align="center"><b>A short introduction.</b></p>
+          <p align="center"><sub>See <a href="#demo-1">details</a>.</sub></p>
+          <p align="center"><a href="https://example.invalid/"><img src="https://example.invalid/badge.svg" alt="Offline badge"></a></p>
+        </p>
+
+        <script>hiddenScriptContent()</script>
+
+        ## Demo
+
+        Regular Markdown.
+        """))
+        let text = output.string as NSString
+        let title = try #require(MarkdownPreviewRenderer.anchorRange(for: "demo", in: output))
+        let markdownHeading = try #require(MarkdownPreviewRenderer.anchorRange(for: "demo-1", in: output))
+        #expect(text.substring(with: title) == "Demo")
+        #expect(text.substring(with: markdownHeading) == "Demo")
+        #expect(title.location < markdownHeading.location)
+        #expect(output.attribute(.markdownHeadingLevel, at: title.location, effectiveRange: nil) as? Int == 1)
+        #expect(output.attribute(.markdownHeadingLevel, at: markdownHeading.location, effectiveRange: nil) as? Int == 2)
+        for paragraph in ["A short introduction.", "See details.", "Offline badge"] {
+            let range = text.range(of: paragraph)
+            try #require(range.location != NSNotFound)
+            #expect(output.attribute(.markdownHeadingLevel, at: range.location, effectiveRange: nil) == nil)
+            let enclosing = text.paragraphRange(for: range)
+            #expect(text.substring(with: enclosing).trimmingCharacters(in: .whitespacesAndNewlines) == paragraph)
+        }
+        let link = output.attribute(.link, at: text.range(of: "details").location, effectiveRange: nil) as? URL
+        #expect(link?.fragment == "demo-1")
+        #expect(!output.string.contains("\u{FFFC}"))
+        #expect(!output.string.contains("hiddenScriptContent"))
+    }
+
+    @Test func readmeHTMLImagesFitThePageAndTheirTableCellsAsTheReaderNarrows() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let bitmap = try #require(NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 1000, pixelsHigh: 200, bitsPerSample: 8,
+            samplesPerPixel: 3, hasAlpha: false, isPlanar: false, colorSpaceName: .deviceRGB,
+            bytesPerRow: 0, bitsPerPixel: 0
+        ))
+        bitmap.bitmapData?.initialize(repeating: 0, count: bitmap.bytesPerPlane)
+        let image = try #require(bitmap.representation(using: .png, properties: [:]))
+        try image.write(to: directory.appendingPathComponent("demo.png"))
+        let renderer = MarkdownPreviewRenderer(
+            theme: ReaderTheme(settings: ReaderSettings()), baseURL: directory.appendingPathComponent("README.md")
+        )
+        let output = try #require(renderer.render("""
+        <p align="center">A wide image:<br>
+          <img src="demo.png" alt="Wide" width="100%"><br>
+          A caption.
+        </p>
+
+        <table align="center" width="100%">
+          <tr>
+            <td width="50%" align="center">
+              <a href="#demo"><img src="demo.png" alt="First" width="100%"></a>
+              <sub><b>First demo</b> — first description.</sub>
+            </td>
+            <td width="50%" align="center">
+              <a href="#demo"><img src="demo.png" alt="Second" width="100%"></a>
+              <sub><b>Second demo</b> — second description.</sub>
+            </td>
+          </tr>
+        </table>
+
+        ## Demo
+        """))
+        let text = output.string as NSString
+        var attachments: [NSRange] = []
+        output.enumerateAttribute(.attachment, in: NSRange(location: 0, length: output.length)) { value, range, _ in
+            if value is NSTextAttachment { attachments.append(range) }
+        }
+        try #require(attachments.count == 3)
+
+        let view = MarkdownPreviewTextView()
+        let layout = try #require(view.layoutManager)
+        let container = try #require(view.textContainer)
+        container.widthTracksTextView = true
+        view.show(output)
+        var previousWidths: [CGFloat] = []
+        for width: CGFloat in [1000, 520] {
+            view.setFrameSize(NSSize(width: width, height: 800))
+            layout.ensureLayout(for: container)
+            let images = attachments.map { range in
+                let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                let line = layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil)
+                let location = layout.location(forGlyphAt: glyphs.location)
+                let size = layout.attachmentSize(forGlyphAt: glyphs.location)
+                return NSRect(x: line.minX + location.x, y: line.minY, width: size.width, height: size.height)
+            }
+            for image in images {
+                #expect(image.width > 0)
+                #expect(abs(image.height / image.width - 0.2) < 0.01)
+                #expect(image.minX >= 0)
+                #expect(image.maxX <= container.containerSize.width + 1)
+            }
+            #expect(images[1].maxX <= images[2].minX + 1)
+            #expect(abs(images[1].minY - images[2].minY) < images[1].height)
+            for (image, previousWidth) in zip(images, previousWidths) {
+                #expect(image.width < previousWidth)
+            }
+            previousWidths = images.map(\.width)
+        }
+
+        let cells = try attachments.dropFirst().map { attachment in
+            let style = output.attribute(.paragraphStyle, at: attachment.location, effectiveRange: nil) as? NSParagraphStyle
+            return try #require(style?.textBlocks.last as? NSTextTableBlock)
+        }
+        #expect(cells[0].table === cells[1].table)
+        #expect(cells[0].startingRow == cells[1].startingRow)
+        #expect(cells.map(\.startingColumn) == [0, 1])
+        for (index, caption) in ["First demo", "Second demo"].enumerated() {
+            let range = text.range(of: caption)
+            try #require(range.location != NSNotFound)
+            let style = output.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle
+            #expect(style?.textBlocks.last === cells[index])
+        }
+    }
+
     @Test func hiddenFoldedHeadingLendsNoChevronToTheNextHeading() throws {
         let renderer = MarkdownPreviewRenderer(theme: ReaderTheme(settings: ReaderSettings()), baseURL: nil)
         let output = try #require(renderer.render("""
