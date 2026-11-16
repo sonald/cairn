@@ -3112,6 +3112,30 @@ func enclosingScopeCountsBodyLinesTheSameForAnySignatureLayout() async throws {
     #expect(model.activeEnclosingScope?.bodyLineCount == 0)
 }
 
+/// Switching back from the enclosing mode shows the earlier symbol at once;
+/// an empty moment hid the pane and made the reader jump (11-16 recording).
+@MainActor
+@Test
+func switchingBackToSymbolTrackingNeverEmptiesTheLens() async throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let document = try DocumentLoader().load(file: root.appendingPathComponent("main.rs")).document
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    let click = byteOffset(of: "target();", in: source)
+    model.tokenClicked(file: "main.rs", offset: click)
+    #expect(await testWaitUntil("symbol shown") { model.displayedCandidate != nil })
+    let shown = try #require(model.displayedCandidate)
+
+    model.setTracking(.enclosing)
+    model.caretMoved(file: "main.rs", offset: click, document: document)
+    #expect(model.activeEnclosingScope?.name == "main")
+    model.setTracking(.symbol)
+    #expect(model.displayedCandidate?.targetByteOffset == shown.targetByteOffset)
+}
+
 /// Q4: a manual declaration/type toggle before the Exact reply blocks the
 /// auto-switch.
 @MainActor

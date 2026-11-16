@@ -700,6 +700,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.openFunctionChange(change)
         }
         contextController.onTrackingChange = { [weak self] in
+            // Using the pane's own control is explicit use: the pane must
+            // not vanish under the click when the new mode has nothing yet.
+            self?.contextOpenedExplicitly = true
             self?.replayCaretForLensTracking()
         }
         contextController.onOpenEnclosing = { [weak self] path, byteOffset in

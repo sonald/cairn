@@ -601,6 +601,14 @@ public final class ContextWindowModel {
     public func setTracking(_ tracking: Tracking) {
         guard tracking != self.tracking else { return }
         self.tracking = tracking
+        if tracking == .enclosing {
+            switch stage {
+            case .candidates, .typeHop:
+                symbolStageBeforeEnclosing = (stage, locatedToken, exactBatch != nil)
+            case .idle, .indexBuilding, .enclosing:
+                symbolStageBeforeEnclosing = nil
+            }
+        }
         // Drop in-flight symbol lookups and Exact work: their results belong
         // to the other mode. Forget the located token so the replay below
         // is not swallowed by the same-token dedup.
@@ -612,11 +620,29 @@ public final class ContextWindowModel {
         locatedToken = nil
         isShowingPreviousToken = false
         guard tracking == .symbol else { return }
-        if case .enclosing = stage { stage = .idle }
+        let saved = symbolStageBeforeEnclosing
+        symbolStageBeforeEnclosing = nil
+        // R4.3 holds across the switch: the symbol shown before the
+        // enclosing mode comes back at once, with the user's candidate
+        // choice, instead of an empty lens until a lookup answers. Only an
+        // interrupted Exact upgrade, or nothing to restore, asks again.
+        if let saved, displayedToken != nil {
+            stage = saved.stage
+            locatedToken = saved.located
+            guard saved.upgradeInFlight else { return }
+            locatedToken = nil
+        } else if case .enclosing = stage {
+            stage = .idle
+        }
         if mode == .follow, let displayedToken {
             tokenClicked(file: displayedToken.file, offset: displayedToken.offset)
         }
     }
+
+    /// What the symbol mode showed when the enclosing mode took over.
+    private var symbolStageBeforeEnclosing: (
+        stage: Stage, located: LocatedToken?, upgradeInFlight: Bool
+    )?
 
     /// R6.1/R6.2: the pin is orthogonal to tracking. Entering the pin keeps
     /// the exact-upgrade semantics of the old `setMode(.pinned)`.
@@ -708,6 +734,7 @@ public final class ContextWindowModel {
                 requestID &+= 1
                 cancelExactUpgrade()
                 locatedToken = nil
+                symbolStageBeforeEnclosing?.located = nil
                 unansweredToken = nil
             } else if let previousSession, previousSession !== session,
                       let unanswered = unansweredToken,
