@@ -190,7 +190,7 @@ public final class ExactCoordinator {
         String?
     ) throws -> any Snapshot
 
-    enum RelationQueryResult: Sendable {
+    public enum RelationQueryResult: Sendable {
         case unsupported
         case notApplicable
         case relations(
@@ -220,11 +220,11 @@ public final class ExactCoordinator {
         case unavailable(String)
     }
 
-    struct Relation: Sendable {
-        let name: String?
-        let location: ExactLocation
-        let item: ExactCallHierarchyItem?
-        let callSites: [ExactLocation]
+    public struct Relation: Sendable {
+        public let name: String?
+        public let location: ExactLocation
+        public let item: ExactCallHierarchyItem?
+        public let callSites: [ExactLocation]
     }
 
     private enum RawRelationQueryResult: Sendable {
@@ -1122,6 +1122,25 @@ public final class ExactCoordinator {
         }
     }
 
+    /// What exact requests answer for right now; nil while no server is
+    /// active. Requests about other snapshots (another `generation`) or other
+    /// analysis units come back empty, so a caller outside the reader checks
+    /// this first.
+    public struct Coverage: Sendable {
+        /// The analysis unit's project-relative directory; "" for the root.
+        public let unitPrefix: String
+        public let unitName: String
+        public let provider: String
+        public let generation: UInt64
+    }
+
+    public var coverage: Coverage? {
+        active.map {
+            Coverage(unitPrefix: $0.profilePrefix, unitName: $0.unitName,
+                     provider: $0.session.attribution.provider, generation: $0.generation)
+        }
+    }
+
     public func refreshReadiness() {
         if case .unavailable(let reason) = active?.session.readiness {
             readiness = .unavailable(reason)
@@ -1439,7 +1458,7 @@ public final class ExactCoordinator {
         }
     }
 
-    func relations(
+    public func relations(
         file: String,
         byteOffset: UInt32,
         item: ExactCallHierarchyItem?,
@@ -2126,5 +2145,5 @@ private func validateProfile(
 
 private func exactFailureReason(_ error: Error) -> String {
     if case ExactError.unavailable(let detail) = error { return detail }
-    return String(describing: error)
+    return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
 }

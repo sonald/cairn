@@ -13,7 +13,7 @@
 - A Context window that follows symbols or the enclosing function, previews binding types, and can be pinned.
 - Optional rust-analyzer, Pyright, typescript-language-server, and gopls analysis, with explicit sources and limitations.
 - Read-only Git snapshots, comparisons, branching reading trails, frozen Reading Sets, bookmarks, and per-project session restoration.
-- An AI panel that answers questions about the open snapshot with a model you configure (OpenAI-compatible or Anthropic API). The model reads code only through Cairn's read-only tools, and the steps it took fold into one line above the answer, from which the code it read opens in the reader. Select code and click the gutter icon, or press `⌘I`, to ask about that code.
+- An AI panel that answers questions about the open snapshot with a model you configure (OpenAI-compatible or Anthropic API). The model reads code only through Cairn's read-only tools (file reading, search, symbol lookup backed by the language server where available, and Git history), and the steps it took fold into one line above the answer, from which the code it read opens in the reader. Select code and click the gutter icon, or press `⌘I`, to ask about that code.
 - Multiple project windows, configurable shortcuts, code fonts and ligatures, Light/Dark/SI Classic themes plus bundled and user-supplied base16 themes, and English/Simplified Chinese UI.
 - Read-only Markdown, Jupyter notebook, restricted HTML, image, PDF, and UTF-8 text previews. Markdown preserves embedded HTML headings, paragraphs, and tables, with images scaled to fit and alt text for remote images. Configuration, scripts, and unanalyzed languages such as C/C++, Java, and JS are syntax-colored.
 
@@ -21,7 +21,7 @@ Exact analysis of a past commit runs in a checkout directory Cairn owns (one per
 
 Safe mode is the default: no network access, and Rust build scripts and proc macros are disabled. Explicitly trusting a project can enable those analysis steps and permit writes to its `target` directory; it does not enable network access. Providers and dependencies must already be available locally. When dependencies are missing, clicking the Exact status shows the install command for the unit; for a Rust project with a `Cargo.lock`, Download Dependencies runs `cargo fetch --locked`, and for a Go module with a `go.sum` and no `vendor/` it runs `go mod download` against a copy of the manifests outside the repository — apart from AI questions, the only network access Cairn makes, and only on that click. TypeScript and Python installs run package scripts, so Cairn copies the command and opens Terminal instead of running them.
 
-AI questions go to the address set in Settings → AI, with the API key kept in the Keychain. Before the first question in a project, Cairn asks whether that project's code may be sent there (a model on localhost is not asked about). Answers load no remote images or other resources.
+AI questions go to the address set in Settings → AI, with the API key kept in the Keychain. Before the first question in a project, Cairn asks whether that project's code, commit messages and past changes may be sent there (author names and email trailers are not sent) (a model on localhost is not asked about). Answers load no remote images or other resources.
 
 ## Build and run
 

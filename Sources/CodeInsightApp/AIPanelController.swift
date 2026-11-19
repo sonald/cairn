@@ -558,12 +558,17 @@ private final class AITurnView: NSStackView, NSTextViewDelegate {
     }
 
     private func showActivity(_ turn: AIConversationModel.Turn) {
-        activityRow.isHidden = turn.steps.isEmpty
-        guard !turn.steps.isEmpty else { return }
+        activityRow.isHidden = turn.steps.isEmpty && turn.runningStep == nil
+        guard !activityRow.isHidden else { return }
         let working = { if case .working = turn.state { return true } else { return false } }()
-        let title = working
-            ? localizedFormat("ai.steps.current", turn.steps.count, Self.describe(turn.steps[turn.steps.count - 1]))
-            : Self.summary(turn)
+        let title: String
+        if working, let running = turn.runningStep {
+            title = localizedFormat("ai.steps.current", turn.steps.count + 1, Self.describe(running, running: true))
+        } else if working, let last = turn.steps.last {
+            title = localizedFormat("ai.steps.current", turn.steps.count, Self.describe(last))
+        } else {
+            title = Self.summary(turn)
+        }
         activity.attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: theme.chromeSecondaryColor,
@@ -584,19 +589,12 @@ private final class AITurnView: NSStackView, NSTextViewDelegate {
         }
     }
 
-    static func describe(_ step: AIToolStep) -> String {
-        let key = switch step.kind {
-        case .listFiles: "ai.step.list"
-        case .readFile: "ai.step.read"
-        case .search: "ai.step.search"
-        case .findSymbol: "ai.step.symbol"
-        case .findCallers: "ai.step.callers"
-        case .unknown: "ai.step.unknown"
-        }
-        let subject = step.kind == .listFiles && step.subject.isEmpty ? "/" : step.subject
-        let text = localizedFormat(key, subject)
+    static func describe(_ step: AIToolStep, running: Bool = false) -> String {
+        let subject = step.kind == .list && step.subject.isEmpty ? "/" : step.subject
+        let text = localizedFormat("ai.step." + step.kind.rawValue, subject)
+        if running { return text }
         guard let count = step.count else { return text + " ⚠︎" }
-        return step.kind == .readFile ? text : text + " · \(count)"
+        return step.kind == .read ? text : text + " · \(count)"
     }
 
     static func statusText(_ turn: AIConversationModel.Turn) -> String {
@@ -621,7 +619,7 @@ private final class AITurnView: NSStackView, NSTextViewDelegate {
     }
 
     static func summary(_ turn: AIConversationModel.Turn) -> String {
-        let reads = turn.steps.filter { $0.kind == .readFile }.count
+        let reads = turn.steps.filter { $0.kind == .read }.count
         let searches = turn.steps.count - reads
         var parts: [String] = []
         if searches > 0 { parts.append(localizedFormat("ai.summary.searches", searches)) }
@@ -683,7 +681,10 @@ private final class AIStepRow: NSButton {
         if let evidence {
             let range = evidence.startLine == evidence.endLine
                 ? "\(evidence.startLine)" : "\(evidence.startLine)–\(evidence.endLine)"
-            text = "\(number)  \(evidence.path):\(range)"
+            // A read names its lines; a lookup or history says what it was.
+            text = step.kind == .read
+                ? "\(number)  \(evidence.path):\(range)"
+                : "\(number)  \(AITurnView.describe(step)) → \(evidence.path):\(range)"
             toolTip = evidence.excerpt
             target = self
             action = #selector(clicked(_:))

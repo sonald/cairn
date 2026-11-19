@@ -38,9 +38,9 @@ public final class AIConversationModel {
             var body = Substring(text)
             while body.last?.isNewline == true { body = body.dropLast() }
             let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
-            let kept = lines.prefix(AITools.maxReadLines).joined(separator: "\n")
-            let more = lines.count > AITools.maxReadLines
-                ? "\n(selection cut at \(AITools.maxReadLines) lines; read the file for the rest)" : ""
+            let kept = lines.prefix(AITools.maxSelectionLines).joined(separator: "\n")
+            let more = lines.count > AITools.maxSelectionLines
+                ? "\n(selection cut at \(AITools.maxSelectionLines) lines; read the file for the rest)" : ""
             let range = startLine == endLine ? "line \(startLine)" : "lines \(startLine)-\(endLine)"
             return "The user selected \(path) \(range):\n```\n\(kept)\n```\(more)"
         }
@@ -53,6 +53,8 @@ public final class AIConversationModel {
         public internal(set) var answer = ""
         public internal(set) var steps: [AIToolStep] = []
         public internal(set) var evidence: [AIEvidence] = []
+        /// The step running now, shown until it finishes.
+        public internal(set) var runningStep: AIToolStep?
         public internal(set) var state = TurnState.working
         public let startedAt: Date
         public internal(set) var elapsed: TimeInterval?
@@ -100,7 +102,7 @@ public final class AIConversationModel {
         self.helper = helper
         self.settings = settings
         self.apiKey = apiKey
-        self.hasKey = hasKey ?? { !(apiKey() ?? "").isEmpty }
+        self.hasKey = hasKey ?? { AIKeychain.exists() }
         self.consent = consent
     }
 
@@ -157,6 +159,7 @@ public final class AIConversationModel {
         toolTask = nil
         guard isRunning, let last = turns.indices.last else { return }
         turns[last].state = .cancelled
+        turns[last].runningStep = nil
         turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
         round += 1
         if let conversationID { connectedHelper?.send(["type": "cancel", "conversation": conversationID]) }
@@ -196,6 +199,7 @@ public final class AIConversationModel {
     private func fail(_ message: String) -> AIHelper? {
         if let last = turns.indices.last {
             turns[last].state = .failed(message)
+            turns[last].runningStep = nil
             turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
         }
         return nil
@@ -244,41 +248,47 @@ public final class AIConversationModel {
         let expectedRound = round
         toolTask = Task { [weak self] in
             var results: [[String: String]] = []
-            var steps: [AIToolStep] = []
-            var evidence: [AIEvidence] = []
             for (offset, call) in calls.enumerated() {
                 if overBudget {
                     results.append(["call_id": call.callID, "content": "error: the tool budget for this question is used up; answer now with what you have read"])
                     continue
                 }
+                // Each step shows while it runs and joins the trace as it ends.
+                guard let self, self.isCurrent(expectedRound) else { return }
+                let last = self.turns.count - 1
+                self.turns[last].runningStep = AITools.step(for: call, in: snapshot)
                 let ran = await AITools.run(call, step: firstStep + offset, in: snapshot)
+                guard !Task.isCancelled, self.isCurrent(expectedRound) else { return }
+                self.turns[last].runningStep = nil
                 results.append(["call_id": call.callID, "content": ran.output])
-                steps.append(ran.step)
-                evidence.append(contentsOf: ran.evidence)
+                self.turns[last].steps.append(ran.step)
+                for item in ran.evidence where !self.turns[last].evidence.contains(where: {
+                    $0.path == item.path && $0.startLine == item.startLine && $0.endLine == item.endLine
+                }) {
+                    self.turns[last].evidence.append(item)
+                }
             }
-            guard let self, !Task.isCancelled, expectedRound == self.round,
-                  let last = self.turns.indices.last, self.turns[last].state.isRunning
-            else { return }
-            self.turns[last].steps.append(contentsOf: steps)
-            for item in evidence where !self.turns[last].evidence.contains(where: {
-                $0.path == item.path && $0.startLine == item.startLine && $0.endLine == item.endLine
-            }) {
-                self.turns[last].evidence.append(item)
-            }
+            guard let self, !Task.isCancelled, self.isCurrent(expectedRound) else { return }
             self.connectedHelper?.send([
                 "type": "tool_results", "conversation": conversationID, "results": results, "round": self.nextRound(),
             ])
         }
     }
 
+    private func isCurrent(_ expectedRound: Int) -> Bool {
+        expectedRound == round && turns.last?.state.isRunning == true
+    }
+
     private func systemPrompt() -> String {
-        let place = snapshot?.revision.map { "commit \($0)" } ?? "the working tree"
-        return """
+        """
         You are the code-reading assistant inside Cairn, a read-only code reader. You answer questions \
-        about one snapshot of a project (\(place), \(snapshot?.files.count ?? 0) files). Look at the code \
-        with the tools before answering and do not guess about code you have not read. Cite the code you \
-        rely on as project-relative path:line or path:start-end. Answer in the language of the question, \
-        concisely, with short excerpts rather than whole files. You cannot change files or run anything.
+        about one snapshot of a project. Look at the code with the tools before answering and do not guess \
+        about code you have not read: symbol answers what a name is and who uses it, history why code is \
+        as it is, search where text appears, read what a file or directory holds. Cite the code you rely on \
+        as project-relative path:line or path:start-end. Answer in the language of the question, concisely, \
+        with short excerpts rather than whole files. You cannot change files or run anything.
+
+        \(snapshot?.overview() ?? "")
         """
     }
 

@@ -77,8 +77,16 @@ public struct AIProviderSettings: Equatable, Sendable {
 
 /// The API key, as a generic password in the login Keychain.
 public enum AIKeychain {
-    private static let service = "Cairn AI provider"
+    /// A build with another bundle identifier (a test build, `swift test`)
+    /// gets its own item: it never asks for the release build's key, so it
+    /// never brings up the Keychain access prompt for it.
+    private static let service = Bundle.main.bundleIdentifier == "dev.cairn.Cairn"
+        ? "Cairn AI provider" : "Cairn AI provider (\(Bundle.main.bundleIdentifier ?? "unbundled"))"
     private static let account = "api-key"
+    /// Read once per launch: a build whose signature changed is asked about
+    /// every read until the user picks Always Allow.
+    nonisolated(unsafe) private static var cached: String??
+    private static let lock = NSLock()
 
     private static var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
@@ -87,14 +95,17 @@ public enum AIKeychain {
     }
 
     public static func read() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if let cached { return cached }
         var query = query
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data
-        else { return nil }
-        return String(data: data, encoding: .utf8)
+        else { cached = .some(nil); return nil }
+        cached = .some(String(data: data, encoding: .utf8))
+        return cached!
     }
 
     /// Asks only for the item's attributes, which needs no access prompt.
@@ -110,6 +121,7 @@ public enum AIKeychain {
     @discardableResult
     public static func write(_ key: String) -> Bool {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        lock.lock(); cached = nil; lock.unlock()
         SecItemDelete(query as CFDictionary)
         guard !key.isEmpty else { return true }
         var item = query
@@ -121,7 +133,9 @@ public enum AIKeychain {
 
 /// Projects whose code the user agreed to send to a provider host.
 public struct AIConsentStore: Sendable {
-    private static let key = "ai.consentedProjects"
+    /// v2: what is sent grew to commit messages and past changes, so
+    /// projects allowed before are asked again.
+    private static let key = "ai.consentedProjects.v2"
     private let defaultsSuite: String?
 
     public init(suiteName: String? = nil) { defaultsSuite = suiteName }
@@ -144,5 +158,8 @@ public struct AIConsentStore: Sendable {
         defaults.set(entries, forKey: Self.key)
     }
 
-    public func revokeAll() { defaults.removeObject(forKey: Self.key) }
+    public func revokeAll() {
+        defaults.removeObject(forKey: Self.key)
+        defaults.removeObject(forKey: "ai.consentedProjects")
+    }
 }

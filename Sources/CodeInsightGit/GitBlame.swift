@@ -111,6 +111,57 @@ public enum GitBlame {
         return hunks
     }
 
+    /// What one commit did to `path`: its full message and the file before
+    /// (in the first parent) and after. `before` is nil when the file is new
+    /// there (or the commit is a root); `after` is nil when the commit has no
+    /// file at `path` (it was renamed since).
+    public struct Change: Sendable {
+        public let message: String
+        public let before: [UInt8]?
+        public let after: [UInt8]?
+    }
+
+    public static func change(repositoryURL: URL, sha: String, path: String) throws -> Change {
+        try initialized.get()
+        var opened: OpaquePointer?
+        try repositoryURL.withUnsafeFileSystemRepresentation { fsPath in
+            try check(git_repository_open(&opened, fsPath), "git_repository_open")
+        }
+        guard let repository = opened else {
+            throw GitError.git(operation: "git_repository_open", code: -1, message: "returned no repository")
+        }
+        defer { git_repository_free(repository) }
+        guard let commit = try commit(sha, in: repository, unbornIsNil: false) else { throw GitError.missingPath(path) }
+        defer { git_commit_free(commit) }
+        let message = git_commit_message(commit).map(String.init(cString:)) ?? ""
+        var before: [UInt8]?
+        if git_commit_parentcount(commit) > 0 {
+            var parent: OpaquePointer?
+            try check(git_commit_parent(&parent, commit, 0), "git_commit_parent")
+            defer { git_commit_free(parent) }
+            before = try blob(at: path, commit: parent!, in: repository)
+        }
+        return Change(message: message, before: before, after: try blob(at: path, commit: commit, in: repository))
+    }
+
+    private static func blob(at path: String, commit: OpaquePointer, in repository: OpaquePointer) throws -> [UInt8]? {
+        var tree: OpaquePointer?
+        try check(git_commit_tree(&tree, commit), "git_commit_tree")
+        defer { git_tree_free(tree) }
+        var entry: OpaquePointer?
+        let code = git_tree_entry_bypath(&entry, tree, path)
+        if code == GIT_ENOTFOUND.rawValue { return nil }
+        try check(code, "git_tree_entry_bypath")
+        defer { git_tree_entry_free(entry) }
+        guard git_tree_entry_type(entry) == GIT_OBJECT_BLOB else { return nil }
+        var blob: OpaquePointer?
+        try check(git_blob_lookup(&blob, repository, git_tree_entry_id(entry)), "git_blob_lookup")
+        defer { git_blob_free(blob) }
+        let size = Int(git_blob_rawsize(blob))
+        guard size > 0, let raw = git_blob_rawcontent(blob) else { return [] }
+        return Array(UnsafeBufferPointer(start: raw.assumingMemoryBound(to: UInt8.self), count: size))
+    }
+
     private static func uncommitted(_ bytes: [UInt8]?) -> [BlameHunk] {
         let count = bytes.map(countLines) ?? 0
         return count > 0 ? [BlameHunk(lines: 1...count, commit: nil)] : []

@@ -71,7 +71,7 @@ struct AIConversationTests {
         let turn = try #require(f.model.turns.last)
         #expect(turn.state == .done)
         #expect(turn.answer.contains("alpha") && turn.answer.contains("beta"))
-        #expect(turn.steps.map(\.kind) == [.readFile, .readFile])
+        #expect(turn.steps.map(\.kind) == [.read, .read])
         #expect(Set(turn.evidence.map(\.path)) == ["a.txt", "b.txt"])
 
         let requests = provider.requests

@@ -234,6 +234,8 @@ let package = Package(
                 "CodeInsightAppModel",
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightExact",
+                "CodeInsightGit",
                 "CodeInsightReaderCore",
             ]
         ),
