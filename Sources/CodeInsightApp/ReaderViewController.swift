@@ -613,7 +613,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewArea.wantsLayer = true
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: overviewRuler.leadingAnchor),
+            // The ruler floats over the scroller's edge so its marks never reflow text.
+            scrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: readerArea.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
             overviewRuler.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
@@ -2229,6 +2230,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             .foregroundColor: readerTheme.foregroundColor,
         ]))
         return title
+    }
+
+    func setChangeAges(_ ages: [(lines: ClosedRange<Int>, age: OverviewChangeAge)]) {
+        loadViewIfNeeded()
+        textView.setChangeAges(ages)
     }
 
     func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {

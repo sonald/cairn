@@ -406,6 +406,12 @@ private struct ReaderSettingsView: View {
                         .help(localized("settings.blockEndAnnotations.help"))
                     Toggle(localized("settings.overviewRuler"), isOn: $settings.overviewRuler)
                         .help(localized("settings.overviewRuler.help"))
+                    Toggle(localized("settings.overviewScopeBands"), isOn: $settings.overviewScopeBands)
+                        .disabled(!settings.overviewRuler)
+                        .help(localized("settings.overviewScopeBands.help"))
+                    Toggle(localized("settings.overviewChangeAge"), isOn: $settings.overviewChangeAge)
+                        .disabled(!settings.overviewRuler)
+                        .help(localized("settings.overviewChangeAge.help"))
                     Toggle(localized("settings.querySuggestions"), isOn: $settings.showQuerySuggestions)
                     fontControls
 

@@ -10,8 +10,8 @@
 "reader.height.full" = "Full";
 "reader.height.overview" = "Overview";
 "reader.height.structure" = "Structure";
-"reader.overview.line" = "Line %lld · %@";
-"reader.overview.folded" = "%@ (folded)";
+"reader.overview.lineNumber" = "Line %lld";
+"reader.overview.foldedLines" = "%lld lines folded";
 "reader.overview.find" = "Find match";
 "reader.overview.added" = "Added";
 "reader.overview.removed" = "Removed";

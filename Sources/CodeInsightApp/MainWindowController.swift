@@ -3,6 +3,7 @@ import CodeInsightAI
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
@@ -181,6 +182,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
+    /// The open file's Git change ages for the overview ruler, by what they were computed for.
+    private var changeAges: (key: ChangeAgeKey, ages: [(lines: ClosedRange<Int>, age: OverviewChangeAge)])?
+    private var changeAgeRequest: (key: ChangeAgeKey, task: Task<Void, Never>)?
+    private var changeAgeTarget: (file: URL?, document: ReaderDocument?) = (nil, nil)
     private let symbolDocCard = SymbolDocCard()
     private let docsController = DocumentationPanelController(
         model: DocumentationPanelModel(source: DashIntegration.documentationSource)
@@ -2597,6 +2602,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func applyReaderSettings(_ settings: ReaderSettings) {
         currentReaderSettings = settings
+        updateChangeAges(file: changeAgeTarget.file, document: changeAgeTarget.document)
         model.symbolHover.isHoverEnabled = settings.hoverDocs
         if symbolDocCard.isShown { renderSymbolHover() }
         let theme = ReaderTheme(settings: settings)
@@ -2983,6 +2989,73 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
+    // MARK: Change ages
+
+    private struct ChangeAgeKey: Equatable {
+        let file: URL
+        let revision: String?
+        let contentID: ContentID
+        /// Refresh Index bumps it, so a commit made outside Cairn re-blames.
+        let generation: UInt64
+    }
+
+    /// Shows cached ages for the open file, or blames it off the main thread.
+    private func updateChangeAges(file: URL?, document: ReaderDocument?) {
+        changeAgeTarget = (file, document)
+        guard currentReaderSettings.overviewRuler, currentReaderSettings.overviewChangeAge,
+              let file, let document, let root = model.projectRoot,
+              file.standardizedFileURL.path.hasPrefix(root.standardizedFileURL.path + "/")
+        else {
+            changeAgeRequest?.task.cancel()
+            changeAgeRequest = nil
+            readerController.setChangeAges([])
+            return
+        }
+        let key = ChangeAgeKey(
+            file: file, revision: model.currentRevision, contentID: document.contentID, generation: model.generation
+        )
+        if let changeAges, changeAges.key == key {
+            readerController.setChangeAges(changeAges.ages)
+            return
+        }
+        readerController.setChangeAges([])
+        guard changeAgeRequest?.key != key else { return }
+        changeAgeRequest?.task.cancel()
+        let path = ProjectTreeWalk.relativePath(of: file, under: root)
+        let revision = key.revision
+        let bytes = revision == nil ? document.bytes : nil
+        let task = Task { [weak self] in
+            let hunks = await Task.detached(priority: .utility) {
+                try? GitBlame.blame(repositoryURL: root, path: path, revision: revision, workingTreeBytes: bytes)
+            }.value
+            guard let self, !Task.isCancelled, self.changeAgeRequest?.key == key else { return }
+            self.changeAgeRequest = nil
+            let ages = Self.changeAges(from: hunks ?? [], now: Date())
+            self.changeAges = (key, ages)
+            if self.changeAgeTarget.file == key.file,
+               self.changeAgeTarget.document?.contentID == key.contentID {
+                self.readerController.setChangeAges(ages)
+            }
+        }
+        changeAgeRequest = (key, task)
+    }
+
+    /// Buckets blame hunks by age; lines older than a year are left out.
+    private static func changeAges(from hunks: [BlameHunk], now: Date) -> [(lines: ClosedRange<Int>, age: OverviewChangeAge)] {
+        hunks.compactMap { hunk in
+            guard let commit = hunk.commit else { return (hunk.lines, .uncommitted) }
+            let days = now.timeIntervalSince(commit.date) / 86_400
+            let age: OverviewChangeAge? = switch days {
+            case ..<7: .week
+            case ..<31: .month
+            case ..<183: .halfYear
+            case ..<366: .year
+            default: nil
+            }
+            return age.map { (hunk.lines, $0) }
+        }
+    }
+
     private func render() {
         guard !isClosing else { return }
         updateContentSurfaceIfNeeded()
@@ -3062,6 +3135,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.refreshTabs()
         renderSecondaryReader()
         readerController.setDiffMarkers(model.compare.diff?.leftMarkers ?? [:])
+        updateChangeAges(file: readerFile, document: model.tabStrip.activeDocument)
         secondaryReaderController.setDiffMarkers(
             model.compare.diff?.rightMarkers ?? [:]
         )

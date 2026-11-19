@@ -661,6 +661,10 @@
 "main.bracket.notInside" = "The caret is not inside brackets";
 "settings.overviewRuler" = "Show overview marks beside the scroller";
 "settings.overviewRuler.help" = "A narrow strip at the reader’s right edge marks highlights, find matches, bookmarks and differences across the whole file. Click a mark to go there; drag along the strip to scroll.";
+"settings.overviewScopeBands" = "Shade functions on the overview strip";
+"settings.overviewScopeBands.help" = "Each function or type gets a faint band on the overview strip; the one holding the caret is darker, with an accent-colored edge.";
+"settings.overviewChangeAge" = "Show when lines last changed";
+"settings.overviewChangeAge.help" = "A thin column at the strip’s right edge colors lines by their last Git change: darker is more recent, orange is uncommitted. Changes older than a year are left blank.";
 "settings.blockEndAnnotations" = "Label the end of long blocks";
 "settings.blockEndAnnotations.help" = "Rust and TypeScript: after the closing brace of a block of 12 lines or more, show which block it ends. Click the label to go to the block's start.";
 "panel.search.word" = "Whole word";

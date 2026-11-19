@@ -149,6 +149,10 @@ public struct ReaderSettings: Equatable, Sendable {
     public var blockEndAnnotations: Bool
     /// Show the overview ruler beside the reader's scroller.
     public var overviewRuler: Bool
+    /// Shade each function or type on the overview ruler; the caret's scope is emphasized.
+    public var overviewScopeBands: Bool
+    /// Color the overview ruler's right edge by when each line last changed (Git).
+    public var overviewChangeAge: Bool
     public var showQuerySuggestions: Bool
 
     public init(
@@ -196,6 +200,8 @@ public struct ReaderSettings: Equatable, Sendable {
         hoverDocs = true
         blockEndAnnotations = true
         overviewRuler = true
+        overviewScopeBands = false
+        overviewChangeAge = false
         showQuerySuggestions = true
         autoLightTheme = .light
         autoDarkTheme = .dark
@@ -265,6 +271,8 @@ public struct ReaderSettings: Equatable, Sendable {
         overviewRuler = (defaults.object(forKey: Keys.overviewRuler) as? NSNumber)?
             .boolValue
             ?? true
+        overviewScopeBands = defaults.bool(forKey: Keys.overviewScopeBands)
+        overviewChangeAge = defaults.bool(forKey: Keys.overviewChangeAge)
         showQuerySuggestions = (defaults.object(forKey: Keys.showQuerySuggestions) as? NSNumber)?
             .boolValue
             ?? true
@@ -308,6 +316,8 @@ public struct ReaderSettings: Equatable, Sendable {
         validated.hoverDocs = hoverDocs
         validated.blockEndAnnotations = blockEndAnnotations
         validated.overviewRuler = overviewRuler
+        validated.overviewScopeBands = overviewScopeBands
+        validated.overviewChangeAge = overviewChangeAge
         validated.showQuerySuggestions = showQuerySuggestions
         validated.autoLightTheme = autoLightTheme
         validated.autoDarkTheme = autoDarkTheme
@@ -355,6 +365,8 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
         defaults.set(validated.blockEndAnnotations, forKey: Keys.blockEndAnnotations)
         defaults.set(validated.overviewRuler, forKey: Keys.overviewRuler)
+        defaults.set(validated.overviewScopeBands, forKey: Keys.overviewScopeBands)
+        defaults.set(validated.overviewChangeAge, forKey: Keys.overviewChangeAge)
         defaults.set(validated.showQuerySuggestions, forKey: Keys.showQuerySuggestions)
     }
 
@@ -400,6 +412,8 @@ public struct ReaderSettings: Equatable, Sendable {
         static let hoverDocs = "reader.hoverDocs"
         static let blockEndAnnotations = "reader.blockEndAnnotations"
         static let overviewRuler = "reader.overviewRuler"
+        static let overviewScopeBands = "reader.overviewScopeBands"
+        static let overviewChangeAge = "reader.overviewChangeAge"
         static let showQuerySuggestions = "reader.showQuerySuggestions"
     }
 }

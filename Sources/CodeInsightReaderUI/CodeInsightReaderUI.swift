@@ -96,6 +96,9 @@ public final class ReaderTextView {
     private var overviewRulerView: OverviewRulerView?
     private var overviewCache: (content: OverviewContent, lines: ProjectedLines)?
     private var overviewGeneration = 0
+    private var overviewShowsScopes = false
+    /// Source lines (1-based) and how recently they changed; older lines are absent.
+    private var changeAges: [(lines: ClosedRange<Int>, age: OverviewChangeAge)] = []
     /// The bracket beside the caret and its partner, as source byte offsets.
     private var bracketMatch: (bracket: UInt32, partner: UInt32?)?
     private var caretByteOffset: UInt32?
@@ -518,8 +521,113 @@ public final class ReaderTextView {
         for (line, labels) in bookmarkMarkers where lineStarts.indices.contains(line - 1) {
             add(.bookmark, lineStarts[line - 1], localizedFormat("reader.bookmarks", labels.joined(separator: ", ")))
         }
+        if overviewShowsScopes, let facets = document.foldTopology?.associatedFacets {
+            // Siblings at one depth alternate shades so neighbours stay apart.
+            var shadeByDepth: [Int: Int] = [:]
+            for facet in facets.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
+                let first = lines.displayLine(ofByte: facet.range.lowerBound).line
+                let last = lines.displayLine(ofByte: max(facet.range.lowerBound, facet.range.upperBound &- 1)).line
+                let shade = shadeByDepth[facet.depth, default: 0]
+                shadeByDepth[facet.depth] = 1 - shade
+                content.scopes.append(.init(lines: first..<(last + 1), shade: shade))
+            }
+        }
+        for (range, age) in changeAges
+        where lineStarts.indices.contains(range.lowerBound - 1) && lineStarts.indices.contains(range.upperBound - 1) {
+            let first = lines.displayLine(ofByte: lineStarts[range.lowerBound - 1]).line
+            let last = lines.displayLine(ofByte: lineStarts[range.upperBound - 1]).line
+            content.ages.append(.init(lines: first..<(last + 1), age: age))
+        }
         overviewCache = (content, lines)
         return (content, overviewGeneration)
+    }
+
+    /// Shows how recently each stretch of source lines changed; pass `[]` to clear.
+    public func setChangeAges(_ ages: [(lines: ClosedRange<Int>, age: OverviewChangeAge)]) {
+        guard !changeAges.elementsEqual(ages, by: { $0.lines == $1.lines && $0.age == $1.age }) else { return }
+        changeAges = ages
+        invalidateOverview()
+    }
+
+    /// Display lines of the innermost scope holding the caret, when scope bands are on.
+    func overviewCurrentScope() -> Range<Int>? {
+        guard overviewShowsScopes, let caret = caretByteOffset, let document = displayedDocument,
+              let lines = overviewCache?.lines,
+              let facet = ReadingPlan.enclosingAssociatedFacets(at: caret, in: document).last
+        else { return nil }
+        let first = lines.displayLine(ofByte: facet.range.lowerBound).line
+        let last = lines.displayLine(ofByte: max(facet.range.lowerBound, facet.range.upperBound &- 1)).line
+        return first..<(last + 1)
+    }
+
+    /// A few source lines around display line `displayLine`, colored like the
+    /// reader, with a title naming the scope, line and the marks found there.
+    func overviewPreview(atDisplayLine displayLine: Int, marks: [String]) -> (title: String, code: NSAttributedString)? {
+        _ = overviewContent()
+        guard let lines = overviewCache?.lines, let document = displayedDocument else { return nil }
+        let starts = document.lineTable.lineStarts
+        guard !starts.isEmpty else { return nil }
+        func lineIndex(ofByte byte: UInt32) -> Int {
+            var low = 0, high = starts.count - 1
+            while low < high {
+                let middle = (low + high + 1) / 2
+                if starts[middle] <= byte { low = middle } else { high = middle - 1 }
+            }
+            return low
+        }
+        let byte = lines.sourceByte(ofDisplayLine: displayLine)
+        let center = lineIndex(ofByte: byte)
+        var title: [String] = []
+        if let facet = ReadingPlan.enclosingAssociatedFacets(at: byte, in: document).last {
+            title.append(facet.name)
+        }
+        title.append(localizedFormat("reader.overview.lineNumber", center + 1))
+        title += marks
+        if displayLine + 1 < lines.count {
+            let hidden = lineIndex(ofByte: lines.sourceByte(ofDisplayLine: displayLine + 1)) - center - 1
+            if hidden > 0 { title.append(localizedFormat("reader.overview.foldedLines", hidden)) }
+        }
+
+        let first = max(0, center - 3), last = min(starts.count - 1, center + 3)
+        let byteCount = UInt32(document.bytes.count)
+        func lineEnd(_ index: Int) -> UInt32 { index + 1 < starts.count ? starts[index + 1] : byteCount }
+        let codeFont = font(atByteOffset: starts[center]) ?? .monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+        let previewFont = NSFontManager.shared.convert(codeFont, toSize: max(10, codeFont.pointSize - 1))
+        let numberFont = NSFont.monospacedDigitSystemFont(ofSize: previewFont.pointSize - 1, weight: .regular)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byClipping
+        let spans = document.highlightSpans.filter {
+            $0.range.upperBound > starts[first] && $0.range.lowerBound < lineEnd(last)
+        }
+        let digits = String(last + 1).count
+        let code = NSMutableAttributedString()
+        for index in first...last {
+            var bytes = Array(document.bytes[Int(starts[index])..<Int(lineEnd(index))])
+            while let tail = bytes.last, tail == 0x0A || tail == 0x0D { bytes.removeLast() }
+            let number = String(index + 1)
+            code.append(NSAttributedString(
+                string: String(repeating: " ", count: digits - number.count) + number + "  ",
+                attributes: [
+                    .font: index == center ? NSFont.monospacedDigitSystemFont(ofSize: numberFont.pointSize, weight: .bold) : numberFont,
+                    .foregroundColor: index == center ? theme.accentColor : theme.foregroundColor.withAlphaComponent(0.45),
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+            let text = NSMutableAttributedString(string: String(decoding: bytes, as: UTF8.self), attributes: [
+                .font: previewFont, .foregroundColor: theme.foregroundColor, .paragraphStyle: paragraph,
+            ])
+            let lineStart = starts[index], lineStop = lineStart + UInt32(bytes.count)
+            for span in spans where span.range.upperBound > lineStart && span.range.lowerBound < lineStop {
+                let lower = Int(max(span.range.lowerBound, lineStart) - lineStart)
+                let upper = Int(min(span.range.upperBound, lineStop) - lineStart)
+                let location = String(decoding: bytes[..<lower], as: UTF8.self).utf16.count
+                let length = String(decoding: bytes[lower..<upper], as: UTF8.self).utf16.count
+                text.addAttribute(.foregroundColor, value: theme.color(for: span.kind), range: NSRange(location: location, length: length))
+            }
+            code.append(text)
+            if index < last { code.append(NSAttributedString(string: "\n", attributes: [.font: previewFont, .paragraphStyle: paragraph])) }
+        }
+        return (title.joined(separator: " · "), code)
     }
 
     /// Display lines in view and the caret's display line.
@@ -569,10 +677,6 @@ public final class ReaderTextView {
     }
 
     /// 1-based source line of `byte`, for the ruler's tooltips.
-    func overviewSourceLine(ofByte byte: UInt32) -> Int {
-        displayedDocument?.lineTable.lineColumn(at: byte).map { Int($0.line) } ?? 0
-    }
-
     // MARK: Highlighted names
 
     /// Names to paint with their color slots. Matching is lexical: same
@@ -1082,6 +1186,7 @@ public final class ReaderTextView {
         prepareIdentifiers(for: document)
         diffMarkers = [:]
         bookmarkMarkers = [:]
+        changeAges = []
         bracketMatch = nil
         caretByteOffset = nil
         blockEndAnnotations = BlockEndAnnotations.compute(for: document)
@@ -1169,6 +1274,7 @@ public final class ReaderTextView {
         widthReflowCapturedState = nil
         diffMarkers = [:]
         bookmarkMarkers = [:]
+        changeAges = []
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
         findMatchByteRanges = nil
@@ -2762,6 +2868,10 @@ public final class ReaderTextView {
 
     public func apply(settings: ReaderSettings) {
         guard !readerWorkStopped else { return }
+        if settings.overviewScopeBands != overviewShowsScopes {
+            overviewShowsScopes = settings.overviewScopeBands
+            invalidateOverview()
+        }
         let newTheme = ReaderTheme(settings: settings)
         let themeChanged = newTheme != theme
         let newTypographyKey = ReaderTypographyKey(settings: settings)
