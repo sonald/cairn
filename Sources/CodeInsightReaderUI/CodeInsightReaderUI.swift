@@ -96,7 +96,6 @@ public final class ReaderTextView {
     private var overviewRulerView: OverviewRulerView?
     private var overviewCache: (content: OverviewContent, lines: ProjectedLines)?
     private var overviewGeneration = 0
-    private var overviewShowsScopes = false
     /// Source lines (1-based) and how recently they changed; older lines are absent.
     private var changeAges: [(lines: ClosedRange<Int>, age: OverviewChangeAge)] = []
     /// The bracket beside the caret and its partner, as source byte offsets.
@@ -521,17 +520,6 @@ public final class ReaderTextView {
         for (line, labels) in bookmarkMarkers where lineStarts.indices.contains(line - 1) {
             add(.bookmark, lineStarts[line - 1], localizedFormat("reader.bookmarks", labels.joined(separator: ", ")))
         }
-        if overviewShowsScopes, let facets = document.foldTopology?.associatedFacets {
-            // Siblings at one depth alternate shades so neighbours stay apart.
-            var shadeByDepth: [Int: Int] = [:]
-            for facet in facets.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
-                let first = lines.displayLine(ofByte: facet.range.lowerBound).line
-                let last = lines.displayLine(ofByte: max(facet.range.lowerBound, facet.range.upperBound &- 1)).line
-                let shade = shadeByDepth[facet.depth, default: 0]
-                shadeByDepth[facet.depth] = 1 - shade
-                content.scopes.append(.init(lines: first..<(last + 1), shade: shade))
-            }
-        }
         for (range, age) in changeAges
         where lineStarts.indices.contains(range.lowerBound - 1) && lineStarts.indices.contains(range.upperBound - 1) {
             let first = lines.displayLine(ofByte: lineStarts[range.lowerBound - 1]).line
@@ -547,17 +535,6 @@ public final class ReaderTextView {
         guard !changeAges.elementsEqual(ages, by: { $0.lines == $1.lines && $0.age == $1.age }) else { return }
         changeAges = ages
         invalidateOverview()
-    }
-
-    /// Display lines of the innermost scope holding the caret, when scope bands are on.
-    func overviewCurrentScope() -> Range<Int>? {
-        guard overviewShowsScopes, let caret = caretByteOffset, let document = displayedDocument,
-              let lines = overviewCache?.lines,
-              let facet = ReadingPlan.enclosingAssociatedFacets(at: caret, in: document).last
-        else { return nil }
-        let first = lines.displayLine(ofByte: facet.range.lowerBound).line
-        let last = lines.displayLine(ofByte: max(facet.range.lowerBound, facet.range.upperBound &- 1)).line
-        return first..<(last + 1)
     }
 
     /// A few source lines around display line `displayLine`, colored like the
@@ -2868,10 +2845,6 @@ public final class ReaderTextView {
 
     public func apply(settings: ReaderSettings) {
         guard !readerWorkStopped else { return }
-        if settings.overviewScopeBands != overviewShowsScopes {
-            overviewShowsScopes = settings.overviewScopeBands
-            invalidateOverview()
-        }
         let newTheme = ReaderTheme(settings: settings)
         let themeChanged = newTheme != theme
         let newTypographyKey = ReaderTypographyKey(settings: settings)

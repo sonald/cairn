@@ -19,23 +19,16 @@ struct OverviewContent {
         let label: String
     }
 
-    /// A function or type's display lines; `shade` alternates between neighbours.
-    struct Scope {
-        let lines: Range<Int>
-        let shade: Int
-    }
-
     struct Age {
         let lines: Range<Int>
         let age: OverviewChangeAge
     }
 
     var marks: [Mark] = []
-    var scopes: [Scope] = []
     var ages: [Age] = []
     var lineCount = 1
 
-    var isEmpty: Bool { marks.isEmpty && scopes.isEmpty && ages.isEmpty }
+    var isEmpty: Bool { marks.isEmpty && ages.isEmpty }
 }
 
 /// How recently a stretch of lines last changed. Older lines are not shown.
@@ -141,16 +134,6 @@ final class OverviewRulerView: NSView {
         func band(_ lines: Range<Int>, x: CGFloat, width: CGFloat) -> NSRect {
             let top = y(forLine: lines.lowerBound, lineCount: lineCount)
             return NSRect(x: x, y: top, width: width, height: max(1, y(forLine: lines.upperBound, lineCount: lineCount) - top))
-        }
-        for scope in content.scopes {
-            theme.foregroundColor.withAlphaComponent(scope.shade == 0 ? 0.04 : 0.08).setFill()
-            band(scope.lines, x: 1, width: bounds.width - 1).fill(using: .sourceOver)
-        }
-        if let current = reader.overviewCurrentScope() {
-            theme.foregroundColor.withAlphaComponent(0.08).setFill()
-            band(current, x: 1, width: bounds.width - 1).fill(using: .sourceOver)
-            theme.accentColor.setFill()
-            band(current, x: 0, width: 2).fill()
         }
         // ponytail: fixed age column at the right edge; it shares x with the
         // third highlight column, which draws over it.
