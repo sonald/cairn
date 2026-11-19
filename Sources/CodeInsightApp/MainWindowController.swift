@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightAI
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightExact
@@ -185,6 +186,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         model: DocumentationPanelModel(source: DashIntegration.documentationSource)
     )
     private let symbolsPanel = ProjectSymbolsPanel(model: ProjectSymbolsPanelModel())
+    private lazy var aiController = AIPanelController(
+        conversation: AIConversationModel(hasKey: { AIKeychain.exists() }), appModel: model)
     /// Screen rects of recently hovered tokens, so the card anchors to the
     /// token it shows even after the pointer moved on.
     private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
@@ -579,6 +582,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             reader.onShowInDocsPanel = { [weak self] identifier, offset, document in
                 self?.showInDocsPanel(identifier: identifier, in: document, byteOffset: offset)
             }
+            reader.onAskAI = { [weak self, weak reader] in
+                guard let self, let reader else { return }
+                askAI(in: reader)
+            }
         }
         symbolDocCard.onPointerEntered = { [weak self] in
             self?.model.symbolHover.pointerEnteredCard()
@@ -592,6 +599,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         symbolDocCard.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
         docsController.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
+        aiController.onOpen = { [weak self] url, byteOffset in
+            guard let self else { return }
+            model.navigate(to: url, byteOffset: byteOffset, leaving: currentJumpRecord())
+            readerController.focusText()
+        }
+        aiController.onShowSettings = { NSApp.sendAction(#selector(AppDelegate.showAISettings(_:)), to: nil, from: nil) }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
             primaryOutline = facets
@@ -1859,7 +1872,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
         }
         symbolsPanel.host = self
-        for controller in [sidebarController, relationController, contextController, panel, docsController, symbolsPanel]
+        for controller in [sidebarController, relationController, contextController, panel, docsController, symbolsPanel, aiController]
             as [NSViewController] {
             host.addChild(controller)
         }
@@ -1872,6 +1885,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             (.search, panel.view, []),
             (.docs, docsController.view, []),
             (.symbols, symbolsPanel.view, []),
+            (.ai, aiController.view, []),
         ]
         for (id, content, accessories) in contents {
             let chrome = PanelChromeView(id: id, title: panelTitle(id), content: content, accessories: accessories)
@@ -2605,6 +2619,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         searchPanel?.apply(settings: settings)
         docsController.apply(settings: settings)
         symbolsPanel.apply(settings: settings)
+        aiController.apply(settings: settings)
         for chrome in chromes.values { chrome.apply(theme: theme) }
         for zoneView in zoneViews.values { zoneView.apply(theme: theme) }
         bookmarkPanel?.apply(settings: settings)
@@ -3968,8 +3983,42 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         savePanelLayout()
     }
 
+    /// Shows the AI panel like the docs panel (a never-sized panel keeps the
+    /// share it first gets) and puts the caret in its question field.
+    func revealAIPanel() {
+        let neverSized = (panelLayout.heights[.ai] ?? 0) <= 0
+        setPanelVisible(.ai, true)
+        aiController.focusInput()
+        let zoneView = zoneViews[panelLayout.zone(of: .ai).zone]!
+        guard neverSized, !panelOverrideActive, !isDraggingPanel,
+              zoneView.panels.contains(where: { $0.id == .ai })
+        else { return }
+        window?.contentView?.layoutSubtreeIfNeeded()
+        panelLayout.recordHeights(zoneView.measuredHeights, for: zoneView.panels.map(\.id))
+        savePanelLayout()
+    }
+
     /// ⌃⇧D: the identifier at the caret, in any language.
     var canShowInDocsPanel: Bool { focusedReader.hoverRequestAtSelection() != nil }
+
+    /// Ask AI about the selection, or the declaration at the caret: the
+    /// inline box, then the answer in the AI panel.
+    func askAIAboutSelection() { askAI(in: focusedReader) }
+
+    private func askAI(in reader: ReaderViewController) {
+        guard let target = reader.aiAskTarget(), let path = projectPath(for: target.file) else {
+            NSSound.beep()
+            return
+        }
+        let selection = AIConversationModel.Selection(
+            path: path, startLine: target.span.startLine, endLine: target.span.endLine, text: target.span.text)
+        model.symbolHover.dismiss()
+        AIAskPopover.show(relativeTo: target.anchor, of: target.view) { [weak self] question in
+            guard let self else { return }
+            revealAIPanel()
+            aiController.ask(question, about: selection)
+        }
+    }
 
     func showInDocsPanelAtSelection() {
         guard let request = focusedReader.hoverRequestAtSelection(),

@@ -328,21 +328,26 @@ package struct MarkdownPreviewRenderer {
     package let baseURL: URL?
     private let bodyPointSize: CGFloat?
     private let compactHeadings: Bool
+    private let loadsImages: Bool
 
     /// `bodyPointSize` overrides the preview's reading size and
     /// `compactHeadings` keeps headings near body size without rules, for
     /// compact hosts such as the symbol documentation card, where rustdoc's
     /// `# Examples` is a section label rather than a page title.
+    /// `loadsImages: false` shows every image as its alt text, for text whose
+    /// author is not trusted (a model's answer).
     package init(
         theme: ReaderTheme,
         baseURL: URL?,
         bodyPointSize: CGFloat? = nil,
-        compactHeadings: Bool = false
+        compactHeadings: Bool = false,
+        loadsImages: Bool = true
     ) {
         self.theme = theme
         self.baseURL = baseURL
         self.bodyPointSize = bodyPointSize
         self.compactHeadings = compactHeadings
+        self.loadsImages = loadsImages
     }
 
     private var body: CGFloat { bodyPointSize ?? max(14, CGFloat(theme.fontSize) + 2) }
@@ -1163,6 +1168,7 @@ package struct MarkdownPreviewRenderer {
     private func imageAttachment(
         _ url: URL, width: CGFloat?, percentage: CGFloat? = nil, inset: CGFloat = 0
     ) -> NSTextAttachment? {
+        guard loadsImages else { return nil }
         let image: NSImage?
         if url.scheme == "data" {
             let string = url.absoluteString

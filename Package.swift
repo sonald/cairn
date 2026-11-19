@@ -228,6 +228,16 @@ let package = Package(
             resources: [.process("Resources")]
         ),
         .target(
+            name: "CodeInsightAI",
+            dependencies: [
+                "CProcessGuard",
+                "CodeInsightAppModel",
+                "CodeInsightCore",
+                "CodeInsightEngine",
+                "CodeInsightReaderCore",
+            ]
+        ),
+        .target(
             name: "CodeInsightReaderCore",
             dependencies: [
                 "CodeInsightCore",
@@ -251,6 +261,7 @@ let package = Package(
         .executableTarget(
             name: "CodeInsightApp",
             dependencies: [
+                "CodeInsightAI",
                 "CodeInsightAppModel",
                 "CodeInsightCore",
                 "CodeInsightEngine",
@@ -371,6 +382,15 @@ let package = Package(
                 "CodeInsightCore",
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
+            ]
+        ),
+        .testTarget(
+            name: "CodeInsightAITests",
+            dependencies: [
+                "CodeInsightAI",
+                "CodeInsightAppModel",
+                "CodeInsightCore",
+                "CodeInsightEngine",
             ]
         ),
         .testTarget(

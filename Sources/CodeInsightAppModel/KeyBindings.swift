@@ -179,6 +179,7 @@ extension CommandID {
     public static let viewPanelContext = CommandID(rawValue: "view.panel.context")
     public static let viewPanelDocs = CommandID(rawValue: "view.panel.docs")
     public static let viewPanelSymbols = CommandID(rawValue: "view.panel.symbols")
+    public static let viewPanelAI = CommandID(rawValue: "view.panel.ai")
     public static let viewLocateProjectSymbol = CommandID(rawValue: "view.symbols.locate")
     public static let viewRestoreDefaultLayout = CommandID(rawValue: "view.restoreDefaultLayout")
     public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
@@ -205,6 +206,7 @@ extension CommandID {
     public static let relationsShowResolutionInspector =
         CommandID(rawValue: "relations.showResolutionInspector")
     public static let relationsShowInDocsPanel = CommandID(rawValue: "relations.showInDocsPanel")
+    public static let relationsAskAI = CommandID(rawValue: "relations.askAI")
 
     public static let lensPreviousCandidate = CommandID(rawValue: "lens.previousCandidate")
     public static let lensNextCandidate = CommandID(rawValue: "lens.nextCandidate")
@@ -395,6 +397,7 @@ public extension KeyBindingScheme {
             def(.viewPanelSymbols, .view, "app.menu.show.hide.symbols", [
                 keyboard([.control, .command], .character("s")),
             ]),
+            def(.viewPanelAI, .view, "app.menu.show.hide.ai", []),
             def(.viewLocateProjectSymbol, .view, "panel.symbols.locate", []),
             def(.viewRestoreDefaultLayout, .view, "app.menu.restore.default.layout", []),
             def(.viewOpenToSide, .view, "app.menu.open.to.side", [
@@ -447,11 +450,14 @@ public extension KeyBindingScheme {
                 keyboard([.control, .shift], .special(.space)),
             ]),
             def(.relationsShowResolutionInspector, .relations, "app.menu.show.resolution.inspector", [
-                keyboard([.command], .character("i")),
+                keyboard([.command, .option], .character("i")),
             ]),
             // ⌃⌘D is the system's Look Up in text views and never reaches the menu.
             def(.relationsShowInDocsPanel, .relations, "main.show.in.docs.panel", [
                 keyboard([.control, .shift], .character("d")),
+            ]),
+            def(.relationsAskAI, .relations, "app.menu.ask.ai", [
+                keyboard([.command], .character("i")),
             ]),
 
             def(.lensTrackSymbol, .lens, "lens.trackSymbol", []),

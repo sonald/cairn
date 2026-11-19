@@ -938,6 +938,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// every grant/revoke so it always reflects the shared registry.
     private(set) lazy var trustListModel = TrustListModel()
 
+    @objc func showAISettings(_ sender: Any?) {
+        keyBindingSettingsModel.selectedTab = .ai
+        showSettings(sender)
+    }
+
     @objc func showSettings(_ sender: Any?) {
         ThemeCatalog.reloadUserThemes(in: userThemesFolder)
         let validated = readerSettings.validatingThemes()
@@ -1306,6 +1311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         else { return }
         if id == .context {
             target.toggleContext(sender)
+        } else if id == .ai, !target.isPanelShown(.ai) {
+            target.revealAIPanel()
         } else {
             target.setPanelVisible(id, !target.isPanelShown(id))
         }
@@ -1344,6 +1351,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     @objc private func showInDocsPanel(_ sender: Any?) {
         projectCommandTarget()?.showInDocsPanelAtSelection()
+    }
+
+    @objc private func askAIAboutSelection(_ sender: Any?) {
+        projectCommandTarget()?.askAIAboutSelection()
     }
 
     @objc func showReadingTrail(_ sender: Any?) {
@@ -1686,6 +1697,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.docs.rawValue
         ),
         .viewPanelSymbols: CommandAction(#selector(AppDelegate.toggleProjectSymbols(_:))),
+        .viewPanelAI: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.ai.rawValue
+        ),
         .viewLocateProjectSymbol: CommandAction(#selector(AppDelegate.locateProjectSymbol(_:))),
         .viewRestoreDefaultLayout: CommandAction(#selector(AppDelegate.restoreDefaultLayout(_:))),
         .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
@@ -1717,6 +1731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             #selector(AppDelegate.showResolutionInspector(_:))
         ),
         .relationsShowInDocsPanel: CommandAction(#selector(AppDelegate.showInDocsPanel(_:))),
+        .relationsAskAI: CommandAction(#selector(AppDelegate.askAIAboutSelection(_:))),
         .lensPreviousCandidate: CommandAction(
             #selector(AppDelegate.previousContextCandidate(_:))
         ),
@@ -1957,6 +1972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             (.search, .toggleProjectSearchResults),
             (.docs, .viewPanelDocs),
             (.symbols, .viewPanelSymbols),
+            (.ai, .viewPanelAI),
         ]
         for (panel, id) in panelCommands {
             let before = panelsMenu.items.count
@@ -2009,6 +2025,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         relationsMenu.addItem(.separator())
         appendMenuItem(for: .relationsShowSymbolDocumentation, to: relationsMenu)
         appendMenuItem(for: .relationsShowInDocsPanel, to: relationsMenu)
+        appendMenuItem(for: .relationsAskAI, to: relationsMenu)
         appendMenuItem(for: .relationsShowResolutionInspector, to: relationsMenu)
         relationsItem.submenu = relationsMenu
         mainMenu.addItem(relationsItem)

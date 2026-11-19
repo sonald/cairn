@@ -330,6 +330,9 @@ private struct SettingsView: View {
             }
             .tabItem { Label(localized("settings.exact"), systemImage: "checkmark.shield") }
             .tag(KeyBindingSettingsModel.Tab.exact)
+            AISettingsView()
+                .tabItem { Label(localized("settings.ai"), systemImage: "sparkle.magnifyingglass") }
+                .tag(KeyBindingSettingsModel.Tab.ai)
             KeybindingsSettingsView(model: keyBindingsModel)
                 .tabItem { Label(localized("settings.keybindings"), systemImage: "keyboard") }
                 .tag(KeyBindingSettingsModel.Tab.keybindings)

@@ -23,14 +23,16 @@ Cairn（Swift package 名称 CodeInsight）是 macOS 14+ 的原生只读代码�
 ## 代码结构与构建
 
 - `Sources/CodeInsightApp`、`CodeInsightCLI`：应用和 CLI 入口。
+- `CodeInsightAI`、`Helpers/cairn-ai`（Rust）：AI 提问的对话、只读工具和发出模型请求的辅助进程。
 - `CodeInsightCore`、`CodeInsightGit`、`CodeInsightEngine`、`CodeInsightExact`：领域数据、快照、索引、语言服务器；extractor 与 `TreeSitterKit` 负责语法。
 - `CodeInsightAppModel`、`CodeInsightReaderCore`、`CodeInsightReaderUI`：应用状态、阅读逻辑、原生渲染。
 - `Tests/` 对应模块；`fixtures/`、`goldset/` 提供验证输入；`scripts/` 提供构建与验证命令；`site/` 是静态官网。
 
-构建固定使用 Xcode 27.1（27A9275）及随附 Swift 6.4，先用 `bash scripts/check-toolchain.sh` 核对。安装 Homebrew libgit2（`brew install libgit2`），在仓库根目录执行：
+构建固定使用 Xcode 27.1（27A9275）及随附 Swift 6.4，先用 `bash scripts/check-toolchain.sh` 核对。安装 Homebrew libgit2（`brew install libgit2`）和 rustup 的 Rust 工具链（AI 辅助程序 `Helpers/cairn-ai` 用它构建），在仓库根目录执行：
 
 ```sh
 swift build
+bash scripts/build-ai-helper.sh
 swift run codeinsight --help
 CAIRN_LIBGIT2=brew bash scripts/make-app.sh
 open .build/distribution/Cairn.app

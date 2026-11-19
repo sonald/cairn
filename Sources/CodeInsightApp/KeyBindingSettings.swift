@@ -109,6 +109,7 @@ final class KeyBindingSettingsModel {
     enum Tab: String {
         case reader
         case exact
+        case ai
         case keybindings
     }
 

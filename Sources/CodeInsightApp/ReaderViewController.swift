@@ -318,6 +318,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onOpenInDash: ((String, UInt32, ReaderDocument) -> Void)?
     /// Context menu "Show in Documentation Panel", with the same arguments.
     var onShowInDocsPanel: ((String, UInt32, ReaderDocument) -> Void)?
+    /// "Ask AI" from the gutter marker or the context menu.
+    var onAskAI: (() -> Void)?
     var projectRoot: URL?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     /// A project file to open from a preview link, with the heading
@@ -807,8 +809,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             action: #selector(showInDocsPanel(_:)),
             keyEquivalent: ""
         ))
+        relationMenu.addItem(.separator())
+        relationMenu.addItem(NSMenuItem(
+            title: localized("app.menu.ask.ai"),
+            action: #selector(askAIFromMenu(_:)),
+            keyEquivalent: ""
+        ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
+        // After the click ends, so the box, not the window, takes the keyboard.
+        textView.onAskMarkerClick = { [weak self] in DispatchQueue.main.async { self?.onAskAI?() } }
         textView.onContextMenu = { [weak self] characterIndex in
             guard let self else { return }
             contextMenuOffset = displayedDocument == nil
@@ -3284,6 +3294,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
               let identifier = textView.identifier(atByteOffset: offset)
         else { return }
         onOpenInDash?(identifier, offset, document)
+    }
+
+    @objc private func askAIFromMenu(_ sender: Any?) { onAskAI?() }
+
+    /// What asking AI is about: the selection, else the declaration at the
+    /// caret; with the rect in `view` to anchor the ask box at.
+    func aiAskTarget() -> (file: URL, span: ReaderTextView.SourceSpan, anchor: NSRect, view: NSView)? {
+        guard displayedDocument != nil, let file = displayedFile,
+              let span = (textView.view.selectedRange().length >= ReaderTextView.askMinimumSelection
+                  ? textView.selectedSourceSpan : nil) ?? textView.caretSymbolSpan,
+              let anchor = textView.selectionAnchorRect
+        else { return nil }
+        return (file, span, anchor, textView.view)
     }
 
     @objc private func showInDocsPanel(_ sender: Any?) {

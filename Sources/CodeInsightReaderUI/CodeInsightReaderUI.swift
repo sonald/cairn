@@ -261,6 +261,10 @@ public final class ReaderTextView {
                 updateCurrentLine(byteOffset: byteOffset)
                 onUserCaretChange?(byteOffset)
             }
+            // A selection the user made offers asking about it in the gutter,
+            // in readers that can ask.
+            let selected = view.selectedRange()
+            setAskMarker(onAskMarkerClick != nil && selected.length >= Self.askMinimumSelection ? selected : nil)
             // A native gesture can select the same symbol range as activation.
             // It still needs the native selection background and anchor semantics.
             if primarySelectionRange != nil {
@@ -275,6 +279,11 @@ public final class ReaderTextView {
                     ))
                 }
             }
+        }
+        textView.selectionChangeHandler = { [weak self] in
+            guard let self, let marked = askMarkerRange,
+                  marked != view.selectedRange() else { return }
+            setAskMarker(nil)
         }
         textView.hoverHandler = { [weak self] point in
             guard let self else { return }
@@ -3217,6 +3226,81 @@ public final class ReaderTextView {
 
     public var selectedSourceText: String? { sourceText(forDisplaySelection: view.selectedRange()) }
 
+    /// Source lines and text of a span the user can ask about.
+    public struct SourceSpan: Equatable, Sendable {
+        public let startLine: Int
+        public let endLine: Int
+        public let text: String
+    }
+
+    /// The selection, mapped back through folds to source lines.
+    public var selectedSourceSpan: SourceSpan? {
+        let range = view.selectedRange()
+        guard let document = displayedDocument,
+              let text = sourceText(forDisplaySelection: range),
+              let ranges = displayMap?.sourceRanges(forDisplay: range),
+              let first = ranges.first, let last = ranges.last,
+              let start = document.lineTable.lineColumn(at: first.lowerBound)?.line,
+              let end = document.lineTable.lineColumn(at: max(first.lowerBound, last.upperBound - 1))?.line
+        else { return nil }
+        return SourceSpan(startLine: Int(start), endLine: Int(end), text: text)
+    }
+
+    /// The innermost declaration around the caret, for asking with nothing selected.
+    public var caretSymbolSpan: SourceSpan? {
+        guard let document = displayedDocument,
+              let caret = sourceByteOffset(forDisplay: view.selectedRange().location),
+              let facet = ReadingPlan.enclosingAssociatedFacets(at: caret, in: document).last,
+              Int(facet.range.upperBound) <= document.bytes.count,
+              let start = document.lineTable.lineColumn(at: facet.range.lowerBound)?.line,
+              let end = document.lineTable.lineColumn(
+                  at: max(facet.range.lowerBound, facet.range.upperBound - 1))?.line
+        else { return nil }
+        let text = String(decoding: document.bytes[Int(facet.range.lowerBound)..<Int(facet.range.upperBound)],
+                          as: UTF8.self)
+        return SourceSpan(startLine: Int(start), endLine: Int(end), text: text)
+    }
+
+    /// The selection's first line in the text view, to anchor the ask box.
+    public var selectionAnchorRect: NSRect? {
+        guard let window = view.window else { return nil }
+        let screen = view.firstRect(forCharacterRange: view.selectedRange(), actualRange: nil)
+        guard screen != .zero else { return nil }
+        return view.convert(window.convertFromScreen(screen), from: nil)
+    }
+
+    /// Shorter selections (a right-click selects the word under it) are
+    /// asked about as the symbol around them.
+    package static let askMinimumSelection = 3
+
+    /// The selection the gutter offers to ask about, and its first line.
+    private var askMarkerRange: NSRange?
+    private var askMarkerLine: Int?
+    package var onAskMarkerClick: (() -> Void)?
+
+    private func setAskMarker(_ range: NSRange?) {
+        let line = range.flatMap { _ in selectedSourceSpan?.startLine }
+        askMarkerRange = line == nil ? nil : range
+        guard askMarkerLine != line else { return }
+        askMarkerLine = line
+        ruler?.needsDisplay = true
+    }
+
+    /// Clicks on the ask marker's line number; true when it was one.
+    func clickAskMarker(at point: NSPoint, in ruler: NSRulerView) -> Bool {
+        guard let marked = askMarkerLine, lineNumbers, point.x < lineNumberColumnWidth else { return false }
+        var hit = false
+        enumerateVisibleLayoutFragments { fragment, line in
+            guard !hit, line == marked,
+                  let firstRow = ReaderViewportGeometry.firstVisualRowRect(ofFragment: fragment, in: view)
+            else { return }
+            let row = ruler.convert(firstRow, from: view)
+            hit = row.minY <= point.y && point.y < row.maxY
+        }
+        if hit { onAskMarkerClick?() }
+        return hit
+    }
+
     /// Reuses the reader's projection when selecting a project-search hit.
     public func revealSearchMatch(range: ByteRange) {
         clearProjectionSelection()
@@ -3930,6 +4014,12 @@ public final class ReaderTextView {
                     width: max(0, lineNumberColumnWidth - 6),
                     height: labelHeight
                 )
+                if line == askMarkerLine {
+                    drawAskMarker(in: NSRect(x: lineNumberColumnWidth - 20, y: firstRow.midY - 8,
+                                             width: 16, height: 16))
+                    lines.append(line)
+                    return
+                }
                 // ponytail: no caret yet → absolute numbers, like Vim's `number relativenumber`.
                 let label = relativeLineNumbers
                     ? currentLineNumber.map { $0 == line ? line : abs(line - $0) } ?? line
@@ -4014,6 +4104,23 @@ public final class ReaderTextView {
             }
         }
         visibleLineNumbers = lineNumbers ? lines : []
+    }
+
+    /// A speech bubble in place of the line number: ask AI about the selection.
+    private func drawAskMarker(in rect: NSRect) {
+        let box = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        theme.backgroundColor.setFill()
+        box.fill()
+        theme.accentColor.setStroke()
+        box.lineWidth = 1
+        box.stroke()
+        guard let symbol = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .medium)
+                .applying(.init(paletteColors: [theme.accentColor])))
+        else { return }
+        let size = symbol.size
+        symbol.draw(in: NSRect(x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+                               width: size.width, height: size.height))
     }
 
     private func drawFoldChevron(collapsed: Bool, in rect: NSRect) {

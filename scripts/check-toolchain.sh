@@ -24,4 +24,10 @@ if [[ "$xcode_version" != "$expected_xcode" ||
     echo 'See docs/development.md. Do not substitute a runner default or latest Xcode.' >&2
     exit 1
 fi
+# The AI helper (Helpers/cairn-ai) is Rust: edition 2024 needs Rust 1.85+.
+if ! cargo_version="$(cargo --version 2>/dev/null)"; then
+    echo 'FAIL: cargo not found; install Rust with rustup (the AI helper is built with it).' >&2
+    exit 1
+fi
+printf '%s\n' "$cargo_version"
 echo 'PASS: local/CI toolchain baseline matches'

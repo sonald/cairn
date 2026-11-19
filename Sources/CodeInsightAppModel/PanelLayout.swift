@@ -9,6 +9,7 @@ public enum PanelID: String, CaseIterable, Sendable {
     case search
     case docs
     case symbols
+    case ai
 }
 
 /// The side zones stack their panels top to bottom; the bottom zone, under
@@ -37,10 +38,10 @@ public struct PanelLayout: Equatable, Sendable {
     public var readerSplitFraction: Double
 
     public static let standard = PanelLayout(
-        zones: [.left: [.files, .outline, .symbols], .right: [.relations, .context, .search, .docs], .bottom: []],
-        hidden: [.relations, .search, .docs, .symbols],
+        zones: [.left: [.files, .outline, .symbols], .right: [.relations, .context, .search, .docs, .ai], .bottom: []],
+        hidden: [.relations, .search, .docs, .symbols, .ai],
         zoneWidths: [.left: 240, .right: 300, .bottom: 260],
-        heights: [.files: 0.55, .outline: 0.45, .relations: 0.5, .context: 0.25, .search: 0.25, .docs: 0, .symbols: 0],
+        heights: [.files: 0.55, .outline: 0.45, .relations: 0.5, .context: 0.25, .search: 0.25, .docs: 0, .symbols: 0, .ai: 0],
         readerSplitFraction: 0.5
     )
 

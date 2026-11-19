@@ -27,14 +27,14 @@ final class PanelChromeView: NSView, NSDraggingSource {
     var minimumHeight: CGFloat {
         switch id {
         case .context: 120
-        case .search, .docs: 240
+        case .search, .docs, .ai: 240
         default: 80
         }
     }
 
     /// Minimum width: the least a side zone keeps for it (soft), and along
     /// the dividers of the bottom zone.
-    var minimumWidth: CGFloat { [.relations, .search, .docs].contains(id) ? 300 : 180 }
+    var minimumWidth: CGFloat { [.relations, .search, .docs, .ai].contains(id) ? 300 : 180 }
 
     /// Minimum size along `zone`'s stacking axis.
     func minimumLength(in zone: PanelZone) -> CGFloat { zone == .bottom ? minimumWidth : minimumHeight }
@@ -383,5 +383,6 @@ func panelTitle(_ id: PanelID) -> String {
     case .search: localized("panel.query.results")
     case .docs: localized("panel.docs")
     case .symbols: localized("panel.symbols")
+    case .ai: localized("panel.ai")
     }
 }

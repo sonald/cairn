@@ -242,3 +242,34 @@ struct MarkdownPreviewRendererTests {
         }
     }
 }
+
+/// AI answers are rendered with `loadsImages: false`: no image of any kind
+/// (local file, data URI, remote, HTML `<img>`) becomes an attachment.
+@MainActor
+@Test func untrustedMarkdownLoadsNoImages() throws {
+    let png = FileManager.default.temporaryDirectory.appendingPathComponent("ai-image-\(UUID().uuidString).png")
+    let image = NSImage(size: NSSize(width: 4, height: 4), flipped: false) { rect in
+        NSColor.red.setFill(); rect.fill(); return true
+    }
+    let tiff = try #require(image.tiffRepresentation)
+    let data = try #require(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+    try data.write(to: png)
+    let markdown = """
+    ![local](\(png.absoluteString)) ![remote](https://example.invalid/a.png)
+    ![inline](data:image/png;base64,\(data.base64EncodedString()))
+
+    <p><img src="\(png.absoluteString)" alt="html"></p>
+    """
+    func attachments(_ loadsImages: Bool) throws -> Int {
+        let output = try #require(MarkdownPreviewRenderer(
+            theme: ReaderTheme(settings: ReaderSettings()), baseURL: nil, loadsImages: loadsImages
+        ).render(markdown))
+        var count = 0
+        output.enumerateAttribute(.attachment, in: NSRange(location: 0, length: output.length)) { value, _, _ in
+            if value != nil { count += 1 }
+        }
+        return count
+    }
+    #expect(try attachments(true) >= 2)
+    #expect(try attachments(false) == 0)
+}

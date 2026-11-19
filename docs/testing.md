@@ -45,7 +45,7 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 | `reader` | ReaderCore、ReaderUI；包括部分真实 AppKit/TextKit 集成 |
 | `engine` | Engine 和 Rust/Python/TypeScript/Go extractor |
 | `exact` | LSP 编解码、进程、取消、版本边界 |
-| `app` | AppModel、App；包括会话、持久化、窗口和菜单集成 |
+| `app` | AppModel、App、AI；包括会话、持久化、窗口和菜单集成，以及真实 AI 辅助进程对本机回放服务器的集成 |
 | `full` | 所有域、静态检查、应用内部 self-test、折叠性能门禁 |
 
 无参数显示帮助并退出，不再隐式全量运行。域选择只缩小执行范围；SwiftPM 发现测试时仍可能编译其他测试目标。
@@ -53,6 +53,8 @@ CODEX_SANDBOX=1 bash scripts/ci.sh full
 `ci.sh` 从当前构建发现用例，再核对每批完整成功摘要的数量。零测试、命令失败、缺少成功摘要、进程提前退出导致少测都会失败。无需每次新增或删除用例维护固定总数。依赖独立 AppKit 进程的鼠标、字体及窗口测试，以及读取进程级工作计数器的 ownership 测量，均隔离执行。本地并行运行时，刷新进程级字体环境（`ReaderFontResolver.shared.refresh()`）的测试，与经注入验证会被刷新打断的锚点校正测试，都标记 `.readerFontEnvironment` 互斥执行：刷新后已挂载的 Reader 会按设计丢弃排队校正，直到宿主重新应用设置，而测试不会重新应用。App 测试目标有同名的一把锁（每个测试目标是独立进程，两把锁互不相干）：刷新或注册字体、改写 `UserDefaults.standard` 参数域字体偏好的测试，与实测会因此多测量一次的两个阅读集测试持有它；字体注册测试在放锁前注销字体并等刷新落地，因为注销触发的刷新是异步的。并发搜索的同步 gate 场景放在串行 suite 中，但仍和其余引擎检查处于同一批；等待上限不能超过用于证明行为的阻塞或计时器间隔，以免等待放宽后掩盖回归。
 
 测试进程（`swiftpm-testing-helper`、`xctest`）不写用户的索引缓存：未设置 `CODEINSIGHT_INDEX_CACHE_ROOT` 时，`IndexCache` 改用每个进程一个、退出时删除的临时目录；需要跨进程热缓存的 harness 和脚本显式设置该变量。直接 `open` 打包应用做原生验收时仍写 `~/Library/Application Support/CodeInsight/index-cache/`，需要隔离时同样设置该变量。测试和 self-test 的 `UserDefaults` suite 一律命名为 `NSTemporaryDirectory() + "<名字>-<UUID>"`：裸名字会在 `~/Library/Preferences` 留下 plist，`removePersistentDomain` 只清空内容不删文件；`ci.sh static` 拒绝字面量 suite 名。
+
+AI 测试（`CodeInsightAITests`）启动真实的 `cairn-ai` 辅助进程，让它连接测试内的本机 HTTP 服务器；服务器按顺序回放 `Fixtures/*.sse`（2026-11-18 从 `deepseek-v4-pro` 录制，思考模式开启，OpenAI 兼容与 Anthropic 各两轮：先并行调用两个工具，再作答），并记下收到的请求。测试检查多轮并行工具调用（推理内容与签名的回传、并行结果合成一条消息）、回答中途取消后追问、工具未回结果时追问、辅助进程被杀后重启，以及过期轮次的事件不进入当前问题；另有读文件越出快照的拒绝，与 AI 回答不加载图片。缺少辅助程序时测试报错并提示先运行 `scripts/build-ai-helper.sh`。真实服务商不在测试里调用。
 
 日常 GitHub CI 根据改动路径选择域；文档不会触发 Swift 全套。产品语料质量和性能工作流改为手动触发，避免每个 PR 下载完整语料、安装全部语言工具链并重复运行性能测试。手动门禁用于明确的跨域验收或发布决策。
 

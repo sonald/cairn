@@ -22,6 +22,8 @@ open .build/distribution/Cairn.app
 
 2026-10-18 核对的 [GitHub 镜像清单](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md)（镜像 20261012.0260.1）包含 27A9275，安装在 `Xcode_27.1_Release_Candidate.app`，`Xcode_27.1.app` 是它的别名；镜像默认仍是 27.0，`xcode-27` 仍标为 preview。镜像更新或移除该版本时，检查会明确失败，需重新选择共同支持的版本。固定构建工具不等于验证 macOS 14 兼容性；旧系统运行仍需独立验收。
 
+AI 提问依赖 Rust 写的辅助程序 `Helpers/cairn-ai`，需要 rustup 安装的工具链（edition 2024，CI 固定 `RUSTUP_TOOLCHAIN`），`check-toolchain.sh` 会检查 `cargo`。`bash scripts/build-ai-helper.sh` 以 `--locked` 构建到 `.build/cairn-ai/release/cairn-ai`：`swift run` 启动的应用向上找到 `.build` 后从这里取辅助程序，找不到时 AI 面板提示先运行该脚本；`make-app.sh` 调用同一脚本，把它放进 `Contents/Helpers/` 并先于应用签名，把 197 个链接进去的 crate 的许可文件复制到 `Contents/Resources/Licenses/cairn-ai/`（`scripts/ai-helper-notices.py`）。`ci.sh` 选到 AI 测试时先构建辅助程序。genai 版本写死在 `Cargo.toml`（`=0.7.5`），升级时同时更新 `Cargo.lock` 并重新录制 `Tests/CodeInsightAITests/Fixtures`。
+
 应用自测二进制为 `.build/debug/codeinsight-app` 或 `.build/release/codeinsight-app`；验收产品交互时使用刚打包的 `Cairn.app`，确认没有误操作另一个旧版本实例。
 
 分发包使用 vendored 静态 libgit2，关闭其网络能力：

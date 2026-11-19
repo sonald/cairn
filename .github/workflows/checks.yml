@@ -53,7 +53,7 @@ jobs:
                   module = path.split('/')[1]
                   if 'Reader' in module:
                       domains.update({'reader', 'app'})
-                  elif 'App' in module:
+                  elif 'App' in module or module.startswith('CodeInsightAI'):
                       domains.add('app')
                   elif 'Exact' in module or 'ProcessGuard' in module:
                       domains.update({'exact', 'app'})
@@ -63,6 +63,8 @@ jobs:
                       domains.update(all_domains)
               elif path.startswith(('Package.', 'scripts/ci.sh', 'scripts/check-toolchain.sh', '.github/workflows/checks.yml')):
                   domains.update(all_domains)
+              elif path.startswith(('Helpers/', 'scripts/build-ai-helper.sh')):
+                  domains.add('app')
               elif path.startswith('fixtures/'):
                   domains.update({'reader', 'engine', 'app'})
               elif path.startswith('goldset/'):

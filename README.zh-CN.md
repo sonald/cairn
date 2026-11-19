@@ -13,16 +13,19 @@
 - 跟随符号或所在函数的 Context 窗口，支持值绑定的类型预览与固定。
 - 可选 rust-analyzer、Pyright、typescript-language-server、gopls 分析，明确显示来源和限制。
 - 只读 Git 快照、比较、带分支的阅读轨迹、冻结阅读集、书签与项目会话恢复。
+- AI 面板：用你配置的模型（OpenAI 兼容或 Anthropic API）回答关于当前快照的问题。模型只能通过 Cairn 的只读工具读代码，它的阅读步骤折叠在回答上方的一行里，展开后读过的代码可点击在阅读区打开。选中代码后点行号旁的图标或按 `⌘I`，可以针对这段代码提问。
 - 多项目窗口、可配置快捷键、代码字体与连字、Light/Dark/SI Classic 主题及随附与自选的 base16 主题、中英文界面。
 - 只读 Markdown、Jupyter Notebook、受限 HTML、图片、PDF 和 UTF-8 文本预览。Markdown 保留内嵌 HTML 的标题、段落和表格，图片等比缩放，远程图片显示替代文本。配置、脚本，以及 C/C++、Java、JS 等未分析语言按语法着色。
 
 历史 commit 的精确分析在 Cairn 自有的检出目录中进行（每个窗口一份，关窗即删），并借用工作区的 `node_modules` 与虚拟环境；切换 commit 时若只有 commit 与配置内容变化，语言服务器原地跟随而不重启。
 
-默认 Safe 模式禁止网络，关闭 Rust 构建脚本与 proc macros。用户明确信任项目后可以开启这些分析步骤，并允许向项目 `target` 目录写入，网络仍关闭。语言服务和依赖需已存在于本机。缺少依赖时，点状态栏的精确分析会给出当前分析单元的安装命令；有 `Cargo.lock` 的 Rust 项目可点“下载依赖”运行 `cargo fetch --locked`；有 `go.sum`、没有 `vendor/` 的 Go 模块则对仓库外的清单副本运行 `go mod download`。这是 Cairn 唯一的联网，且只在这一点击时发生。TypeScript 与 Python 的安装会运行包脚本，Cairn 只复制命令并打开终端，不代为执行。
+默认 Safe 模式禁止网络，关闭 Rust 构建脚本与 proc macros。用户明确信任项目后可以开启这些分析步骤，并允许向项目 `target` 目录写入，网络仍关闭。语言服务和依赖需已存在于本机。缺少依赖时，点状态栏的精确分析会给出当前分析单元的安装命令；有 `Cargo.lock` 的 Rust 项目可点“下载依赖”运行 `cargo fetch --locked`；有 `go.sum`、没有 `vendor/` 的 Go 模块则对仓库外的清单副本运行 `go mod download`。除 AI 提问外，这是 Cairn 唯一的联网，且只在这一点击时发生。TypeScript 与 Python 的安装会运行包脚本，Cairn 只复制命令并打开终端，不代为执行。
+
+AI 提问发往“设置 → AI”中配置的地址，API 密钥存放在钥匙串。某个项目第一次提问前，Cairn 会询问是否允许把这个项目的代码发送过去（本机 localhost 上的模型不询问）。回答不加载远程图片或其他资源。
 
 ## 构建与运行
 
-应用支持 macOS 14+。构建统一使用 Xcode 27.1（27A9275）、随附的 Swift 6.4 和 Homebrew libgit2；本地检查与 CI 校验同一工具链，配置见[开发说明](docs/development.md)。
+应用支持 macOS 14+。构建统一使用 Xcode 27.1（27A9275）、随附的 Swift 6.4、Homebrew libgit2，以及构建 AI 辅助程序所需的 Rust 工具链（rustup）；本地检查与 CI 校验同一工具链，配置见[开发说明](docs/development.md)。
 
 ```bash
 brew install libgit2

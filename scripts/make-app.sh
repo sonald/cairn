@@ -115,6 +115,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$SOURCE_BINARY" "$APP/Contents/MacOS/codeinsight-app"
 chmod 755 "$APP/Contents/MacOS/codeinsight-app"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# The AI helper (Rust, Helpers/cairn-ai) runs from Contents/Helpers.
+mkdir -p "$APP/Contents/Helpers"
+cp "$(bash scripts/build-ai-helper.sh | tail -1)" "$APP/Contents/Helpers/cairn-ai"
+chmod 755 "$APP/Contents/Helpers/cairn-ai"
 # SwiftPM resources must travel with the app, before signing it.
 for target in CodeInsightApp CodeInsightAppModel CodeInsightReaderCore CodeInsightReaderUI; do
     resource_bundle="$BIN_DIR/CodeInsight_${target}.bundle"
@@ -128,6 +132,7 @@ mkdir -p "$licenses"
 for grammar in CTreeSitter CTreeSitterPython CTreeSitterRust CTreeSitterTypeScript; do
     cp "Sources/$grammar/LICENSE" "$licenses/$grammar-LICENSE"
 done
+python3 scripts/ai-helper-notices.py "$licenses/cairn-ai"
 if [[ "${CAIRN_LIBGIT2:-}" == "vendored" ]]; then
     cp Vendor/libgit2/LICENSE "$licenses/libgit2-LICENSE"
 else
@@ -236,6 +241,7 @@ if [[ -d "$APP/Contents/Frameworks" ]]; then
         codesign "${sign_args[@]}" "$library"
     done < <(find "$APP/Contents/Frameworks" -type f -name '*.dylib' -print0)
 fi
+codesign "${sign_args[@]}" "$APP/Contents/Helpers/cairn-ai"
 app_sign_args=("${sign_args[@]}")
 ADHOC_ENTITLEMENTS="$OUTPUT_DIR/.Cairn-ad-hoc.entitlements"
 if [[ "$SIGNING_IDENTITY" == "-" && -d "$APP/Contents/Frameworks" ]]; then

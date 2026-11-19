@@ -27,7 +27,7 @@ for domain in "$@"; do
         reader) filters+=('CodeInsightReaderCoreTests\.|CodeInsightReaderUITests\.') ;;
         engine) filters+=('CodeInsightEngineTests\.|RustExtractorTests\.|PythonExtractorTests\.|TypeScriptExtractorTests\.|GoExtractorTests\.') ;;
         exact) filters+=('CodeInsightExactTests\.') ;;
-        app) filters+=('CodeInsightAppModelTests\.|CodeInsightAppTests\.') ;;
+        app) filters+=('CodeInsightAppModelTests\.|CodeInsightAppTests\.|CodeInsightAITests\.') ;;
         full) run_static=true; run_full=true; filters+=('.*') ;;
         *) echo "Unknown domain: $domain" >&2; usage >&2; exit 2 ;;
     esac
@@ -118,7 +118,7 @@ if grep -rnE 'import AppKit|import SwiftUI' \
     Sources/CodeInsightAppModel Sources/CodeInsightReaderCore \
     Sources/CodeInsightRustExtractor Sources/CodeInsightEngine \
     Sources/CodeInsightPythonExtractor Sources/CodeInsightTypeScriptExtractor \
-    Sources/CodeInsightGit Sources/CodeInsightExact; then
+    Sources/CodeInsightGit Sources/CodeInsightExact Sources/CodeInsightAI; then
     echo "AppKit/SwiftUI imports are not allowed in core targets." >&2
     exit 1
 fi
@@ -162,6 +162,8 @@ if [[ -n "${CODEX_SANDBOX:-}" ]]; then
         --security-path .build/security --manifest-cache local)
 fi
 mkdir -p .build
+# The AI tests drive the real helper process.
+if grep -qE 'CodeInsightAITests|\.\*' <<< "${filters[*]}"; then bash scripts/build-ai-helper.sh >/dev/null; fi
 # Discovery builds the current tests. Never count source annotations or keep a
 # frozen total: deleted tests and parameterized tests are toolchain concerns.
 swift test ${swift_options[@]+"${swift_options[@]}"} list > .build/ci-test-list.txt

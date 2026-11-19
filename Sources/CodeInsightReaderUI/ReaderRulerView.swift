@@ -56,6 +56,7 @@ final class ReaderRulerView: NSRulerView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if reader?.clickAskMarker(at: convert(event.locationInWindow, from: nil), in: self) == true { return }
         reader?.clickFoldHandle(
             at: convert(event.locationInWindow, from: nil),
             in: self,

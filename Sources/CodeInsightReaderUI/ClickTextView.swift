@@ -46,6 +46,8 @@ final class ClickTextView: NSTextView, NSTextViewDelegate {
     var sourceCopyHandler: (() -> String?)?
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
+    /// Every settled selection change, user or programmatic.
+    var selectionChangeHandler: (() -> Void)?
     var viewportChanged: (() -> Void)?
     var userScrollHandler: (() -> Void)?
     var layoutCompleted: (() -> Void)?
@@ -193,6 +195,13 @@ final class ClickTextView: NSTextView, NSTextViewDelegate {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([source as NSString])
+    }
+
+    override func setSelectedRanges(
+        _ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool
+    ) {
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if !stillSelecting { selectionChangeHandler?() }
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
