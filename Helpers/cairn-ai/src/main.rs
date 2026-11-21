@@ -28,7 +28,7 @@
 
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, Tool, ToolResponse};
+use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, StopReason, Tool, ToolResponse};
 use genai::resolver::{AuthData, Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::Deserialize;
@@ -153,8 +153,11 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
         .with_capture_tool_calls(true)
         .with_capture_reasoning_content(true)
         .with_capture_usage(true);
+    // Anthropic requires a limit, and thinking counts against it: at 8192 a
+    // long answer or tool call was cut off mid-way. Every current Claude model
+    // allows at least 32000.
     if config.protocol == "anthropic" {
-        options = options.with_max_tokens(8192);
+        options = options.with_max_tokens(32000);
     }
     let result = async {
         let mut stream = client(&config)?.exec_chat_stream(&config.model, request, Some(&options)).await?.stream;
@@ -177,6 +180,7 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
         Err(error) => return send(&out, &id, json!({"type": "error", "message": error.to_string()})),
     };
     let usage = end.captured_usage.clone();
+    let truncated = matches!(end.captured_stop_reason, Some(StopReason::MaxTokens(_)));
     let calls: Vec<Value> = end
         .captured_tool_calls()
         .unwrap_or_default()
@@ -204,6 +208,10 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
             "input_tokens": tokens(|u| u.prompt_tokens),
             "output_tokens": tokens(|u| u.completion_tokens),
         }));
+    } else if truncated {
+        // A call cut off at the limit has incomplete arguments; running it would
+        // act on whatever part arrived. The next ask drops the unanswered call.
+        send(&out, &id, json!({"type": "error", "message": "the model's reply was cut off at the output limit"}));
     } else {
         send(&out, &id, json!({"type": "tool_calls", "calls": calls}));
     }
