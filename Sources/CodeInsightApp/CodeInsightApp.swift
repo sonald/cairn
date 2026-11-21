@@ -1700,6 +1700,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .viewPanelAI: CommandAction(
             #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.ai.rawValue
         ),
+        .viewPanelGuide: CommandAction(
+            #selector(AppDelegate.togglePanel(_:)), representedObject: PanelID.guide.rawValue
+        ),
         .viewLocateProjectSymbol: CommandAction(#selector(AppDelegate.locateProjectSymbol(_:))),
         .viewRestoreDefaultLayout: CommandAction(#selector(AppDelegate.restoreDefaultLayout(_:))),
         .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
@@ -1973,6 +1976,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             (.docs, .viewPanelDocs),
             (.symbols, .viewPanelSymbols),
             (.ai, .viewPanelAI),
+            (.guide, .viewPanelGuide),
         ]
         for (panel, id) in panelCommands {
             let before = panelsMenu.items.count

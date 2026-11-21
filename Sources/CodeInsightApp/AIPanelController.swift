@@ -424,7 +424,7 @@ final class AIPanelController: NSViewController, NSTextViewDelegate {
 // MARK: - One question
 
 @MainActor
-private final class AITurnView: NSStackView, NSTextViewDelegate {
+final class AITurnView: NSStackView, NSTextViewDelegate {
     var theme: ReaderTheme { didSet { lastAnswer = nil } }
     var onOpen: ((String, Int) -> Void)?
     var onOpenEvidence: ((AIEvidence) -> Void)?

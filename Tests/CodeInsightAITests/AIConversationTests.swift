@@ -230,6 +230,64 @@ struct AIConversationTests {
         #expect(!retried.reasoning)
     }
 
+    /// An Anthropic stream with one tool call.
+    func toolUse(_ name: String, _ input: [String: Any], id: String) throws -> String {
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+        let events: [[String: Any]] = [
+            ["type": "message_start", "message": ["id": "m", "type": "message", "role": "assistant", "model": "m",
+                                                  "content": [Any](), "usage": ["input_tokens": 10, "output_tokens": 1]]],
+            ["type": "content_block_start", "index": 0, "content_block": ["type": "tool_use", "id": id, "name": name, "input": [String: Any]()]],
+            ["type": "content_block_delta", "index": 0, "delta": ["type": "input_json_delta", "partial_json": json]],
+            ["type": "content_block_stop", "index": 0],
+            ["type": "message_delta", "delta": ["stop_reason": "tool_use"], "usage": ["output_tokens": 5]],
+            ["type": "message_stop"],
+        ]
+        return try events.map { event in
+            "event: \(event["type"]!)\ndata: " + String(decoding: try JSONSerialization.data(withJSONObject: event), as: UTF8.self) + "\n\n"
+        }.joined()
+    }
+
+    /// A guide is written through the shared loop: the model reads, hands in
+    /// a draft, gets the checker's errors back, fixes them, and the accepted
+    /// guide is saved by file content (out of date once the file changes).
+    @Test func aGuideIsCheckedFixedSavedAndMarkedStaleWhenTheFileChanges() async throws {
+        let bad = "---\ntitle: a.txt\n---\nAlpha at `L9`.\n"
+        let good = "---\ntitle: a.txt\n---\nAlpha at `L1`.\n"
+        let provider = try FakeProvider(replies: [
+            .init(body: try toolUse("read", ["path": "a.txt"], id: "t1")),
+            .init(body: try toolUse("submit_guide", ["draft": bad], id: "t2")),
+            .init(body: try toolUse("submit_guide", ["draft": good], id: "t3")),
+        ])
+        defer { provider.stop() }
+        guard let f = try fixture(provider: provider, wire: .anthropic) else { return }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("guides-\(UUID().uuidString)")
+        let model = AIGuideModel(
+            helper: { try f.helpers.get() },
+            settings: { AIProviderSettings(wireProtocol: .anthropic, baseURL: "http://127.0.0.1:\(provider.port)", model: "m") },
+            apiKey: { "k" }, consent: AIConsentStore(suiteName: NSTemporaryDirectory() + "guide-\(UUID().uuidString)"),
+            directory: directory)
+        model.show(path: "a.txt", in: f.snapshot)
+        #expect(model.guide == nil)
+        model.generate(language: "English")
+        try await waitUntil { !model.state.isRunning }
+
+        #expect(model.state == .done)
+        #expect(model.steps.map(\.kind) == [.read])
+        #expect(model.guide?.draft == good && model.isStale == false)
+        let fixRequest = try #require(provider.requests.last?.json["messages"] as? [[String: Any]])
+        let returned = fixRequest.flatMap { $0["content"] as? [[String: Any]] ?? [] }
+            .filter { $0["type"] as? String == "tool_result" }.compactMap { $0["content"] as? String }
+        #expect(returned.last?.contains("L4: 9-9 is not inside the file (1-1)") == true, "\(returned)")
+
+        model.show(path: "b.txt", in: f.snapshot)
+        #expect(model.guide == nil)
+        model.show(path: "a.txt", in: f.snapshot)
+        #expect(model.guide?.draft == good && model.isStale == false)
+        try "alpha changed\n".write(to: f.snapshot.root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        model.show(path: "a.txt", in: f.snapshot)
+        #expect(model.guide?.draft == good && model.isStale)
+    }
+
     /// Settings offers the endpoint's own model list; each protocol has its
     /// own path and key header.
     @Test(arguments: [AIProviderSettings.WireProtocol.openAI, .anthropic])

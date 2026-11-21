@@ -949,3 +949,27 @@
 "settings.ai.privacy" = "When you ask a question, the model reads this project's code through Cairn's read-only tools, and those excerpts are sent to the address above. Cairn asks once per project before sending; a model on localhost is not asked about.";
 "settings.ai.consent.revoke" = "Forget Allowed Projects";
 "settings.ai.consent.revoke.confirm" = "Ask again before sending code from any project?";
+
+/* File guide panel */
+"panel.guide" = "Guide";
+"app.menu.show.hide.guide" = "Show/Hide Guide";
+"guide.generate" = "Write Guide";
+"guide.regenerate" = "Rewrite";
+"guide.stop" = "Stop";
+"guide.allow" = "Allow and Write";
+"guide.noFile" = "Open a file to read its guide.";
+"guide.empty" = "No guide for this file yet. The model reads the file and what it touches with Cairn's read-only tools, then writes how it is put together: its flows, the role of each part, and what to ask next. Every piece of code it names opens in the reader.";
+"guide.stale" = "The file changed since this guide was written; it may be out of date.";
+"guide.written" = "Written by %@ on %@";
+"guide.otherFile" = "Writing the guide for %@…";
+"guide.error.noDraft" = "the model did not hand in a guide.";
+"guide.play" = "▶ Play";
+"guide.from" = "From:";
+"guide.role.main" = "main";
+"guide.role.data" = "data";
+"guide.role.setup" = "setup";
+"guide.role.helper" = "helper";
+"guide.role.error" = "errors";
+"guide.role.boilerplate" = "boilerplate";
+"guide.role.test" = "test";
+"guide.role.other" = "other";

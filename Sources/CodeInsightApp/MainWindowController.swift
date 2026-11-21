@@ -193,6 +193,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let symbolsPanel = ProjectSymbolsPanel(model: ProjectSymbolsPanelModel())
     private lazy var aiController = AIPanelController(
         conversation: AIConversationModel(hasKey: { AIKeychain.exists() }), appModel: model)
+    private lazy var guideController = GuidePanelController(
+        guides: AIGuideModel(hasKey: { AIKeychain.exists() }), appModel: model)
     /// Screen rects of recently hovered tokens, so the card anchors to the
     /// token it shows even after the pointer moved on.
     private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
@@ -610,6 +612,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerController.focusText()
         }
         aiController.onShowSettings = { NSApp.sendAction(#selector(AppDelegate.showAISettings(_:)), to: nil, from: nil) }
+        guideController.projectPath = { [weak self] url in self?.projectPath(for: url) }
+        guideController.onShowSettings = aiController.onShowSettings
+        guideController.onAsk = { [weak self] question in
+            guard let self else { return }
+            revealAIPanel()
+            aiController.ask(question)
+        }
+        guideController.onOpen = { [weak self] url, start, end, playing in
+            guard let self else { return }
+            let range = start.flatMap { start in end.flatMap { $0 > start ? ByteRange(lowerBound: start, upperBound: $0) : nil } }
+            @MainActor func showing() -> Bool { readerController.displayedFile?.standardizedFileURL == url.standardizedFileURL }
+            // A played step in the file already open only moves the selection.
+            if !(playing && range != nil && showing()) {
+                // Renders at once, so the marked lines are not replaced by the caret.
+                navigate(to: url, byteOffset: start)
+            }
+            if let range, showing() {
+                readerController.revealProjectSearchMatch(range, expectedContentID: readerController.displayedContentID)
+            }
+            if !playing { readerController.focusText() }
+        }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
             primaryOutline = facets
@@ -1877,7 +1900,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self.model.scheduleSessionCheckpoint(panelPreset: self.panelPreset)
         }
         symbolsPanel.host = self
-        for controller in [sidebarController, relationController, contextController, panel, docsController, symbolsPanel, aiController]
+        for controller in [sidebarController, relationController, contextController, panel, docsController, symbolsPanel, aiController, guideController]
             as [NSViewController] {
             host.addChild(controller)
         }
@@ -1891,6 +1914,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             (.docs, docsController.view, []),
             (.symbols, symbolsPanel.view, []),
             (.ai, aiController.view, []),
+            (.guide, guideController.view, []),
         ]
         for (id, content, accessories) in contents {
             let chrome = PanelChromeView(id: id, title: panelTitle(id), content: content, accessories: accessories)
@@ -2626,6 +2650,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         docsController.apply(settings: settings)
         symbolsPanel.apply(settings: settings)
         aiController.apply(settings: settings)
+        guideController.apply(settings: settings)
         for chrome in chromes.values { chrome.apply(theme: theme) }
         for zoneView in zoneViews.values { zoneView.apply(theme: theme) }
         bookmarkPanel?.apply(settings: settings)

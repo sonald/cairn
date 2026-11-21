@@ -58,7 +58,17 @@ final class AIRun {
         case stepStarted(AIToolStep)
         case stepFinished(AIToolStep, evidence: [AIEvidence])
         case done(outputTokens: Int)
+        /// The model handed in its work through the task's terminal tool and
+        /// the check accepted it; the run is over.
+        case submitted(AIToolCall)
         case failed(String)
+    }
+
+    /// A tool that ends the run, such as handing in a draft: `check` returns
+    /// nil to accept the call, or what to fix, which goes back as its result.
+    struct Terminal {
+        let name: String
+        let check: @MainActor (AIToolCall) -> String?
     }
 
     /// Tool rounds one request may use, and the input one round may send
@@ -69,6 +79,9 @@ final class AIRun {
     /// Input of the last round above which the helper clears the earlier
     /// tool results before the next request (they can be fetched again).
     let trimAbove: Int
+    /// What the model is told to do once the budget is spent.
+    let whenOverBudget: String
+    let terminal: Terminal?
     var update: (Update) -> Void = { _ in }
 
     private let helper: @MainActor () throws -> AIHelper?
@@ -84,12 +97,15 @@ final class AIRun {
     private var toolTask: Task<Void, Never>?
 
     init(helper: @escaping @MainActor () throws -> AIHelper?, tools: [[String: Any]],
-         maxRounds: Int, answerAbove: Int, trimAbove: Int) {
+         maxRounds: Int, answerAbove: Int, trimAbove: Int,
+         whenOverBudget: String = "answer now with what you have read", terminal: Terminal? = nil) {
         self.helper = helper
         self.tools = tools
         self.maxRounds = maxRounds
         self.answerAbove = answerAbove
         self.trimAbove = trimAbove
+        self.whenOverBudget = whenOverBudget
+        self.terminal = terminal
     }
 
     /// Whether the helper holds this run's conversation, so a follow-up
@@ -204,8 +220,18 @@ final class AIRun {
         toolTask = Task { [weak self] in
             var results: [[String: String]] = []
             for call in calls {
+                if let terminal = self?.terminal, call.name == terminal.name {
+                    guard let self, self.isCurrent(expectedRound) else { return }
+                    if let problems = terminal.check(call) {
+                        results.append(["call_id": call.callID, "content": problems])
+                        continue
+                    }
+                    self.isRunning = false
+                    self.update(.submitted(call))
+                    return
+                }
                 if overBudget {
-                    results.append(["call_id": call.callID, "content": "error: the tool budget for this question is used up; answer now with what you have read"])
+                    results.append(["call_id": call.callID, "content": "error: the tool budget is used up; \(self?.whenOverBudget ?? "")"])
                     continue
                 }
                 // Each step shows while it runs and joins the trace as it ends.

@@ -180,6 +180,7 @@ extension CommandID {
     public static let viewPanelDocs = CommandID(rawValue: "view.panel.docs")
     public static let viewPanelSymbols = CommandID(rawValue: "view.panel.symbols")
     public static let viewPanelAI = CommandID(rawValue: "view.panel.ai")
+    public static let viewPanelGuide = CommandID(rawValue: "view.panel.guide")
     public static let viewLocateProjectSymbol = CommandID(rawValue: "view.symbols.locate")
     public static let viewRestoreDefaultLayout = CommandID(rawValue: "view.restoreDefaultLayout")
     public static let viewOpenToSide = CommandID(rawValue: "view.openToSide")
@@ -398,6 +399,7 @@ public extension KeyBindingScheme {
                 keyboard([.control, .command], .character("s")),
             ]),
             def(.viewPanelAI, .view, "app.menu.show.hide.ai", []),
+            def(.viewPanelGuide, .view, "app.menu.show.hide.guide", []),
             def(.viewLocateProjectSymbol, .view, "panel.symbols.locate", []),
             def(.viewRestoreDefaultLayout, .view, "app.menu.restore.default.layout", []),
             def(.viewOpenToSide, .view, "app.menu.open.to.side", [

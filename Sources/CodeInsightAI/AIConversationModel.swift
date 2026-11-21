@@ -159,6 +159,8 @@ public final class AIConversationModel {
             turns[last].state = .done
             turns[last].outputTokens = outputTokens
             turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
+        case .submitted:
+            break  // Asking has no terminal tool.
         case .failed(let message):
             turns[last].state = .failed(message)
             turns[last].runningStep = nil

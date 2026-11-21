@@ -949,3 +949,27 @@
 "settings.ai.privacy" = "提问时，模型通过 Cairn 的只读工具阅读这个项目的代码，这些片段会发送到上面的地址。每个项目第一次发送前 Cairn 会先征得你的同意；本机（localhost）上的模型不需要。";
 "settings.ai.consent.revoke" = "忘记已允许的项目";
 "settings.ai.consent.revoke.confirm" = "之后任何项目发送代码前都重新询问？";
+
+/* File guide panel */
+"panel.guide" = "导读";
+"app.menu.show.hide.guide" = "显示或隐藏导读";
+"guide.generate" = "生成导读";
+"guide.regenerate" = "重新生成";
+"guide.stop" = "停止";
+"guide.allow" = "允许并生成";
+"guide.noFile" = "打开一个文件查看它的导读。";
+"guide.empty" = "这个文件还没有导读。模型会通过 Cairn 的只读工具阅读这个文件和它牵涉的代码，然后写出它是怎么搭起来的：有哪些流程、各部分负责什么、接下来值得问什么。导读里提到的代码点击即可在阅读区打开。";
+"guide.stale" = "文件在写导读之后改动过，内容可能已过时。";
+"guide.written" = "由 %@ 写于 %@";
+"guide.otherFile" = "正在为 %@ 写导读…";
+"guide.error.noDraft" = "模型没有交回导读。";
+"guide.play" = "▶ 播放";
+"guide.from" = "入口：";
+"guide.role.main" = "主线";
+"guide.role.data" = "数据";
+"guide.role.setup" = "初始化";
+"guide.role.helper" = "辅助";
+"guide.role.error" = "错误处理";
+"guide.role.boilerplate" = "样板";
+"guide.role.test" = "测试";
+"guide.role.other" = "其他";

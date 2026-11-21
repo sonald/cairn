@@ -146,13 +146,13 @@ func panelLayoutDecodingRepairsBadFieldsAndRejectsNonLayouts() throws {
      "readerSplitFraction": 1.5}
     """#)
     #expect(repaired.panels(in: .left) == [.search, .files, .outline, .symbols])
-    #expect(repaired.panels(in: .right) == [.docs, .relations, .context, .ai])
+    #expect(repaired.panels(in: .right) == [.docs, .relations, .context, .ai, .guide])
     #expect(repaired.heights[.search] == 0.3)
     #expect(repaired.heights[.files] == 0.7)
     #expect(repaired.heights[.docs] == 0.5)
     #expect(repaired.heights[.outline] == standard.heights[.outline])
     // Missing panels return in their default visibility.
-    #expect(repaired.hidden == [.files, .relations, .symbols, .ai])
+    #expect(repaired.hidden == [.files, .relations, .symbols, .ai, .guide])
     #expect(repaired.width(of: .left) == 240)
     #expect(repaired.width(of: .right) == 410)
     #expect(repaired.readerSplitFraction == 0.5)
