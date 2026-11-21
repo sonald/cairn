@@ -66,6 +66,11 @@ public final class AIConversationModel {
     /// The most tool rounds one question may use; after it the model is
     /// told to answer with what it has.
     public static let maxRounds = 15
+    /// Input tokens per round. ponytail: fixed below the 100K-token prompt
+    /// where Claude Haiku 5.5's price rises fivefold, not per model window;
+    /// a smaller window is handled by the helper's retry on "too long".
+    static let answerAbove = 80_000
+    static let trimAbove = 60_000
 
     public private(set) var turns: [Turn] = []
     /// The snapshot this conversation reads; nil before the first question.
@@ -82,7 +87,8 @@ public final class AIConversationModel {
         consent: AIConsentStore = AIConsentStore()
     ) {
         access = AIAccess(settings: settings, apiKey: apiKey, hasKey: hasKey ?? { AIKeychain.exists() }, consent: consent)
-        run = AIRun(helper: helper, tools: AITools.specs, maxRounds: Self.maxRounds)
+        run = AIRun(helper: helper, tools: AITools.specs, maxRounds: Self.maxRounds,
+                    answerAbove: Self.answerAbove, trimAbove: Self.trimAbove)
         run.update = { [weak self] in self?.apply($0) }
     }
 

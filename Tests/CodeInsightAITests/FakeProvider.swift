@@ -9,6 +9,7 @@ final class FakeProvider: @unchecked Sendable {
         /// Send only this many SSE events, then keep the connection open.
         var hangAfterEvents: Int? = nil
         var contentType = "text/event-stream"
+        var status = "200 OK"
     }
 
     struct Received {
@@ -90,7 +91,7 @@ final class FakeProvider: @unchecked Sendable {
             connection.send(content: Data(missing.utf8), completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let head = "HTTP/1.1 200 OK\r\nContent-Type: \(reply.contentType)\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+        let head = "HTTP/1.1 \(reply.status)\r\nContent-Type: \(reply.contentType)\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
         var events = reply.body.components(separatedBy: "\n\n").filter { !$0.isEmpty }.map { $0 + "\n\n" }
         if let hang = reply.hangAfterEvents { events = Array(events.prefix(hang)) }
         connection.send(content: Data(head.utf8), completion: .idempotent)

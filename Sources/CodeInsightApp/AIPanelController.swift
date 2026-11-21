@@ -608,6 +608,7 @@ private final class AITurnView: NSStackView, NSTextViewDelegate {
         case .failed(let message):
             let reason = switch message {
             case "roundLimit": localizedFormat("ai.error.roundLimit", AIConversationModel.maxRounds)
+            case "contextLimit": localized("ai.error.contextLimit")
             case "helperMissing": localized("ai.helper.missing")
             case AIHelper.exitedMessage: localized("ai.error.helperExited")
             default: message

@@ -156,6 +156,80 @@ struct AIConversationTests {
         #expect(lastResults.count == 2 && lastResults.allSatisfy { $0.contains("budget") })
     }
 
+    /// A recorded stream reporting `tokens` of input instead of what it used.
+    func reporting(_ tokens: Int, _ fixture: String) -> String {
+        FakeProvider.fixture(fixture).replacingOccurrences(
+            of: #""(input|prompt)_tokens":\d+"#, with: "\"$1_tokens\":\(tokens)", options: .regularExpression)
+    }
+
+    /// The tool results the last request sent, and whether it sent reasoning back.
+    func sentResults(_ request: FakeProvider.Received, wire: AIProviderSettings.WireProtocol) -> (results: [String], reasoning: Bool) {
+        let messages = request.json["messages"] as? [[String: Any]] ?? []
+        if wire == .openAI {
+            return (messages.filter { $0["role"] as? String == "tool" }.compactMap { $0["content"] as? String },
+                    messages.contains { !(($0["reasoning_content"] as? String) ?? "").isEmpty })
+        }
+        let blocks = messages.flatMap { $0["content"] as? [[String: Any]] ?? [] }
+        return (blocks.filter { $0["type"] as? String == "tool_result" }.compactMap { $0["content"] as? String },
+                blocks.contains { $0["type"] as? String == "thinking" })
+    }
+
+    /// A round whose input is over the budget gets "answer now" instead of
+    /// results; the next question goes out with the old results cleared and,
+    /// on Anthropic, without the earlier thinking, which Claude would reject
+    /// once an earlier message changed (a 400, measured 2026-11-21).
+    @Test(arguments: [AIProviderSettings.WireProtocol.openAI, .anthropic])
+    func aLongConversationIsToldToAnswerAndTheNextQuestionClearsOldResults(wire: AIProviderSettings.WireProtocol) async throws {
+        let name = wire == .openAI ? "openai" : "anthropic"
+        let provider = try FakeProvider(replies: [
+            .init(body: reporting(AIConversationModel.answerAbove + 1, "\(name)-1-tools")),
+            .init(body: reporting(AIConversationModel.trimAbove + 1, "\(name)-2-answer")),
+            .init(body: FakeProvider.fixture("\(name)-2-answer")),
+        ])
+        defer { provider.stop() }
+        guard let f = try fixture(provider: provider, wire: wire) else { return }
+        f.model.ask("first", snapshot: f.snapshot)
+        try await waitUntil { !f.model.isRunning }
+        #expect(f.model.turns[0].state == .done)
+        #expect(f.model.turns[0].steps.isEmpty)
+        let answered = sentResults(try #require(provider.requests.last), wire: wire)
+        #expect(answered.results.count == 2 && answered.results.allSatisfy { $0.contains("budget") })
+
+        f.model.ask("second", snapshot: f.snapshot)
+        try await waitUntil { !f.model.isRunning }
+        #expect(f.model.turns[1].state == .done)
+        let trimmed = sentResults(try #require(provider.requests.last), wire: wire)
+        #expect(trimmed.results.count == 2 && trimmed.results.allSatisfy { $0.contains("cleared") })
+        // OpenAI-compatible providers do not bind reasoning to the history, so it stays.
+        #expect(trimmed.reasoning == (wire == .openAI))
+    }
+
+    /// A question the provider rejects as longer than the model's context is
+    /// sent once more with the earlier tool results cleared.
+    @Test func aQuestionRejectedAsTooLongIsRetriedWithOldResultsCleared() async throws {
+        let tooLong = #"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1048577 tokens > 1048576 maximum"}}"#
+        let provider = try FakeProvider(replies: [
+            .init(body: FakeProvider.fixture("anthropic-1-tools")),
+            .init(body: FakeProvider.fixture("anthropic-2-answer")),
+            .init(body: tooLong, contentType: "application/json", status: "400 Bad Request"),
+            .init(body: FakeProvider.fixture("anthropic-2-answer")),
+        ])
+        defer { provider.stop() }
+        guard let f = try fixture(provider: provider, wire: .anthropic) else { return }
+        f.model.ask("first", snapshot: f.snapshot)
+        try await waitUntil { !f.model.isRunning }
+        f.model.ask("second", snapshot: f.snapshot)
+        try await waitUntil { !f.model.isRunning }
+
+        #expect(f.model.turns[1].state == .done)
+        let requests = provider.requests
+        try #require(requests.count == 4)
+        #expect(sentResults(requests[2], wire: .anthropic).results.allSatisfy { $0.contains("alpha") || $0.contains("beta") })
+        let retried = sentResults(requests[3], wire: .anthropic)
+        #expect(retried.results.count == 2 && retried.results.allSatisfy { $0.contains("cleared") })
+        #expect(!retried.reasoning)
+    }
+
     /// Settings offers the endpoint's own model list; each protocol has its
     /// own path and key header.
     @Test(arguments: [AIProviderSettings.WireProtocol.openAI, .anthropic])

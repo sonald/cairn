@@ -61,9 +61,14 @@ final class AIRun {
         case failed(String)
     }
 
-    /// Tool rounds one request may use; after them the model is told to
-    /// answer with what it has, and one round later the run stops.
+    /// Tool rounds one request may use, and the input one round may send
+    /// (history included) before the model is told to answer with what it
+    /// has; if it calls tools again after that, the run stops.
     let maxRounds: Int
+    let answerAbove: Int
+    /// Input of the last round above which the helper clears the earlier
+    /// tool results before the next request (they can be fetched again).
+    let trimAbove: Int
     var update: (Update) -> Void = { _ in }
 
     private let helper: @MainActor () throws -> AIHelper?
@@ -74,13 +79,17 @@ final class AIRun {
     private(set) var isRunning = false
     private var roundsThisRequest = 0
     private var stepsThisRequest = 0
+    private var toldToAnswer = false
     private var snapshot: AISnapshot?
     private var toolTask: Task<Void, Never>?
 
-    init(helper: @escaping @MainActor () throws -> AIHelper?, tools: [[String: Any]], maxRounds: Int) {
+    init(helper: @escaping @MainActor () throws -> AIHelper?, tools: [[String: Any]],
+         maxRounds: Int, answerAbove: Int, trimAbove: Int) {
         self.helper = helper
         self.tools = tools
         self.maxRounds = maxRounds
+        self.answerAbove = answerAbove
+        self.trimAbove = trimAbove
     }
 
     /// Whether the helper holds this run's conversation, so a follow-up
@@ -103,9 +112,11 @@ final class AIRun {
             // Used only when the helper creates the conversation.
             "system": system,
             "tools": tools,
+            "trim_above": trimAbove,
         ]
         roundsThisRequest = 0
         stepsThisRequest = 0
+        toldToAnswer = false
         helper.send(request)
     }
 
@@ -167,8 +178,8 @@ final class AIRun {
             update(.text(delta))
         case .reasoning, .models:
             break
-        case .toolCalls(let calls):
-            runTools(calls)
+        case .toolCalls(let calls, let inputTokens):
+            runTools(calls, inputTokens: inputTokens)
         case .done(_, let outputTokens):
             isRunning = false
             update(.done(outputTokens: outputTokens))
@@ -178,16 +189,17 @@ final class AIRun {
         }
     }
 
-    private func runTools(_ calls: [AIToolCall]) {
+    private func runTools(_ calls: [AIToolCall], inputTokens: Int) {
         guard let snapshot, let conversationID else { return }
         roundsThisRequest += 1
-        if roundsThisRequest > maxRounds + 1 {
+        let overBudget = roundsThisRequest > maxRounds || inputTokens > answerAbove
+        if overBudget, toldToAnswer {
             cancel()
-            update(.failed("roundLimit"))
+            update(.failed(roundsThisRequest > maxRounds ? "roundLimit" : "contextLimit"))
             return
         }
+        toldToAnswer = overBudget
         update(.tools)
-        let overBudget = roundsThisRequest > maxRounds
         let expectedRound = round
         toolTask = Task { [weak self] in
             var results: [[String: String]] = []

@@ -917,6 +917,7 @@
 "ai.status.stopped" = "已停止。";
 "ai.status.failed" = "失败：";
 "ai.error.roundLimit" = "模型用了 %d 轮工具仍在查找，已停止。";
+"ai.error.contextLimit" = "对话已经太长，模型仍在调用工具，已停止。";
 "ai.error.helperExited" = "AI 辅助程序已停止。再次提问会重新启动它。";
 "ai.summary.searches" = "查找 %d 次";
 "ai.summary.reads" = "读取 %d 次";

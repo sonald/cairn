@@ -5,7 +5,8 @@ import Foundation
 public enum AIHelperEvent: Sendable {
     case text(String)
     case reasoning(String)
-    case toolCalls([AIToolCall])
+    /// `inputTokens`: what the round sent, history included.
+    case toolCalls([AIToolCall], inputTokens: Int)
     case done(inputTokens: Int, outputTokens: Int)
     /// The answer to a model list request.
     case models([String])
@@ -134,7 +135,7 @@ public final class AIHelper: @unchecked Sendable {
                 } ?? Data("{}".utf8)
                 return AIToolCall(callID: id, name: name, arguments: arguments)
             }
-            return .toolCalls(calls)
+            return .toolCalls(calls, inputTokens: (object["input_tokens"] as? NSNumber)?.intValue ?? 0)
         default: return nil
         }
     }

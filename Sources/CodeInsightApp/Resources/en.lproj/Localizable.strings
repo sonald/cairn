@@ -917,6 +917,7 @@
 "ai.status.stopped" = "Stopped.";
 "ai.status.failed" = "Failed:";
 "ai.error.roundLimit" = "the model kept looking after %d rounds of tools.";
+"ai.error.contextLimit" = "the conversation grew too long while the model kept calling tools.";
 "ai.error.helperExited" = "the AI helper stopped. Ask again to start it anew.";
 "ai.summary.searches" = "Lookups: %d";
 "ai.summary.reads" = "Reads: %d";

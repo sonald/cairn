@@ -5,9 +5,11 @@
 //!
 //! In (Cairn → helper):
 //!   {"type":"ask","conversation":ID,"config":{"protocol":"openai"|"anthropic","base_url":S,"model":S,"api_key":S},
-//!    "system":S,"tools":[{"name":S,"description":S,"schema":{...}}],"text":S}
+//!    "system":S,"tools":[{"name":S,"description":S,"schema":{...}}],"text":S,"trim_above":N}
 //!       Creates the conversation on first use (system and tools are fixed then), appends the user text
-//!       and runs a round.
+//!       and runs a round. When the last round's input passed `trim_above` tokens, every earlier tool
+//!       result is first replaced by a note saying how to get it back (see `trim`). A first round the
+//!       provider rejects as too long is trimmed and sent once more.
 //!   {"type":"tool_results","conversation":ID,"results":[{"call_id":S,"content":S}]}
 //!       Appends the results of the last round's calls as one message and runs the next round.
 //!   Both may carry "round":N, which every event of that round echoes, so late events of a cancelled
@@ -19,7 +21,8 @@
 //!
 //! Out (helper → Cairn), each carrying "conversation" and "round":
 //!   {"type":"text","delta":S} · {"type":"reasoning","delta":S}
-//!   {"type":"tool_calls","calls":[{"call_id":S,"name":S,"arguments":{...}}]}   round ended, run these
+//!   {"type":"tool_calls","calls":[{"call_id":S,"name":S,"arguments":{...}}],"input_tokens":N}
+//!                                                                            round ended, run these
 //!   {"type":"done","input_tokens":N,"output_tokens":N}                        round ended with the answer
 //!   {"type":"models","models":[S]}                                           answer to list_models, sorted
 //!   {"type":"error","message":S}
@@ -28,7 +31,9 @@
 
 use futures::StreamExt;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, StopReason, Tool, ToolResponse};
+use genai::chat::{
+    ChatMessage, ChatOptions, ChatRequest, ChatRole, ChatStreamEvent, ContentPart, StopReason, Tool, ToolResponse,
+};
 use genai::resolver::{AuthData, Endpoint, ProviderConfig, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde::Deserialize;
@@ -74,6 +79,7 @@ enum Request {
         text: String,
         #[serde(default)]
         round: u64,
+        trim_above: Option<i32>,
     },
     ToolResults {
         conversation: String,
@@ -97,6 +103,8 @@ struct Conversation {
     config: Config,
     request: ChatRequest,
     round: Option<JoinHandle<()>>,
+    /// Input tokens of the last round that finished.
+    last_input: i32,
 }
 
 type Conversations = Arc<Mutex<HashMap<String, Conversation>>>;
@@ -143,7 +151,7 @@ fn send(out: &Out, conversation: &str, round: u64, mut event: Value) {
 /// Streams one round and records the assistant's turn in the history.
 async fn run_round(conversations: Conversations, out: Out, id: String, round: u64) {
     let send = |out: &Out, id: &str, event: Value| send(out, id, round, event);
-    let (config, request) = {
+    let (config, mut request) = {
         let map = conversations.lock().await;
         let Some(conversation) = map.get(&id) else { return };
         (conversation.config.clone(), conversation.request.clone())
@@ -159,27 +167,25 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
     if config.protocol == "anthropic" {
         options = options.with_max_tokens(32000);
     }
-    let result = async {
-        let mut stream = client(&config)?.exec_chat_stream(&config.model, request, Some(&options)).await?.stream;
-        while let Some(event) = stream.next().await {
-            match event? {
-                ChatStreamEvent::Chunk(chunk) => send(&out, &id, json!({"type": "text", "delta": chunk.content})),
-                ChatStreamEvent::ReasoningChunk(chunk) => {
-                    send(&out, &id, json!({"type": "reasoning", "delta": chunk.content}))
-                }
-                ChatStreamEvent::End(end) => return Ok::<_, genai::Error>(Some(end)),
-                _ => {}
+    let mut retried = false;
+    let end = loop {
+        match stream_round(&config, request.clone(), &options, &out, &id, round).await {
+            Ok(Some(end)) => break end,
+            Ok(None) => return send(&out, &id, json!({"type": "error", "message": "the stream ended without a final event"})),
+            // A question's first round may carry a long history: clear the old tool results
+            // and try once more. Later rounds would need the current round's thinking edited.
+            Err(error) if !retried && too_long(&error.to_string()) && matches!(request.messages.last(), Some(m) if matches!(m.role, ChatRole::User)) => {
+                retried = true;
+                let mut map = conversations.lock().await;
+                let Some(conversation) = map.get_mut(&id) else { return };
+                conversation.request = trim(conversation.request.clone(), &config.protocol);
+                request = conversation.request.clone();
             }
+            Err(error) => return send(&out, &id, json!({"type": "error", "message": error.to_string()})),
         }
-        Ok(None)
-    }
-    .await;
-    let end = match result {
-        Ok(Some(end)) => end,
-        Ok(None) => return send(&out, &id, json!({"type": "error", "message": "the stream ended without a final event"})),
-        Err(error) => return send(&out, &id, json!({"type": "error", "message": error.to_string()})),
     };
     let usage = end.captured_usage.clone();
+    let tokens = |f: fn(&genai::chat::Usage) -> Option<i32>| usage.as_ref().and_then(f).unwrap_or(0);
     let truncated = matches!(end.captured_stop_reason, Some(StopReason::MaxTokens(_)));
     let calls: Vec<Value> = end
         .captured_tool_calls()
@@ -200,9 +206,9 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
             conversation.request = conversation.request.clone().append_message(message);
         }
         conversation.round = None;
+        conversation.last_input = tokens(|u| u.prompt_tokens);
     }
     if calls.is_empty() {
-        let tokens = |f: fn(&genai::chat::Usage) -> Option<i32>| usage.as_ref().and_then(f).unwrap_or(0);
         send(&out, &id, json!({
             "type": "done",
             "input_tokens": tokens(|u| u.prompt_tokens),
@@ -213,8 +219,71 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
         // act on whatever part arrived. The next ask drops the unanswered call.
         send(&out, &id, json!({"type": "error", "message": "the model's reply was cut off at the output limit"}));
     } else {
-        send(&out, &id, json!({"type": "tool_calls", "calls": calls}));
+        send(&out, &id, json!({"type": "tool_calls", "calls": calls, "input_tokens": tokens(|u| u.prompt_tokens)}));
     }
+}
+
+/// Streams one request, forwarding text and reasoning as they come.
+async fn stream_round(
+    config: &Config, request: ChatRequest, options: &ChatOptions, out: &Out, id: &str, round: u64,
+) -> genai::Result<Option<genai::chat::StreamEnd>> {
+    let send = |event: Value| send(out, id, round, event);
+    let mut stream = client(config)?.exec_chat_stream(&config.model, request, Some(options)).await?.stream;
+    while let Some(event) = stream.next().await {
+        match event? {
+            ChatStreamEvent::Chunk(chunk) => send(json!({"type": "text", "delta": chunk.content})),
+            ChatStreamEvent::ReasoningChunk(chunk) => send(json!({"type": "reasoning", "delta": chunk.content})),
+            ChatStreamEvent::End(end) => return Ok(Some(end)),
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+/// Whether the provider refused the request for being longer than the model's context.
+/// ponytail: matched on the error text, which genai passes through; add a phrase when a
+/// provider words it differently.
+fn too_long(message: &str) -> bool {
+    let message = message.to_lowercase();
+    ["prompt is too long", "context length", "context_length", "context window", "maximum context"]
+        .iter()
+        .any(|phrase| message.contains(phrase))
+}
+
+const CLEARED: &str = "[This result was cleared to keep the conversation short. Make the same call again to see it.]";
+
+/// Replaces every tool result with `CLEARED`. On Anthropic it also drops every thinking
+/// block: Claude binds each block to everything sent before it, so after an edit the later
+/// blocks are rejected (a 400 on claude-haiku-5-5 with the check on, 2026-11-21), and blocks
+/// can only be removed from the front, so all go. Other protocols keep their reasoning.
+fn trim(mut request: ChatRequest, protocol: &str) -> ChatRequest {
+    let anthropic = protocol == "anthropic";
+    for message in &mut request.messages {
+        let parts = std::mem::take(&mut message.content).into_parts();
+        let kept: Vec<ContentPart> = parts
+            .into_iter()
+            .filter_map(|part| match part {
+                ContentPart::ToolResponse(mut response) => {
+                    response.content = CLEARED.to_string();
+                    Some(ContentPart::ToolResponse(response))
+                }
+                ContentPart::ReasoningContent(_) | ContentPart::ThoughtSignature(_) if anthropic => None,
+                ContentPart::Custom(custom)
+                    if anthropic
+                        && matches!(custom.data.get("type").and_then(Value::as_str), Some("thinking" | "redacted_thinking")) =>
+                {
+                    None
+                }
+                ContentPart::ToolCall(mut call) if anthropic => {
+                    call.thought_signatures = None;
+                    Some(ContentPart::ToolCall(call))
+                }
+                other => Some(other),
+            })
+            .collect();
+        message.content = kept.into();
+    }
+    request
 }
 
 async fn list_models(out: Out, id: String, config: Config) {
@@ -251,7 +320,7 @@ async fn handle(line: &str, conversations: &Conversations, out: &Out) {
     };
     let mut map = conversations.lock().await;
     let (id, round) = match request {
-        Request::Ask { conversation, config, system, tools, text, round } => {
+        Request::Ask { conversation, config, system, tools, text, round, trim_above } => {
             let entry = map.entry(conversation.clone()).or_insert_with(|| {
                 let tools = tools
                     .into_iter()
@@ -261,13 +330,18 @@ async fn handle(line: &str, conversations: &Conversations, out: &Out) {
                 if !system.is_empty() {
                     request = request.with_system(system);
                 }
-                Conversation { config: config.clone(), request, round: None }
+                Conversation { config: config.clone(), request, round: None, last_input: 0 }
             });
             if let Some(round) = entry.round.take() {
                 round.abort();
             }
             entry.config = config;
-            entry.request = drop_unanswered_calls(entry.request.clone()).append_message(ChatMessage::user(text));
+            let mut request = drop_unanswered_calls(entry.request.clone());
+            if trim_above.is_some_and(|limit| entry.last_input > limit) {
+                request = trim(request, &entry.config.protocol);
+                entry.last_input = 0;
+            }
+            entry.request = request.append_message(ChatMessage::user(text));
             (conversation, round)
         }
         Request::ToolResults { conversation, results, round } => {
