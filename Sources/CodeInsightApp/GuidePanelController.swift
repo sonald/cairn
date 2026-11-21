@@ -72,8 +72,9 @@ final class GuidePanelController: NSViewController, WKNavigationDelegate, WKScri
         header.wantsLayer = true
 
         statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.maximumNumberOfLines = 4
+        statusLabel.lineBreakMode = .byWordWrapping
+        statusLabel.maximumNumberOfLines = 6
+        statusLabel.cell?.truncatesLastVisibleLine = true
         settingsButton.title = localized("ai.openSettings")
         settingsButton.bezelStyle = .rounded
         settingsButton.controlSize = .small
@@ -84,6 +85,8 @@ final class GuidePanelController: NSViewController, WKNavigationDelegate, WKScri
         statusRow.alignment = .leading
         statusRow.spacing = 6
         statusRow.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        // A wrapping label in a stack view stays one line unless its width is bound.
+        statusLabel.widthAnchor.constraint(equalTo: statusRow.widthAnchor, constant: -24).isActive = true
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
@@ -192,7 +195,7 @@ final class GuidePanelController: NSViewController, WKNavigationDelegate, WKScri
             showsSettings = true
         case .helperMissing: status = localized("ai.helper.missing")
         case .needsConsent(let host):
-            status = localizedFormat("ai.consent.message", host)
+            status = localizedFormat("guide.consent.message", host)
         case nil: break
         }
         if path == nil { status = localized("guide.noFile") }

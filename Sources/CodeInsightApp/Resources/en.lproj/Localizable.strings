@@ -957,6 +957,7 @@
 "guide.regenerate" = "Rewrite";
 "guide.stop" = "Stop";
 "guide.allow" = "Allow and Write";
+"guide.consent.message" = "Writing a guide sends excerpts of this project's code, and of its commit messages and past changes, to %@. Allow it for this project? Asking AI uses the same permission.";
 "guide.noFile" = "Open a file to read its guide.";
 "guide.empty" = "No guide for this file yet. The model reads the file and what it touches with Cairn's read-only tools, then writes how it is put together: its flows, the role of each part, and what to ask next. Every piece of code it names opens in the reader.";
 "guide.stale" = "The file changed since this guide was written; it may be out of date.";

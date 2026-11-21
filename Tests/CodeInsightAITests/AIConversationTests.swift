@@ -251,8 +251,8 @@ struct AIConversationTests {
     /// a draft, gets the checker's errors back, fixes them, and the accepted
     /// guide is saved by file content (out of date once the file changes).
     @Test func aGuideIsCheckedFixedSavedAndMarkedStaleWhenTheFileChanges() async throws {
-        let bad = "---\ntitle: a.txt\n---\nAlpha at `L9`.\n"
-        let good = "---\ntitle: a.txt\n---\nAlpha at `L1`.\n"
+        let bad = "---\ntitle: a.txt\n---\nAlpha at `L9`.\n```ask\nWhy?\n```\n"
+        let good = "---\ntitle: a.txt\n---\nAlpha at `L1`.\n```ask\nWhy?\n```\n"
         let provider = try FakeProvider(replies: [
             .init(body: try toolUse("read", ["path": "a.txt"], id: "t1")),
             .init(body: try toolUse("submit_guide", ["draft": bad], id: "t2")),

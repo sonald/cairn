@@ -196,7 +196,7 @@ enum GuideHTML {
         --faint:\(css(theme.chromeTertiaryColor));--accent:\(css(theme.accentColor));--line:\(css(theme.chromeDividerColor));\
         --chip:\(css(theme.chromeColor));--hl:\(css(theme.chromeSelectionColor))}
         *{box-sizing:border-box}
-        body{margin:0;padding:10px 14px 24px;background:var(--bg);color:var(--fg);font:13px/1.55 -apple-system,system-ui,sans-serif}
+        body{margin:0;padding:10px 14px 24px;overflow-wrap:anywhere;background:var(--bg);color:var(--fg);font:13px/1.55 -apple-system,system-ui,sans-serif}
         h1{font-size:15px;margin:2px 0 6px}h2{font-size:12.5px;margin:18px 0 6px;color:var(--muted);text-transform:none}
         p,ul,ol,blockquote{margin:6px 0}ul,ol{padding-left:20px}blockquote{border-left:3px solid var(--line);padding-left:8px;color:var(--muted)}
         code{font:12px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--chip);border-radius:4px;padding:0 3px}

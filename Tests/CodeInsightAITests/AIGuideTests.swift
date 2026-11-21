@@ -91,6 +91,8 @@ struct AIGuideTests {
         #expect(has(8, "sidekick is not a role"))
         #expect(has(10, "is not a component"))
         #expect(has(12, "the block is not closed"))
+        // Follow-up questions are the guide's way into asking; a draft without them goes back.
+        #expect(has(14, "no ask block"))
         #expect(errors.allSatisfy { $0.contains(". Fix: ") }, "\(errors)")
     }
 
@@ -100,6 +102,9 @@ struct AIGuideTests {
         ```roles
         `handle:10-20` | main | the loop
         `handle` | helper | no lines
+        ```
+        ```ask
+        Why?
         ```
         """
         let errors = GuideDraft.check(draft, in: f).errors

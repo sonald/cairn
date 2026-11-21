@@ -9,7 +9,7 @@ import Foundation
 public enum AIGuide {
     /// Bumped when the prompt or format changes, so cached guides written
     /// for the old one show as out of date.
-    public static let promptVersion = "guide-1"
+    public static let promptVersion = "guide-2"
     public static let maxRounds = 15
     static let components = ["path", "roles", "sequence", "state", "ask"]
     static let roles: Set<String> = ["main", "data", "setup", "helper", "error", "boilerplate", "test", "other"]
@@ -119,7 +119,8 @@ public enum AIGuide {
                   loop <condition> ... end
       state     Named states and what moves between them:
                   A -> B: event `anchor`
-      ask       1-3 follow-up questions the reader is likely to have, one per line
+      ask       1-3 follow-up questions the reader is likely to have, one per line.
+                Every guide ends with one; Cairn shows them as buttons that ask.
 
     Choosing:
     - Include a component only when the file has that shape. A sequence needs several
@@ -541,6 +542,9 @@ public struct GuideDraft: Sendable, Equatable {
         }
         flushProse()
         if blocks.isEmpty { errors.append("L1: the draft is empty. Fix: write the guide") }
+        else if !blocks.contains(where: { if case .ask = $0 { true } else { false } }) {
+            error(lines.count, "the draft has no ask block", "end it with ```ask and 1-3 questions, one per line")
+        }
         return (GuideDraft(title: title, blocks: blocks), errors)
     }
 }
