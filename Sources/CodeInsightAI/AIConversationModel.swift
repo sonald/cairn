@@ -61,15 +61,7 @@ public final class AIConversationModel {
         public internal(set) var outputTokens: Int?
     }
 
-    /// Why a question cannot be sent yet.
-    public enum Blocker: Equatable, Sendable {
-        case noProject
-        case needsSettings
-        case needsKey
-        case helperMissing
-        /// Code from this project has not been allowed to go to this host.
-        case needsConsent(host: String)
-    }
+    public typealias Blocker = AIAccess.Blocker
 
     /// The most tool rounds one question may use; after it the model is
     /// told to answer with what it has.
@@ -79,18 +71,8 @@ public final class AIConversationModel {
     /// The snapshot this conversation reads; nil before the first question.
     public private(set) var snapshot: AISnapshot?
 
-    @ObservationIgnored private let helper: @MainActor () throws -> AIHelper?
-    @ObservationIgnored private let settings: @MainActor () -> AIProviderSettings
-    @ObservationIgnored private let apiKey: @MainActor () -> String?
-    /// Whether a key is stored, without reading it: reading the secret can
-    /// raise a Keychain prompt, so only asking does.
-    @ObservationIgnored private let hasKey: @MainActor () -> Bool
-    @ObservationIgnored private let consent: AIConsentStore
-    @ObservationIgnored private var conversationID: String?
-    @ObservationIgnored private weak var connectedHelper: AIHelper?
-    @ObservationIgnored private(set) var round = 0
-    @ObservationIgnored private var roundsThisTurn = 0
-    @ObservationIgnored private var toolTask: Task<Void, Never>?
+    @ObservationIgnored private let access: AIAccess
+    @ObservationIgnored let run: AIRun
 
     public init(
         helper: @escaping @MainActor () throws -> AIHelper? = { try AIHelper.shared() },
@@ -99,31 +81,20 @@ public final class AIConversationModel {
         hasKey: (@MainActor () -> Bool)? = nil,
         consent: AIConsentStore = AIConsentStore()
     ) {
-        self.helper = helper
-        self.settings = settings
-        self.apiKey = apiKey
-        self.hasKey = hasKey ?? { AIKeychain.exists() }
-        self.consent = consent
+        access = AIAccess(settings: settings, apiKey: apiKey, hasKey: hasKey ?? { AIKeychain.exists() }, consent: consent)
+        run = AIRun(helper: helper, tools: AITools.specs, maxRounds: Self.maxRounds)
+        run.update = { [weak self] in self?.apply($0) }
     }
 
     public var isRunning: Bool { turns.last?.state.isRunning ?? false }
 
     /// What stops a question about `project` now, if anything.
     public func blocker(project: URL?) -> Blocker? {
-        guard let project = snapshot?.root ?? project else { return .noProject }
-        let settings = settings()
-        guard settings.isComplete else { return .needsSettings }
-        if !settings.isLocal, !hasKey() { return .needsKey }
-        if AIHelper.locate() == nil, connectedHelper == nil { return .helperMissing }
-        if !settings.isLocal, let host = settings.host, !consent.allows(project, host: host) {
-            return .needsConsent(host: host)
-        }
-        return nil
+        access.blocker(project: snapshot?.root ?? project, helperConnected: run.connectedHelper != nil)
     }
 
     public func allowSending(project: URL) {
-        guard let host = settings().host else { return }
-        consent.allow(project, host: host)
+        access.allow(project)
     }
 
     /// Starts a new conversation on `snapshot` when there is none, then asks.
@@ -133,150 +104,60 @@ public final class AIConversationModel {
         let question = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         cancel()
-        if conversationID == nil || snapshot == nil {
+        if !run.hasConversation || snapshot == nil {
             guard let fresh = newSnapshot() else { return }
             snapshot = fresh
         }
         turns.append(Turn(id: turns.count, question: question, selection: selection, startedAt: Date()))
-        let settings = settings()
-        guard let helper = connect() else { return }
-        let request: [String: Any] = [
-            "type": "ask",
-            "conversation": conversationID!,
-            "config": settings.helperConfig(apiKey: apiKey() ?? ""),
-            "text": selection.map { $0.prompt + "\n\n" + question } ?? question,
-            "round": nextRound(),
-            // Used only when the helper creates the conversation.
-            "system": systemPrompt(),
-            "tools": AITools.specs,
-        ]
-        roundsThisTurn = 0
-        helper.send(request)
+        run.ask(selection.map { $0.prompt + "\n\n" + question } ?? question,
+                in: snapshot!, system: systemPrompt(), config: access.helperConfig)
     }
 
     public func cancel() {
-        toolTask?.cancel()
-        toolTask = nil
-        guard isRunning, let last = turns.indices.last else { return }
+        guard run.cancel(), let last = turns.indices.last else { return }
         turns[last].state = .cancelled
         turns[last].runningStep = nil
         turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
-        round += 1
-        if let conversationID { connectedHelper?.send(["type": "cancel", "conversation": conversationID]) }
     }
 
     /// Forgets the conversation; the next question starts a new one on the
     /// snapshot showing then.
     public func reset() {
         cancel()
-        if let conversationID { connectedHelper?.forget(conversationID) }
-        conversationID = nil
+        run.reset()
         turns = []
         snapshot = nil
     }
 
-    // MARK: Rounds
-
-    private func connect() -> AIHelper? {
-        do {
-            guard let helper = try helper() else { return fail("helperMissing") }
-            if helper !== connectedHelper || conversationID == nil {
-                // A new helper does not know the old conversation: start over there.
-                if let conversationID { connectedHelper?.forget(conversationID) }
-                conversationID = UUID().uuidString
-                connectedHelper = helper
-                helper.observe(conversationID!) { [weak self] round, event in
-                    // The main queue keeps the deltas in order.
-                    DispatchQueue.main.async { MainActor.assumeIsolated { self?.handle(event, round: round) } }
-                }
-            }
-            return helper
-        } catch {
-            return fail(String(describing: error))
-        }
-    }
-
-    private func fail(_ message: String) -> AIHelper? {
-        if let last = turns.indices.last {
-            turns[last].state = .failed(message)
-            turns[last].runningStep = nil
-            turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
-        }
-        return nil
-    }
-
-    private func nextRound() -> Int {
-        round += 1
-        return round
-    }
-
-    func handle(_ event: AIHelperEvent, round eventRound: Int) {
-        guard eventRound == round || eventRound == -1,
-              let last = turns.indices.last, turns[last].state.isRunning
-        else { return }
-        switch event {
+    private func apply(_ update: AIRun.Update) {
+        guard let last = turns.indices.last else { return }
+        switch update {
         case .text(let delta):
             turns[last].answer += delta
             if !delta.isEmpty { turns[last].state = .answering }
-        case .reasoning, .models:
-            break
-        case .toolCalls(let calls):
-            runTools(calls)
-        case .done(_, let outputTokens):
+        case .tools:
+            // Text before tool calls is the model thinking aloud, not the answer.
+            turns[last].answer = ""
+            turns[last].state = .working
+        case .stepStarted(let step):
+            turns[last].runningStep = step
+        case .stepFinished(let step, let evidence):
+            turns[last].runningStep = nil
+            turns[last].steps.append(step)
+            for item in evidence where !turns[last].evidence.contains(where: {
+                $0.path == item.path && $0.startLine == item.startLine && $0.endLine == item.endLine
+            }) {
+                turns[last].evidence.append(item)
+            }
+        case .done(let outputTokens):
             turns[last].state = .done
             turns[last].outputTokens = outputTokens
             turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
         case .failed(let message):
-            if eventRound == -1 { conversationID = nil }
-            _ = fail(message)
+            turns[last].state = .failed(message)
+            turns[last].runningStep = nil
+            turns[last].elapsed = Date().timeIntervalSince(turns[last].startedAt)
         }
-    }
-
-    private func runTools(_ calls: [AIToolCall]) {
-        guard let snapshot, let conversationID, let last = turns.indices.last else { return }
-        roundsThisTurn += 1
-        if roundsThisTurn > Self.maxRounds + 1 {
-            cancel()
-            turns[last].state = .failed("roundLimit")
-            return
-        }
-        // Text before tool calls is the model thinking aloud, not the answer.
-        turns[last].answer = ""
-        turns[last].state = .working
-        let overBudget = roundsThisTurn > Self.maxRounds
-        let firstStep = turns[last].steps.count + 1
-        let expectedRound = round
-        toolTask = Task { [weak self] in
-            var results: [[String: String]] = []
-            for (offset, call) in calls.enumerated() {
-                if overBudget {
-                    results.append(["call_id": call.callID, "content": "error: the tool budget for this question is used up; answer now with what you have read"])
-                    continue
-                }
-                // Each step shows while it runs and joins the trace as it ends.
-                guard let self, self.isCurrent(expectedRound) else { return }
-                let last = self.turns.count - 1
-                self.turns[last].runningStep = AITools.step(for: call, in: snapshot)
-                let ran = await AITools.run(call, step: firstStep + offset, in: snapshot)
-                guard !Task.isCancelled, self.isCurrent(expectedRound) else { return }
-                self.turns[last].runningStep = nil
-                results.append(["call_id": call.callID, "content": ran.output])
-                self.turns[last].steps.append(ran.step)
-                for item in ran.evidence where !self.turns[last].evidence.contains(where: {
-                    $0.path == item.path && $0.startLine == item.startLine && $0.endLine == item.endLine
-                }) {
-                    self.turns[last].evidence.append(item)
-                }
-            }
-            guard let self, !Task.isCancelled, self.isCurrent(expectedRound) else { return }
-            self.connectedHelper?.send([
-                "type": "tool_results", "conversation": conversationID, "results": results, "round": self.nextRound(),
-            ])
-        }
-    }
-
-    private func isCurrent(_ expectedRound: Int) -> Bool {
-        expectedRound == round && turns.last?.state.isRunning == true
     }
 
     private func systemPrompt() -> String {

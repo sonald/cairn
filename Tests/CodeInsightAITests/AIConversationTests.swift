@@ -182,10 +182,10 @@ struct AIConversationTests {
         defer { provider.stop() }
         guard let f = try fixture(provider: provider, wire: .openAI) else { return }
         f.model.ask("q", snapshot: f.snapshot)
-        let current = f.model.round
-        f.model.handle(.text("stale"), round: current - 1)
+        let current = f.model.run.round
+        f.model.run.handle(.text("stale"), round: current - 1)
         #expect(f.model.turns.last?.answer == "")
-        f.model.handle(.text("fresh"), round: current)
+        f.model.run.handle(.text("fresh"), round: current)
         #expect(f.model.turns.last?.answer == "fresh")
         f.model.cancel()
     }
