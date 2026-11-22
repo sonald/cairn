@@ -10,6 +10,19 @@ trail?.addEventListener("click", () => {
   });
 });
 
+// Tour: the step crossing the middle of the viewport picks the screenshot.
+const tourShots = document.querySelectorAll(".frame img");
+const steps = document.querySelectorAll(".step");
+const observer = !("IntersectionObserver" in window) ? null : new IntersectionObserver(entries => {
+  entries.filter(e => e.isIntersecting).forEach(e => {
+    const i = +e.target.dataset.i;
+    steps.forEach((s, j) => s.classList.toggle("on", j === i));
+    tourShots.forEach((img, j) => img.classList.toggle("on", j === i));
+  });
+}, { rootMargin: "-45% 0px -45% 0px" });
+steps.forEach(s => observer?.observe(s));
+steps[0]?.classList.add("on");
+
 // Reader demo: real output from `codeinsight callers`, `resolve` and `exact-def`
 // on sonald/knuth-rs @ fac975a (crates/knuth-agent/src/harness.rs), Safe mode.
 const EXACT = "rust-analyzer ✓ same target";

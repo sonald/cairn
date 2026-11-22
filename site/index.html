@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, and browse Git commits without checkout.">
+  <meta name="description" content="Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, distill a file to its skeleton, ask a model you choose about the code, and browse Git commits without checkout.">
   <meta name="theme-color" content="#ece6da">
   <title>Cairn — Open-source code reader for macOS</title>
   <link rel="canonical" href="https://cairn.sonald.me/">
@@ -22,7 +22,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Cairn",
-    "description": "Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, and browse Git commits without checkout.",
+    "description": "Cairn is a read-only code reader for macOS. Follow symbols and callers in Rust, Python, TypeScript, and Go, distill a file to its skeleton, ask a model you choose about the code, and browse Git commits without checkout.",
     "url": "https://cairn.sonald.me/",
     "image": "https://cairn.sonald.me/assets/og.png",
     "applicationCategory": "DeveloperApplication",
@@ -33,6 +33,7 @@
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
   }
   </script>
+  <script>document.documentElement.classList.add("js")</script>
   <link rel="stylesheet" href="./style.css">
   <script src="./script.js" defer></script>
 </head>
@@ -60,6 +61,7 @@
           Cairn
         </a>
         <nav aria-label="Main navigation">
+          <a href="#tour">Tour</a>
           <a href="#evidence">Evidence</a>
           <a href="#time">Time</a>
           <a href="#start">Get started</a>
@@ -72,9 +74,9 @@
           <div>
             <p class="eyebrow">Unfamiliar code is terrain. Leave cairns.</p>
             <h1 id="headline">A read-only<br>code <em>reader</em><br>for macOS</h1>
-            <p class="lede">Cairn marks the way through a codebase you didn’t write — symbols, callers, any commit in its history — shows the evidence for every step, and remembers the path so you can walk it again. It never edits a line.</p>
+            <p class="lede">Cairn marks the way through a codebase you didn’t write — symbols, callers, any commit in its history — shows the evidence for every step, and remembers the path so you can walk it again. When you want a second pair of eyes, a model you choose reads along through the same read-only tools. Nothing edits a line.</p>
             <div class="cta">
-              <a class="btn dark" href="https://github.com/sonald/cairn/releases/tag/v0.4.0">Download 0.4.0 preview <span aria-hidden="true">→</span></a>
+              <a class="btn dark" href="https://github.com/sonald/cairn/releases/tag/v0.5.0">Download 0.5.0 preview <span aria-hidden="true">→</span></a>
               <a class="btn ghost" href="https://github.com/sonald/cairn">Read the source</a>
             </div>
             <p class="meta">macOS 14+ · Apple silicon · Rust · Python · TypeScript · TSX · Go · MIT</p>
@@ -106,12 +108,50 @@
           </button>
         </section>
 
-        <figure class="shot">
-          <a href="./assets/reader.png" aria-label="View full-size Cairn application screenshot">
-            <img src="./assets/reader.webp" width="1800" height="1433" fetchpriority="high" alt="Cairn’s native macOS reader showing Rust source from knuth-rs, with Files, Outline and three Verified callers of after_tool_use.">
-          </a>
-          <figcaption><span>Fig. 1 — Reading <code>harness.rs</code> in knuth-rs: every caller of <code>after_tool_use</code>, verified.</span><span>Native AppKit · Swift 6</span></figcaption>
-        </figure>
+        <section class="tour" id="tour" aria-label="A tour of Cairn">
+          <div class="steps">
+            <article class="step" data-i="0">
+              <p class="eyebrow">Follow</p>
+              <h3>Every jump shows its evidence</h3>
+              <p>Click a symbol to see its callers, calls, implementations and references. Each result says how it was found — Cairn’s index or a language server such as rust-analyzer — and whether the file changed since.</p>
+              <img class="step-shot" src="./assets/tour-reader.webp" width="1600" height="1057" loading="lazy" alt="Cairn reading harness.rs in knuth-rs, with three verified callers of after_tool_use in the Relations panel.">
+            </article>
+            <article class="step" data-i="1">
+              <p class="eyebrow">Overview</p>
+              <h3>A file, distilled to its skeleton</h3>
+              <p>Overview shows a Rust or Python file in source order: main-line functions keep their key statements, the rest shrink to one-line signatures. Line numbers stay the source’s; click one to land there. With a Jev key, TypeSafe’s Jev helps pick what stays.</p>
+              <img class="step-shot" src="./assets/tour-overview.webp" width="1600" height="1057" loading="lazy" alt="Overview of harness.rs: a skeleton of its functions numbered with their source lines.">
+            </article>
+            <article class="step" data-i="2">
+              <p class="eyebrow">Ask AI</p>
+              <h3>Ask the codebase, see what it read</h3>
+              <p>Select code and press <kbd>⌘I</kbd>, or ask in the AI panel. The model you configure reads only through Cairn’s read-only tools — files, search, symbols backed by the language server, Git history. Its steps fold into one line above the answer, and every cited line opens in the reader.</p>
+              <img class="step-shot" src="./assets/tour-ask.webp" width="1600" height="1057" loading="lazy" alt="The AI panel answering a question about after_tool_use, with its eight reading steps expanded above the answer.">
+            </article>
+            <article class="step" data-i="3">
+              <p class="eyebrow">Guide</p>
+              <h3>A guide to the file in front of you</h3>
+              <p>The Guide panel writes how the open file is put together: its flows with step-by-step playback, the role of each part, a sequence diagram and questions worth asking next. Every code anchor is checked against the file’s real lines. Guides are kept locally and flagged when the file changes.</p>
+              <img class="step-shot" src="./assets/tour-guide.webp" width="1600" height="1057" loading="lazy" alt="The Guide panel for hooks/registry.rs playing a flow; step 3 is selected in the reader.">
+            </article>
+            <article class="step" data-i="4">
+              <p class="eyebrow">Look back</p>
+              <h3>Any commit, no checkout</h3>
+              <p>Open a past commit as a read-only snapshot and compare it with the working tree side by side. Exact analysis follows you there, in a checkout Cairn owns; your repository is never touched.</p>
+              <img class="step-shot" src="./assets/tour-compare.webp" width="1600" height="1057" loading="lazy" alt="hooks/types.rs in the working tree beside the same file at commit 864d216.">
+            </article>
+          </div>
+          <div class="stage" aria-hidden="true">
+            <div class="frame">
+              <img src="./assets/tour-reader.webp" width="1600" height="1057" fetchpriority="high" class="on" alt="">
+              <img src="./assets/tour-overview.webp" width="1600" height="1057" loading="lazy" alt="">
+              <img src="./assets/tour-ask.webp" width="1600" height="1057" loading="lazy" alt="">
+              <img src="./assets/tour-guide.webp" width="1600" height="1057" loading="lazy" alt="">
+              <img src="./assets/tour-compare.webp" width="1600" height="1057" loading="lazy" alt="">
+            </div>
+            <p class="stage-cap">Cairn 0.5.0 reading <a href="https://github.com/sonald/knuth-rs/tree/fac975a" tabindex="-1">knuth-rs @ fac975a</a></p>
+          </div>
+        </section>
       </main>
     </div>
   </div>
@@ -207,7 +247,8 @@
       <ul>
         <li><s>save files</s><span>read-only reader</span></li>
         <li><s>run build scripts or proc macros</s><span>disabled in Safe Reading Mode</span></li>
-        <li><s>reach the network</s><span>denied by default</span></li>
+        <li><s>reach the network on its own</s><span>only the AI you set up, or a download you click</span></li>
+        <li><s>let the AI edit or run anything</s><span>its tools only read</span></li>
         <li><s>git checkout in your repo</s><span>snapshots are virtual</span></li>
         <li><s>forget where you were</s><span>tabs, trail and Reading Sets restore</span></li>
       </ul>
@@ -218,11 +259,11 @@
     <div>
       <p class="eyebrow">Base camp</p>
       <h2 id="start-title">Start with a codebase.<br>Leave with a mental model.</h2>
-      <p>Download the <a href="https://github.com/sonald/cairn/releases/tag/v0.4.0">0.4.0 preview</a> (macOS 14+, Apple silicon). It is ad‑hoc signed and not notarized, so on first launch right‑click Cairn.app and choose Open. Or build it yourself with a Swift 6 toolchain and Homebrew’s libgit2.</p>
+      <p>Download the <a href="https://github.com/sonald/cairn/releases/tag/v0.5.0">0.5.0 preview</a> (macOS 14+, Apple silicon). It is ad‑hoc signed and not notarized, so on first launch right‑click Cairn.app and choose Open. Or build it yourself with Xcode 27.1, Homebrew’s libgit2 and a Rust toolchain from rustup.</p>
       <p class="langs"><span>Rust</span><span>Python</span><span>TypeScript</span><span>TSX</span><span>Go</span></p>
       <a class="guide" href="https://github.com/sonald/cairn#build-and-run">Read the build guide <span aria-hidden="true">↗</span></a>
     </div>
-    <pre class="term" aria-label="Commands to clone, build and open Cairn"><span class="c"># clone, build, open</span>
+    <pre class="term" aria-label="Commands to clone, build and open Cairn"><span class="c"># clone, build, open (Xcode 27.1 + rustup)</span>
 <span class="p">$ </span>git clone https://github.com/sonald/cairn.git
 <span class="p">$ </span>cd cairn &amp;&amp; brew install libgit2
 <span class="p">$ </span>CAIRN_LIBGIT2=brew bash scripts/make-app.sh
