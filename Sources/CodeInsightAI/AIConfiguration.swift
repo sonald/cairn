@@ -7,6 +7,8 @@ public struct AIProviderSettings: Equatable, Sendable {
     public enum WireProtocol: String, CaseIterable, Sendable {
         case openAI = "openai"
         case anthropic
+        /// A ChatGPT plan, through Sign in with ChatGPT instead of a key; always OpenAI's API.
+        case chatGPT = "chatgpt"
     }
 
     public var wireProtocol: WireProtocol
@@ -49,10 +51,11 @@ public struct AIProviderSettings: Equatable, Sendable {
 
     /// What an empty Base URL means: the protocol's official service.
     public static func defaultBaseURL(for wireProtocol: WireProtocol) -> String {
-        wireProtocol == .openAI ? "https://api.openai.com/v1" : "https://api.anthropic.com"
+        wireProtocol == .anthropic ? "https://api.anthropic.com" : "https://api.openai.com/v1"
     }
 
     var resolvedBaseURL: String {
+        if wireProtocol == .chatGPT { return Self.defaultBaseURL(for: .chatGPT) }
         let typed = baseURL.trimmingCharacters(in: .whitespaces)
         return typed.isEmpty ? Self.defaultBaseURL(for: wireProtocol) : typed
     }

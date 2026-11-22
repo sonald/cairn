@@ -212,6 +212,8 @@ final class GuidePanelController: NSViewController, WKNavigationDelegate, WKScri
                 case "contextLimit": localized("ai.error.contextLimit")
                 case "noDraft": localized("guide.error.noDraft")
                 case "helperMissing": localized("ai.helper.missing")
+                case "chatgptSignIn", "chatgptPlanNotShared": AISettingsView.describe(message)
+                case let usage where usage.contains("subscription_sharing_usage_limit_exceeded"): localized("ai.error.chatgptUsageLimit")
                 case AIHelper.exitedMessage: localized("ai.error.helperExited")
                 default: message
                 }

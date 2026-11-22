@@ -21,6 +21,8 @@ final class AIPanelController: NSViewController, NSTextViewDelegate {
     private let header = NSStackView()
     private let snapshotLabel = NSTextField(labelWithString: "")
     private let newButton = NSButton()
+    /// Shown while questions use a ChatGPT plan, as OpenAI's guidelines ask.
+    private let usageButton = NSButton()
     private let scrollView = NSScrollView()
     private let turnsStack = NSStackView()
     private let placeholder = NSTextField(wrappingLabelWithString: "")
@@ -62,9 +64,16 @@ final class AIPanelController: NSViewController, NSTextViewDelegate {
         newButton.target = self
         newButton.action = #selector(newConversation(_:))
         newButton.setAccessibilityLabel(localized("ai.new"))
+        usageButton.title = localized("settings.chatgpt.usage")
+        usageButton.isBordered = false
+        usageButton.font = .systemFont(ofSize: 11)
+        usageButton.contentTintColor = .linkColor
+        usageButton.target = self
+        usageButton.action = #selector(manageUsage(_:))
+        usageButton.toolTip = ChatGPTAccount.usageURL.absoluteString
         let spacer = NSView()
         spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        header.setViews([snapshotLabel, spacer, newButton], in: .leading)
+        header.setViews([snapshotLabel, spacer, usageButton, newButton], in: .leading)
         header.orientation = .horizontal
         header.spacing = 6
         header.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 4, right: 8)
@@ -193,6 +202,10 @@ final class AIPanelController: NSViewController, NSTextViewDelegate {
         update()
     }
 
+    @objc private func manageUsage(_ sender: Any?) {
+        NSWorkspace.shared.open(ChatGPTAccount.usageURL)
+    }
+
     @objc private func windowBecameKey(_ note: Notification) {
         guard (note.object as? NSWindow) === view.window else { return }
         update()
@@ -287,6 +300,9 @@ final class AIPanelController: NSViewController, NSTextViewDelegate {
             parts.append(snapshot.revision.map { String($0.prefix(7)) } ?? localized("ai.snapshot.worktree"))
         }
         if !settings.model.isEmpty { parts.append(settings.model) }
+        // Requests count against the plan; say so where the model is named.
+        if settings.wireProtocol == .chatGPT { parts.append(localized("ai.chatgpt.plan")) }
+        usageButton.isHidden = settings.wireProtocol != .chatGPT
         snapshotLabel.stringValue = parts.joined(separator: " · ")
         newButton.isEnabled = !conversation.turns.isEmpty
     }
@@ -610,6 +626,8 @@ final class AITurnView: NSStackView, NSTextViewDelegate {
             case "roundLimit": localizedFormat("ai.error.roundLimit", AIConversationModel.maxRounds)
             case "contextLimit": localized("ai.error.contextLimit")
             case "helperMissing": localized("ai.helper.missing")
+            case "chatgptSignIn", "chatgptPlanNotShared": AISettingsView.describe(message)
+            case let usage where usage.contains("subscription_sharing_usage_limit_exceeded"): localized("ai.error.chatgptUsageLimit")
             case AIHelper.exitedMessage: localized("ai.error.helperExited")
             default: message
             }

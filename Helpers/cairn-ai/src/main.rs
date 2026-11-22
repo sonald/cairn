@@ -4,7 +4,7 @@
 //! model round per request; Cairn runs the tools and decides when to stop.
 //!
 //! In (Cairn → helper):
-//!   {"type":"ask","conversation":ID,"config":{"protocol":"openai"|"anthropic","base_url":S,"model":S,"api_key":S},
+//!   {"type":"ask","conversation":ID,"config":{"protocol":"openai"|"anthropic"|"chatgpt","base_url":S,"model":S,"api_key":S},
 //!    "system":S,"tools":[{"name":S,"description":S,"schema":{...}}],"text":S,"trim_above":N}
 //!       Creates the conversation on first use (system and tools are fixed then), appends the user text
 //!       and runs a round. When the last round's input passed `trim_above` tokens, every earlier tool
@@ -114,6 +114,10 @@ type Out = mpsc::UnboundedSender<Value>;
 /// already end in the version (`…/v1`, or DeepSeek's bare host); Anthropic
 /// bases are the host, and the helper adds `/v1/`.
 fn endpoint(config: &Config) -> String {
+    // A ChatGPT sign-in token is only ever sent to OpenAI's own API.
+    if config.protocol == "chatgpt" {
+        return "https://api.openai.com/v1/".to_string();
+    }
     let base = config.base_url.trim().trim_end_matches('/');
     if config.protocol == "anthropic" && !base.ends_with("/v1") {
         format!("{base}/v1/")
@@ -123,7 +127,12 @@ fn endpoint(config: &Config) -> String {
 }
 
 fn adapter_kind(config: &Config) -> AdapterKind {
-    if config.protocol == "anthropic" { AdapterKind::Anthropic } else { AdapterKind::OpenAI }
+    match config.protocol.as_str() {
+        "anthropic" => AdapterKind::Anthropic,
+        // A ChatGPT plan is used through the Responses API only.
+        "chatgpt" => AdapterKind::OpenAIResp,
+        _ => AdapterKind::OpenAI,
+    }
 }
 
 fn client(config: &Config) -> genai::Result<Client> {
@@ -166,6 +175,12 @@ async fn run_round(conversations: Conversations, out: Out, id: String, round: u6
     // allows at least 32000.
     if config.protocol == "anthropic" {
         options = options.with_max_tokens(32000);
+    }
+    // On api.openai.com genai otherwise asks for `prompt_cache_options`, which the
+    // ChatGPT plan route rejects (400 on gpt-6.2-sol, 2026-11-22); a cache key
+    // keeps rounds of one conversation cached without it.
+    if config.protocol == "chatgpt" {
+        options = options.with_prompt_cache_key(id.clone());
     }
     let mut retried = false;
     let end = loop {

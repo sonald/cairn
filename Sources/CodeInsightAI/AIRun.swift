@@ -26,7 +26,7 @@ public struct AIAccess {
         guard let project else { return .noProject }
         let settings = settings()
         guard settings.isComplete else { return .needsSettings }
-        if !settings.isLocal, !hasKey() { return .needsKey }
+        if !settings.isLocal, !(settings.wireProtocol == .chatGPT ? ChatGPTAccount.isSignedIn() : hasKey()) { return .needsKey }
         if AIHelper.locate() == nil, !helperConnected { return .helperMissing }
         if !settings.isLocal, let host = settings.host, !consent.allows(project, host: host) {
             return .needsConsent(host: host)
@@ -39,9 +39,12 @@ public struct AIAccess {
         consent.allow(project, host: host)
     }
 
-    /// The provider settings for the helper; reads the key.
-    func helperConfig() -> [String: Any] {
-        settings().helperConfig(apiKey: apiKey() ?? "")
+    /// The provider settings for the helper; reads the key, or gets a fresh
+    /// ChatGPT token.
+    func helperConfig() async throws -> [String: Any] {
+        let settings = settings()
+        let key = settings.wireProtocol == .chatGPT ? try await ChatGPTAccount.accessToken() : apiKey() ?? ""
+        return settings.helperConfig(apiKey: key)
     }
 }
 
@@ -113,27 +116,41 @@ final class AIRun {
     var hasConversation: Bool { conversationID != nil }
 
     /// Sends `text` on the conversation, starting one with `system` when there
-    /// is none. `config` is read only once the helper is up.
-    func ask(_ text: String, in snapshot: AISnapshot, system: String, config: () -> [String: Any]) {
+    /// is none. `config` is read only once the helper is up; it may refresh a
+    /// token first, and a request cancelled meanwhile is not sent.
+    func ask(_ text: String, in snapshot: AISnapshot, system: String,
+             config: @escaping @MainActor () async throws -> [String: Any]) {
         cancel()
         self.snapshot = snapshot
         isRunning = true
         guard let helper = connect() else { return }
-        let request: [String: Any] = [
-            "type": "ask",
-            "conversation": conversationID!,
-            "config": config(),
-            "text": text,
-            "round": nextRound(),
-            // Used only when the helper creates the conversation.
-            "system": system,
-            "tools": tools,
-            "trim_above": trimAbove,
-        ]
+        let conversationID = conversationID!
+        let round = nextRound()
         roundsThisRequest = 0
         stepsThisRequest = 0
         toldToAnswer = false
-        helper.send(request)
+        Task { [weak self] in
+            let settings: [String: Any]
+            do {
+                settings = try await config()
+            } catch {
+                guard let self, self.isCurrent(round) else { return }
+                _ = self.fail(String(describing: error))
+                return
+            }
+            guard let self, self.isCurrent(round) else { return }
+            helper.send([
+                "type": "ask",
+                "conversation": conversationID,
+                "config": settings,
+                "text": text,
+                "round": round,
+                // Used only when the helper creates the conversation.
+                "system": system,
+                "tools": self.tools,
+                "trim_above": self.trimAbove,
+            ])
+        }
     }
 
     /// Stops the request in flight; returns whether one was running.
