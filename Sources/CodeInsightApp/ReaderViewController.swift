@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightAI
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightReaderCore
@@ -299,6 +300,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// R4: USER caret movement (mouse selection, arrow keys) drives the lens;
     /// programmatic navigation/restores do not (the owner debounces).
     var onCaretFollow: ((UInt32) -> Void)?
+    /// The user moved the caret in the Overview skeleton. It carries no
+    /// offset: skeleton offsets are not source offsets.
+    var onSkeletonCaret: (() -> Void)?
     /// The identifier under the pointer, or `nil` over anything else.
     var onHover: ((ReaderHoverRequest?) -> Void)?
     /// ⌥-click: show documentation now.
@@ -310,7 +314,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onReadingPositionChange: ((UInt32) -> Void)?
     var onOutlineFollowPositionChange: ((UInt32) -> Void)?
     var onLiveScroll: (() -> Void)?
-    var onFocusNotice: ((String) -> Void)?
+    /// A short notice for the window's transient status line.
+    var onNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onOpenScope: ((UInt32) -> Void)?
     var onRevealPath: ((URL) -> Void)?
@@ -428,7 +433,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     /// The identifier at the caret or the start of the selection.
     func hoverRequestAtSelection() -> ReaderHoverRequest? {
-        hoverRequest(textView.hoverTargetAtSelection())
+        guard !isShowingSkeleton else { return nil }
+        return hoverRequest(textView.hoverTargetAtSelection())
     }
 
     private func hoverRequest(_ target: ReaderHoverTarget?) -> ReaderHoverRequest? {
@@ -450,6 +456,41 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// Code-like previews: a reader of their own that folds like source.
     private var previewReader: ReaderTextView?
     private var previewSettings = ReaderSettings()
+    /// Overview of a Rust or Python file: the skeleton in a reader of its
+    /// own, laid over the source reader, which stays the current document.
+    private var skeletonReader: ReaderTextView?
+    private let skeletonScrollView: NSScrollView = {
+        let scrollView = NSScrollView()
+        scrollView.isHidden = true
+        return scrollView
+    }()
+    /// What the skeleton reader shows, and the source content it came from.
+    private var shownSkeleton: (source: ContentID, overview: SkeletonOverview)?
+    /// The most recently used skeletons, last most recent.
+    private var skeletonCache: [SkeletonEntry] = []
+    private var skeletonTask: (contentID: ContentID, language: LanguageID, scored: Bool, task: Task<Void, Never>)?
+    /// Jev scoring for Overview; set only on a window's primary reader.
+    /// Without it Overview never goes online.
+    var overviewScoring: OverviewScoring?
+    /// `run` tells a request from an earlier one for the same content.
+    private var scoringTask: (contentID: ContentID, run: Int, task: Task<Void, Never>)?
+    private var scoringRuns = 0
+    /// The key revision last seen, whether a key was saved then, and the
+    /// content not to send again until the key changes (failed or too large).
+    private var scoringKey: (revision: Int, configured: Bool)?
+    private var scoringSkipped: Set<ContentID> = []
+    /// "Refining the overview…", in the skeleton's top trailing corner.
+    private let scoringIndicator = NSStackView()
+    /// Where to land once a pending skeleton arrives.
+    private var pendingSkeletonLanding: (line: Int, marks: Bool)?
+    /// Shown over the overlay while a large file's skeleton distils.
+    private let skeletonPendingLabel = NSTextField(labelWithString: localized("main.overview.distilling"))
+    /// The skeleton line a context menu was opened on.
+    private var skeletonMenuLine: Int?
+    /// Where the source reader was when Overview was entered, and the
+    /// skeleton's top source line it landed on: leaving without scrolling
+    /// the skeleton goes back there exactly.
+    private var skeletonReturn: (contentID: ContentID, anchor: ViewportAnchor, top: Int?)?
     private let previewDerivedDataStore: ReaderDerivedDataStore
     private var previewUnwrappedX: CGFloat = 0
     private var previewRenderedText: String?
@@ -520,7 +561,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.setHighlightedNames(names)
     }
 
-    var identifierAtCaret: String? { textView.identifierAtCaret }
+    var identifierAtCaret: String? { isShowingSkeleton ? nil : textView.identifierAtCaret }
 
     func occurrenceCount(ofName name: String) -> Int? {
         textView.occurrenceCount(ofName: name)
@@ -528,14 +569,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     @discardableResult
     func revealOccurrence(ofName name: String, backwards: Bool) -> Bool {
-        textView.revealOccurrence(ofName: name, backwards: backwards)
+        !isShowingSkeleton && textView.revealOccurrence(ofName: name, backwards: backwards)
     }
 
     @discardableResult
-    func jumpToMatchingBracket() -> Bool { textView.jumpToMatchingBracket() }
+    func jumpToMatchingBracket() -> Bool { !isShowingSkeleton && textView.jumpToMatchingBracket() }
 
     @discardableResult
-    func selectInsideBrackets() -> Bool { textView.selectInsideBrackets() }
+    func selectInsideBrackets() -> Bool { !isShowingSkeleton && textView.selectInsideBrackets() }
 
     @objc private func toggleHighlightFromMenu(_ sender: Any?) {
         guard let offset = contextMenuOffset, let name = textView.identifier(atByteOffset: offset) else { return }
@@ -604,6 +645,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let overviewRuler = textView.overviewRuler
         overviewRuler.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(overviewRuler)
+        if !showsCompareControls { installSkeletonReader() }
         let overviewRulerWidth = overviewRuler.widthAnchor.constraint(equalToConstant: ReaderTextView.overviewRulerWidth)
         self.overviewRulerWidth = overviewRulerWidth
         readerArea.addSubview(readingSetView)
@@ -820,6 +862,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.view.menu = relationMenu
         // After the click ends, so the box, not the window, takes the keyboard.
         textView.onAskMarkerClick = { [weak self] in DispatchQueue.main.async { self?.onAskAI?() } }
+        // Leaving focus from Overview comes back to the skeleton.
+        textView.onFocusEscape = { [weak self] in self?.toggleFocusCurrentScope() ?? false }
         textView.onContextMenu = { [weak self] characterIndex in
             guard let self else { return }
             contextMenuOffset = displayedDocument == nil
@@ -960,7 +1004,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     private func renderScopeHeader(at byteOffset: UInt32?) {
         scopeHeaderByteOffset = byteOffset
-        guard !showsCompareControls,
+        guard !showsCompareControls, !isShowingSkeleton,
               let byteOffset,
               let file = displayedFile,
               let document = displayedDocument
@@ -1613,6 +1657,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         exclusionBadge.update(style: .limited, text: localized("main.rules.fileExcluded"), theme: readerTheme)
         if showsCompareControls { renderFunctionSummary() }
         textView.apply(settings: settings)
+        skeletonReader?.apply(settings: settings)
+        skeletonScrollView.backgroundColor = readerTheme.backgroundColor
+        scoringIndicator.layer?.backgroundColor = readerTheme.backgroundColor.withAlphaComponent(0.92).cgColor
         showsOverviewRuler = settings.overviewRuler
         updateOverviewRulerVisibility()
         readingSetView.apply(settings: settings)
@@ -1733,6 +1780,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private func setCodeViewHidden(_ hidden: Bool) {
         scrollView?.isHidden = hidden
         updateOverviewRulerVisibility()
+        refreshSkeleton()
     }
 
     private func updateOverviewRulerVisibility() {
@@ -1912,6 +1960,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     func showFindBar() -> Bool {
         loadViewIfNeeded()
         guard canFindInFile else { return false }
+        // Find searches the source: Overview leaves to Full on the same line.
+        if isShowingSkeleton { setReadingHeightLevel(.full, landingOn: topSourceLine()) }
         if findBar.isHidden {
             savedSymbolOccurrenceByteOffset = textView.symbolOccurrenceByteOffset
             findBar.isHidden = false
@@ -2069,7 +2119,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// source document is displayed. Drives surface-scoped relation
     /// commands alongside the context menu.
     var currentSelectionByteOffset: UInt32? {
-        guard displayedDocument != nil, displayedFile != nil else { return nil }
+        guard displayedDocument != nil, displayedFile != nil, !isShowingSkeleton else { return nil }
         let range = textView.view.selectedRange()
         guard range.location != NSNotFound,
               let byteOffset = textView.byteOffset(
@@ -2079,23 +2129,42 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         else { return nil }
         return offset
     }
+    /// Entering or leaving the Overview skeleton keeps the source line on
+    /// top, or lands on `sourceLine` when given. Leaving a skeleton that was
+    /// not scrolled, with no `sourceLine`, goes back to where Overview was entered.
     @discardableResult
-    func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
+    func setReadingHeightLevel(_ level: ReadingHeightLevel, landingOn sourceLine: Int? = nil) -> Bool {
         loadViewIfNeeded()
+        let line = sourceLine ?? topSourceLine()
+        let returning = sourceLine == nil ? untouchedSkeletonReturn() : nil
+        let entering = isShowingSkeleton ? nil : textView.viewportAnchor()
         let changed = textView.setReadingHeightLevel(level)
         readingHeightControl.set(level: textView.readingHeightLevel)
+        refreshSkeleton(landingOn: line, returningTo: returning)
+        if let entering { noteSkeletonEntry(from: entering) }
         return changed
     }
+    /// From the skeleton, focus takes the scope of the caret row's source
+    /// line; the source reader keeps the Overview level, so leaving focus
+    /// comes back to the skeleton.
     @discardableResult
     func toggleFocusCurrentScope() -> Bool {
-        if textView.isFocusMode { return textView.exitFocusMode() }
-        guard let byteOffset = textView.byteOffset(
-            forCharacterIndex: textView.view.selectedRange().location
-        ), textView.focusCurrentScope(at: byteOffset)
-        else {
-            onFocusNotice?(localized("main.no.enclosing.scope.to.focus"))
+        if textView.isFocusMode {
+            let line = topSourceLine()
+            let entering = textView.viewportAnchor()
+            let exited = textView.exitFocusMode()
+            refreshSkeleton(landingOn: line)
+            if let entering { noteSkeletonEntry(from: entering) }
+            return exited
+        }
+        let byteOffset = isShowingSkeleton
+            ? skeletonCaretSourceLine().flatMap { sourceLineStart($0, skippingIndent: true) }
+            : textView.byteOffset(forCharacterIndex: textView.view.selectedRange().location)
+        guard let byteOffset, textView.focusCurrentScope(at: byteOffset) else {
+            onNotice?(localized("main.no.enclosing.scope.to.focus"))
             return false
         }
+        refreshSkeleton()
         return true
     }
     @discardableResult
@@ -2116,6 +2185,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         return (markdown, heading)
     }
     private var foldTargetAtSelection: (ReaderTextView, Int)? {
+        guard !isShowingSkeleton else { return nil }
         let reader = previewReader ?? textView
         guard let byteOffset = reader.byteOffset(
                 forCharacterIndex: reader.view.selectedRange().location
@@ -2253,10 +2323,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.setBookmarkMarkers(markers)
     }
 
-    var selectedSourceText: String? { textView.selectedSourceText }
-    func focusText() { view.window?.makeFirstResponder(textView.view) }
+    var selectedSourceText: String? { isShowingSkeleton ? nil : textView.selectedSourceText }
+    func focusText() { view.window?.makeFirstResponder(isShowingSkeleton ? skeletonReader?.view : textView.view) }
     func revealProjectSearchMatch(_ range: ByteRange, expectedContentID: ContentID?) {
         guard let expectedContentID, displayedDocument?.contentID == expectedContentID else { return }
+        // A match is exact text: the source shows it, so Overview leaves to Full.
+        if isShowingSkeleton { setReadingHeightLevel(.full) }
         textView.revealSearchMatch(range: range)
     }
     var displayedContentID: ContentID? { displayedDocument?.contentID }
@@ -2431,7 +2503,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     @discardableResult
     func revealDiffLine(_ line: Int) -> Bool {
-        textView.revealDiffLine(line)
+        if isShowingSkeleton { setReadingHeightLevel(.full) }
+        return textView.revealDiffLine(line)
     }
 
     func display(
@@ -3030,6 +3103,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             }
             return
         }
+        // Same file, new bytes: a replaced skeleton keeps the source line on top.
+        let keptSkeletonLine = isShowingSkeleton && file == displayedFile ? topSourceLine() : nil
         displayedReadingSetKey = nil
         readingSetView.isHidden = true
         setCodeViewHidden(false)
@@ -3071,6 +3146,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             // No file displayed: the source-only reading height controls
             // leave with it (§3.1 no-project surface).
             readingHeightControl.isHidden = true
+            refreshSkeleton()
             return
         }
 
@@ -3102,6 +3178,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onOutlineChange?(loaded.document.outlineFacets)
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
+            refreshSkeleton(landingOn: keptSkeletonLine)
             if loaded.tier != .regular {
                 syntaxLoadPending = true
                 syntaxTask = activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
@@ -3135,14 +3212,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                                 )
                             }
                             if wasFocused && !self.textView.isFocusMode {
-                                self.onFocusNotice?(localized("main.focus.ended.no.enclosing.scope"))
+                                self.onNotice?(localized("main.focus.ended.no.enclosing.scope"))
+                                self.refreshSkeleton()
                             }
                             self.onOutlineChange?(document.outlineFacets)
                         case .failure:
                             self.pendingFocusNavigationOffset = nil
                             if self.textView.isFocusMode {
                                 _ = self.textView.exitFocusMode()
-                                self.onFocusNotice?(localized("main.focus.ended.syntax.unavailable"))
+                                self.onNotice?(localized("main.focus.ended.syntax.unavailable"))
+                                self.refreshSkeleton()
                             }
                             self.label.stringValue = localized("main.syntax.highlighting.failed")
                             self.label.isHidden = false
@@ -3162,6 +3241,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             label.isHidden = false
             textView.clear()
             hideScopeHeader()
+            refreshSkeleton()
         }
     }
 
@@ -3182,11 +3262,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             if syntaxLoadPending {
                 pendingFocusNavigationOffset = byteOffset
             } else if !textView.followFocusForExplicitNavigation(to: byteOffset) {
-                onFocusNotice?(localized("main.focus.ended.no.enclosing.scope"))
+                onNotice?(localized("main.focus.ended.no.enclosing.scope"))
             }
         }
-        textView.reveal(byteOffset: byteOffset)
-        _ = textView.activate(atByteOffset: byteOffset)
+        if isShowingSkeleton {
+            // Covered by the skeleton, the source reader only keeps the place:
+            // no find indicator or landing mark there; the skeleton shows the landing.
+            textView.restore(scrollByteOffset: byteOffset, selectionByteOffset: byteOffset)
+        } else {
+            textView.reveal(byteOffset: byteOffset)
+            _ = textView.activate(atByteOffset: byteOffset)
+        }
+        // A jump moves the place; leaving no longer goes back to the old one.
+        skeletonReturn = nil
+        refreshSkeleton(landingOn: sourceLineNumber(at: byteOffset), marksLanding: true)
         onSelectionChange?(byteOffset)
         onReadingPositionChange?(byteOffset)
     }
@@ -3213,6 +3302,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 scrollByteOffset: keepsViewport ? nil : scrollByteOffset,
                 selectionByteOffset: selectionByteOffset
             )
+            if isShowingSkeleton, let target = scrollByteOffset.flatMap(sourceLineNumber(at:)),
+               target != skeletonTopSourceLine()
+            {
+                refreshSkeleton(landingOn: target)
+            }
         }
     }
 
@@ -3227,8 +3321,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         guard displayedFile != nil,
               let document = displayedDocument
         else { return nil }
+        let top = isShowingSkeleton
+            ? topSourceLine().flatMap { sourceLineStart($0) }
+            : textView.firstVisibleByteOffset()
         let byteOffset = min(
-            textView.firstVisibleByteOffset() ?? fallbackByteOffset ?? 0,
+            top ?? fallbackByteOffset ?? 0,
             UInt32(clamping: document.bytes.count)
         )
         return readingPosition(at: byteOffset)
@@ -3268,7 +3365,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             readingPositionTask = nil
             guard let offset = currentReadingPosition()?.byteOffset else { return }
             onReadingPositionChange?(offset)
-            if let anchor = textView.followAnchorByteOffset() {
+            let anchor = isShowingSkeleton
+                ? skeletonReader?.followAnchorByteOffset().flatMap(skeletonSourceLine(at:)).flatMap { sourceLineStart($0) }
+                : textView.followAnchorByteOffset()
+            if let anchor {
                 onOutlineFollowPositionChange?(anchor)
             }
         }
@@ -3307,7 +3407,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// What asking AI is about: the selection, else the declaration at the
     /// caret; with the rect in `view` to anchor the ask box at.
     func aiAskTarget() -> (file: URL, span: ReaderTextView.SourceSpan, anchor: NSRect, view: NSView)? {
-        guard displayedDocument != nil, let file = displayedFile,
+        guard displayedDocument != nil, let file = displayedFile, !isShowingSkeleton,
               let span = (textView.view.selectedRange().length >= ReaderTextView.askMinimumSelection
                   ? textView.selectedSourceSpan : nil) ?? textView.caretSymbolSpan,
               let anchor = textView.selectionAnchorRect
@@ -3358,4 +3458,516 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         onShowRelation?(contextMenuOffset, direction)
     }
 
+}
+
+// MARK: - Overview skeleton
+
+extension ReaderViewController {
+    /// The skeleton overlay is up: the skeleton, or blank while it distils.
+    /// Caret- and selection-driven source commands are unavailable then.
+    var isShowingSkeleton: Bool { !skeletonScrollView.isHidden }
+
+    /// The one entry point that shows, replaces in place or hides the
+    /// Overview skeleton. It shows for a Rust or Python file at Overview,
+    /// out of focus, whose skeleton is not empty; otherwise the source
+    /// reader shows. With `sourceLine` the viewport lands on it (on the
+    /// skeleton row the line map picks, or on that source line); without
+    /// it the viewport stays put, and a new skeleton starts at its top.
+    ///
+    /// With Jev scoring on for the file, saved scores give the scored
+    /// skeleton at once; without them the rule skeleton shows and the file
+    /// is sent, and the scored skeleton replaces it in place on success.
+    func refreshSkeleton(
+        landingOn sourceLine: Int? = nil, marksLanding: Bool = false, returningTo anchor: ViewportAnchor? = nil
+    ) {
+        guard let reader = skeletonReader else { return }
+        guard let document = displayedDocument, let file = displayedFile, scrollView?.isHidden == false,
+              textView.readingHeightLevel == .overview, !textView.isFocusMode,
+              document.languageMode.language == .rust || document.languageMode.language == .python
+        else { return hideSkeleton(landingOn: sourceLine, returningTo: anchor) }
+        // The place to go back to belongs to one content.
+        if skeletonReturn?.contentID != document.contentID { skeletonReturn = nil }
+        if scoringTask?.contentID != document.contentID { cancelScoring() }
+        let scoring = scoringAllowed(for: file)
+        guard let entry = skeletonEntry(for: document, scoring: scoring, landingOn: sourceLine, marksLanding: marksLanding)
+        else { return }
+        guard let overview = entry.overview else { return hideSkeleton(landingOn: sourceLine) }
+        let replaced = shownSkeleton?.overview.document !== overview.document
+        if replaced {
+            reader.gutterLabels = overview.map.ranges.map { $0?.lowerBound }
+            reader.display(document: overview.document)
+            shownSkeleton = (document.contentID, overview)
+        }
+        skeletonPendingLabel.isHidden = true
+        showSkeletonOverlay()
+        if scoring, !entry.scored { startScoring(document) }
+        let lineStarts = overview.document.lineTable.lineStarts
+        guard let row = sourceLine.flatMap(overview.map.row(forSourceLine:)) ?? (replaced ? 0 : nil),
+              lineStarts.indices.contains(row)
+        else { return }
+        view.layoutSubtreeIfNeeded()
+        reader.restore(scrollByteOffset: lineStarts[row], selectionByteOffset: lineStarts[row])
+        if marksLanding { reader.markNavigationLanding(at: lineStarts[row]) }
+    }
+
+    /// The skeleton to show: scored when scoring is on and scores are saved,
+    /// else by the rules. A regular file distils in this turn, like the
+    /// syntax load, so there is never a blank frame; a large one distils off
+    /// the main thread and gives nil meanwhile.
+    private func skeletonEntry(
+        for document: ReaderDocument, scoring: Bool, landingOn sourceLine: Int?, marksLanding: Bool
+    ) -> SkeletonEntry? {
+        let language = document.languageMode.language
+        func cached(scored: Bool) -> SkeletonEntry? {
+            guard let index = skeletonCache.lastIndex(where: {
+                $0.contentID == document.contentID && $0.language == language && $0.scored == scored
+            }) else { return nil }
+            let entry = skeletonCache.remove(at: index)
+            skeletonCache.append(entry)
+            return entry
+        }
+        if scoring, let entry = cached(scored: true) { return entry }
+        let scores = scoring ? overviewScoring?.cache.scores(contentHash: document.contentID.hex, language: language) : nil
+        if scores == nil, let entry = cached(scored: false) { return entry }
+        guard FileTier(lineCount: document.lineTable.lineStarts.count) == .regular else {
+            awaitSkeleton(for: document, scores: scores, landingOn: sourceLine, marksLanding: marksLanding)
+            return nil
+        }
+        skeletonTask?.task.cancel()
+        skeletonTask = nil
+        pendingSkeletonLanding = nil
+        let entry = SkeletonEntry(
+            contentID: document.contentID, language: language, scored: scores != nil,
+            overview: SkeletonOverview(source: document, scores: scores ?? [:])
+        )
+        remember(entry)
+        return entry
+    }
+
+    // ponytail: eight entries cover switching between a few tabs at Overview.
+    private func remember(_ entry: SkeletonEntry) {
+        skeletonCache.removeAll {
+            $0.contentID == entry.contentID && $0.language == entry.language && $0.scored == entry.scored
+        }
+        skeletonCache.append(entry)
+        if skeletonCache.count > 8 { skeletonCache.removeFirst() }
+    }
+
+    /// Jev scoring needs a saved key and a file inside the project that its
+    /// rules do not exclude; then saved scores are used and the file may be
+    /// sent. Otherwise the skeleton follows the rules alone.
+    private func scoringAllowed(for file: URL) -> Bool {
+        guard let scoring = overviewScoring else { return false }
+        let revision = scoring.keyRevision()
+        if scoringKey?.revision != revision {
+            // A new key: content that failed before is tried again.
+            scoringKey = (revision, scoring.isConfigured())
+            scoringSkipped = []
+        }
+        return scoringKey?.configured == true && scoring.allows(file)
+    }
+
+    /// Sends the shown file's questions, once per content until the key
+    /// changes; meanwhile the rule skeleton shows with a corner indicator.
+    private func startScoring(_ document: ReaderDocument) {
+        guard let scoring = overviewScoring, scoringTask?.contentID != document.contentID,
+              !scoringSkipped.contains(document.contentID), shownSkeleton?.source == document.contentID
+        else { return }
+        scoringIndicator.isHidden = false
+        scoringRuns += 1
+        let run = scoringRuns
+        scoringTask = (document.contentID, run, Task { [weak self] in
+            let outcome = await Self.score(document, with: scoring)
+            self?.finishScoring(outcome, for: document, run: run)
+        })
+    }
+
+    private enum ScoringOutcome: Sendable {
+        case scored(SkeletonOverview?)
+        /// Too large to send, or nothing to ask.
+        case notAsked
+        case failed(any Error)
+        case cancelled
+    }
+
+    /// Off the main thread: builds the questions, asks, saves the scores and
+    /// distils with them.
+    private nonisolated static func score(_ document: ReaderDocument, with scoring: OverviewScoring) async -> ScoringOutcome {
+        let language = document.languageMode.language
+        guard let questions = SkeletonQuestions(bytes: document.bytes, language: language) else { return .notAsked }
+        do {
+            let scores = try await scoring.score(questions)
+            scoring.cache.save(scores, contentHash: document.contentID.hex, language: language)
+            return .scored(SkeletonOverview(source: document, scores: scores))
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            return .failed(error)
+        }
+    }
+
+    private func finishScoring(_ outcome: ScoringOutcome, for document: ReaderDocument, run: Int) {
+        // Leaving Overview or another content cancelled it: a late result
+        // never lands, on this file or another, nor ends a newer request.
+        guard scoringTask?.run == run else { return }
+        scoringTask = nil
+        scoringIndicator.isHidden = true
+        switch outcome {
+        case .scored(let overview):
+            let line = topSourceLine()
+            remember(SkeletonEntry(
+                contentID: document.contentID, language: document.languageMode.language, scored: true, overview: overview
+            ))
+            refreshSkeleton(landingOn: line)
+        case .notAsked:
+            scoringSkipped.insert(document.contentID)
+        case .failed(let error):
+            scoringSkipped.insert(document.contentID)
+            onNotice?(Self.scoringFailure(error))
+        case .cancelled:
+            break
+        }
+    }
+
+    private static func scoringFailure(_ error: any Error) -> String {
+        switch error as? JevClient.Failure {
+        case .notConfigured?, .status(401)?, .status(403)?: localized("main.overview.refine.unauthorized")
+        case .transport?: localized("main.overview.refine.network")
+        case .status(let status)? where status == 429 || status >= 500: localized("main.overview.refine.busy")
+        default: localized("main.overview.refine.failed")
+        }
+    }
+
+    private func cancelScoring() {
+        scoringTask?.task.cancel()
+        scoringTask = nil
+        scoringIndicator.isHidden = true
+    }
+
+    fileprivate func installSkeletonReader() {
+        let reader = ReaderTextView(settings: previewSettings, derivedDataStore: previewDerivedDataStore)
+        skeletonScrollView.hasVerticalScroller = true
+        skeletonScrollView.hasHorizontalScroller = true
+        skeletonScrollView.documentView = reader.view
+        skeletonScrollView.translatesAutoresizingMaskIntoConstraints = false
+        reader.configureGutter(in: skeletonScrollView, lineNumbers: previewSettings.lineNumbers)
+        reader.onGutterLineClick = { [weak self] line in self?.openSourceLine(fromSkeletonLine: line) }
+        reader.onViewportChange = { [weak self] in self?.scheduleReadingPositionChange() }
+        reader.onUserCaretChange = { [weak self] _ in self?.onSkeletonCaret?() }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let copy = NSMenuItem(title: localized("app.menu.copy"), action: #selector(NSText.copy(_:)), keyEquivalent: "")
+        copy.target = reader.view
+        menu.addItem(copy)
+        let open = NSMenuItem(
+            title: localized("main.overview.open.line"),
+            action: #selector(openSkeletonLineFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        open.target = self
+        menu.addItem(open)
+        reader.view.menu = menu
+        reader.onContextMenu = { [weak self, weak reader] index in
+            guard let self, let reader else { return }
+            skeletonMenuLine = reader.byteOffset(forCharacterIndex: index)
+                .flatMap { reader.displayedLineTable?.lineColumn(at: $0) }
+                .map { Int($0.line) }
+            copy.isEnabled = reader.view.selectedRange().length > 0
+            open.isEnabled = skeletonMenuLine.flatMap { shownSkeleton?.overview.map.label(ofRow: $0 - 1) } != nil
+        }
+        // Over the source reader and its overview ruler, whose marks are
+        // source positions; under previews, reading sets and notices.
+        readerArea.addSubview(skeletonScrollView)
+        NSLayoutConstraint.activate([
+            skeletonScrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            skeletonScrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            skeletonScrollView.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            skeletonScrollView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+        ])
+        skeletonPendingLabel.textColor = .secondaryLabelColor
+        skeletonPendingLabel.translatesAutoresizingMaskIntoConstraints = false
+        skeletonPendingLabel.isHidden = true
+        readerArea.addSubview(skeletonPendingLabel)
+        NSLayoutConstraint.activate([
+            skeletonPendingLabel.centerXAnchor.constraint(equalTo: readerArea.centerXAnchor),
+            skeletonPendingLabel.centerYAnchor.constraint(equalTo: readerArea.centerYAnchor),
+        ])
+        // Floats in the corner, clear of the scroller, so nothing moves.
+        let spinner = NSProgressIndicator()
+        spinner.style = .spinning
+        spinner.controlSize = .small
+        spinner.startAnimation(nil)
+        let refining = NSTextField(labelWithString: localized("main.overview.refining"))
+        refining.textColor = .secondaryLabelColor
+        refining.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        scoringIndicator.setViews([spinner, refining], in: .leading)
+        scoringIndicator.spacing = 6
+        scoringIndicator.edgeInsets = NSEdgeInsets(top: 3, left: 8, bottom: 3, right: 8)
+        scoringIndicator.wantsLayer = true
+        scoringIndicator.layer?.cornerRadius = 6
+        scoringIndicator.layer?.backgroundColor = readerTheme.backgroundColor.withAlphaComponent(0.92).cgColor
+        scoringIndicator.isHidden = true
+        scoringIndicator.translatesAutoresizingMaskIntoConstraints = false
+        readerArea.addSubview(scoringIndicator)
+        NSLayoutConstraint.activate([
+            scoringIndicator.topAnchor.constraint(equalTo: readerArea.topAnchor, constant: 8),
+            scoringIndicator.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor, constant: -24),
+        ])
+        skeletonReader = reader
+    }
+
+    @objc private func openSkeletonLineFromMenu(_ sender: Any?) {
+        guard let line = skeletonMenuLine else { return }
+        openSourceLine(fromSkeletonLine: line)
+    }
+
+    /// Distilling a large file takes a noticeable moment, so it runs off the
+    /// main thread; meanwhile the overlay says so rather than show the
+    /// source folded.
+    private func awaitSkeleton(
+        for document: ReaderDocument, scores: [String: Double]?, landingOn sourceLine: Int?, marksLanding: Bool
+    ) {
+        let language = document.languageMode.language
+        let scored = scores != nil
+        if skeletonTask?.contentID != document.contentID || skeletonTask?.language != language
+            || skeletonTask?.scored != scored {
+            skeletonTask?.task.cancel()
+            pendingSkeletonLanding = nil
+            skeletonTask = (document.contentID, language, scored, Task.detached(priority: .userInitiated) { [weak self] in
+                let overview = SkeletonOverview(source: document, scores: scores ?? [:])
+                guard !Task.isCancelled else { return }
+                await self?.finishSkeleton(overview, for: document, scored: scored)
+            })
+        }
+        if let sourceLine { pendingSkeletonLanding = (sourceLine, marksLanding) }
+        // A skeleton of the same content stays up until its replacement lands.
+        if let shown = shownSkeleton, shown.source != document.contentID {
+            skeletonReader?.clear()
+            skeletonReader?.gutterLabels = []
+            shownSkeleton = nil
+        }
+        skeletonPendingLabel.isHidden = shownSkeleton != nil
+        showSkeletonOverlay()
+    }
+
+    private func finishSkeleton(_ overview: SkeletonOverview?, for document: ReaderDocument, scored: Bool) {
+        let language = document.languageMode.language
+        guard skeletonTask?.contentID == document.contentID, skeletonTask?.language == language,
+              skeletonTask?.scored == scored
+        else { return }
+        skeletonTask = nil
+        remember(SkeletonEntry(contentID: document.contentID, language: language, scored: scored, overview: overview))
+        let landing = pendingSkeletonLanding
+        pendingSkeletonLanding = nil
+        // No skeleton: the ordinary Overview keeps its own viewport.
+        refreshSkeleton(landingOn: overview == nil ? nil : landing?.line, marksLanding: landing?.marks ?? false)
+        if skeletonReturn?.contentID == document.contentID, skeletonReturn?.top == nil {
+            skeletonReturn?.top = skeletonTopSourceLine()
+        }
+    }
+
+    /// Overview was just entered from `anchor`; remember it while the skeleton shows.
+    private func noteSkeletonEntry(from anchor: ViewportAnchor) {
+        guard isShowingSkeleton, let document = displayedDocument else { return }
+        // Nil top while a large file distils: filled in when the skeleton lands.
+        skeletonReturn = (document.contentID, anchor, skeletonTopSourceLine())
+    }
+
+    /// The remembered place, if the skeleton still shows the row it landed on.
+    private func untouchedSkeletonReturn() -> ViewportAnchor? {
+        guard isShowingSkeleton, let entry = skeletonReturn, entry.contentID == displayedDocument?.contentID,
+              let top = entry.top, top == skeletonTopSourceLine()
+        else { return nil }
+        return entry.anchor
+    }
+
+    private func showSkeletonOverlay() {
+        guard skeletonScrollView.isHidden, let reader = skeletonReader else { return }
+        skeletonScrollView.isHidden = false
+        closeFindBar()
+        hideScopeHeader()
+        if view.window?.firstResponder === textView.view { view.window?.makeFirstResponder(reader.view) }
+    }
+
+    private func hideSkeleton(landingOn sourceLine: Int?, returningTo anchor: ViewportAnchor? = nil) {
+        skeletonTask?.task.cancel()
+        skeletonTask = nil
+        pendingSkeletonLanding = nil
+        skeletonReturn = nil
+        cancelScoring()
+        skeletonPendingLabel.isHidden = true
+        guard !skeletonScrollView.isHidden else { return }
+        skeletonScrollView.isHidden = true
+        if let reader = skeletonReader, view.window?.firstResponder === reader.view {
+            view.window?.makeFirstResponder(textView.view)
+        }
+        renderScopeHeader(at: textView.byteOffset(forCharacterIndex: textView.view.selectedRange().location))
+        if let anchor {
+            view.layoutSubtreeIfNeeded()
+            textView.restore(scrollByteOffset: anchor.byteOffset, selectionByteOffset: nil, topInset: -anchor.offsetIntoLine)
+            return
+        }
+        guard let sourceLine, let offset = sourceLineStart(sourceLine) else { return }
+        view.layoutSubtreeIfNeeded()
+        // The line goes where the reader's own first line is read from: the
+        // first one wholly visible below the scope header.
+        textView.restore(scrollByteOffset: offset, selectionByteOffset: nil, topInset: scopeHeaderInset)
+        // Structure can fold that line away; then reveal it, as navigation does.
+        if sourceTopLine() != sourceLine {
+            textView.reveal(byteOffset: offset)
+        }
+    }
+
+    /// A gutter number (or the context menu): Full, then navigate to that
+    /// source line as any jump does, clear of the scope header and marked.
+    private func openSourceLine(fromSkeletonLine line: Int) {
+        guard let source = shownSkeleton?.overview.map.label(ofRow: line - 1),
+              let file = displayedFile
+        else { return }
+        setReadingHeightLevel(.full, landingOn: source)
+        guard let offset = sourceLineStart(source, skippingIndent: true) else { return }
+        navigate(to: file, byteOffset: offset, snapshotID: displayedSnapshotID, languageMode: displayedLanguageMode)
+        textView.markNavigationLanding(at: offset)
+        view.window?.makeFirstResponder(textView.view)
+    }
+
+    /// The shown skeleton's text and the lines whose gutter number a fresh
+    /// draw of the visible rows painted.
+    var selfTestSkeleton: (text: String, numberedLines: Set<Int>)? {
+        guard isShowingSkeleton, shownSkeleton != nil, let reader = skeletonReader,
+              let ruler = skeletonScrollView.verticalRulerView,
+              let rep = ruler.bitmapImageRepForCachingDisplay(in: ruler.bounds)
+        else { return nil }
+        ruler.cacheDisplay(in: ruler.bounds, to: rep)
+        return (reader.view.string, Set(reader.lastRulerLabelDrawRectsForTesting.keys))
+    }
+
+    func selfTestClickSkeletonGutter(line: Int) {
+        skeletonReader?.onGutterLineClick?(line)
+    }
+
+    var selfTestSkeletonPendingText: String? {
+        isShowingSkeleton && !skeletonPendingLabel.isHidden ? skeletonPendingLabel.stringValue : nil
+    }
+
+    /// The source reader's top line and how far it is scrolled into it, its
+    /// first line visible below the scope header, and whether the header shows.
+    var selfTestSourceTop: (atTop: Int?, intoLine: CGFloat?, belowHeader: Int?, headerShown: Bool) {
+        let anchor = textView.viewportAnchor()
+        return (anchor.flatMap { sourceLineNumber(at: $0.byteOffset) }, anchor?.offsetIntoLine,
+                sourceTopLine(), !scopeHeader.isHidden)
+    }
+
+    /// Puts a source line `topInset` points below the source reader's top
+    /// (negative: scrolled that far into it).
+    func selfTestScrollSource(toLine line: Int, topInset: CGFloat) {
+        guard let offset = sourceLineStart(line) else { return }
+        textView.restore(scrollByteOffset: offset, selectionByteOffset: nil, topInset: topInset)
+    }
+
+    /// Scrolls the skeleton so its row `row` (0-based) is on top.
+    func selfTestScrollSkeleton(toRow row: Int) {
+        guard let reader = skeletonReader, let starts = reader.displayedLineTable?.lineStarts,
+              starts.indices.contains(row)
+        else { return }
+        reader.restore(scrollByteOffset: starts[row], selectionByteOffset: nil)
+    }
+
+    /// The scoring indicator's text while it shows over the skeleton.
+    var selfTestScoringText: String? {
+        guard isShowingSkeleton, !scoringIndicator.isHidden else { return nil }
+        return scoringIndicator.views.compactMap { ($0 as? NSTextField)?.stringValue }.first
+    }
+
+    /// Opens the skeleton's context menu on a line: titles and enabled states.
+    func selfTestSkeletonContextMenu(line: Int) -> [(title: String, enabled: Bool)] {
+        guard let reader = skeletonReader, let lineStarts = reader.displayedLineTable?.lineStarts,
+              lineStarts.indices.contains(line - 1),
+              let index = shownSkeleton?.overview.document.byteUTF16Map.utf16Offset(forByte: Int(lineStarts[line - 1]))
+        else { return [] }
+        reader.onContextMenu?(index)
+        return reader.view.menu?.items.map { ($0.title, $0.isEnabled) } ?? []
+    }
+
+    func selfTestChooseSkeletonContextItem(_ index: Int) {
+        guard let item = skeletonReader?.view.menu?.items[index], let action = item.action else { return }
+        NSApp.sendAction(action, to: item.target, from: item)
+    }
+
+    /// The source line on top of what the reader shows now.
+    private func topSourceLine() -> Int? {
+        if isShowingSkeleton {
+            if let line = skeletonTopSourceLine() { return line }
+            if let pending = pendingSkeletonLanding { return pending.line }
+        }
+        return sourceTopLine()
+    }
+
+    /// The source reader's first line wholly visible below the scope header.
+    private func sourceTopLine() -> Int? {
+        textView.firstVisibleByteOffset(belowTopInset: scopeHeaderInset).flatMap(sourceLineNumber(at:))
+    }
+
+    private var scopeHeaderInset: CGFloat { scopeHeader.isHidden ? 0 : scopeHeader.frame.height }
+
+    /// The source line of the skeleton's top row; nil while it distils.
+    private func skeletonTopSourceLine() -> Int? {
+        skeletonReader?.firstVisibleByteOffset().flatMap(skeletonSourceLine(at:))
+    }
+
+    private func skeletonCaretSourceLine() -> Int? {
+        guard let reader = skeletonReader else { return nil }
+        return reader.byteOffset(forCharacterIndex: reader.view.selectedRange().location)
+            .flatMap(skeletonSourceLine(at:))
+    }
+
+    /// The source line a skeleton byte offset's row stands for.
+    private func skeletonSourceLine(at skeletonOffset: UInt32) -> Int? {
+        guard let map = shownSkeleton?.overview.map,
+              let line = skeletonReader?.displayedLineTable?.lineColumn(at: skeletonOffset)?.line
+        else { return nil }
+        return map.sourceLine(ofRow: Int(line) - 1)
+    }
+
+    private func sourceLineNumber(at byteOffset: UInt32) -> Int? {
+        displayedDocument?.lineTable.lineColumn(at: byteOffset).map { Int($0.line) }
+    }
+
+    private func sourceLineStart(_ line: Int, skippingIndent: Bool = false) -> UInt32? {
+        guard let document = displayedDocument, document.lineTable.lineStarts.indices.contains(line - 1)
+        else { return nil }
+        var offset = Int(document.lineTable.lineStarts[line - 1])
+        while skippingIndent, offset < document.bytes.count,
+              document.bytes[offset] == 0x20 || document.bytes[offset] == 0x09 {
+            offset += 1
+        }
+        return UInt32(offset)
+    }
+}
+
+/// A distilled skeleton of one content; a nil overview means it has none.
+private struct SkeletonEntry {
+    let contentID: ContentID
+    let language: LanguageID
+    /// Distilled with Jev scores.
+    let scored: Bool
+    let overview: SkeletonOverview?
+}
+
+/// What Overview needs to score skeletons with Jev.
+struct OverviewScoring: Sendable {
+    /// Changes whenever the key is saved or removed.
+    var keyRevision: @MainActor () -> Int = { AIKeychain.jev.revision }
+    /// Whether a key is saved; asks the Keychain without an access prompt.
+    var isConfigured: @MainActor () -> Bool = { AIKeychain.jev.exists() }
+    /// Inside the current project and not excluded by its rules.
+    var allows: @MainActor (URL) -> Bool
+    var cache = JevScoreCache()
+    var score: @Sendable (SkeletonQuestions) async throws -> [String: Double] = { try await JevClient().scores(for: $0) }
+}
+
+typealias ViewportAnchor = (byteOffset: UInt32, offsetIntoLine: CGFloat)
+
+private extension ContentID {
+    var hex: String { "\(algorithm)-" + bytes.map { String(format: "%02x", $0) }.joined() }
 }

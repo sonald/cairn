@@ -107,6 +107,20 @@ public final class ReaderTextView {
     /// Activating a block-end label: the header's byte offset. The host
     /// records the jump so Back returns to the brace.
     package var onBlockEndAnnotationActivate: ((UInt32) -> Void)?
+    /// A derived text (the Overview skeleton) shows, per line, the number
+    /// given here instead of its own; nil draws no number on that line.
+    package var gutterLabels: [Int?]? {
+        didSet {
+            largestGutterLabel = gutterLabels?.compactMap { $0 }.max()
+            updateRulerThickness()
+            ruler?.needsDisplay = true
+        }
+    }
+    private var largestGutterLabel: Int?
+    /// A click on a numbered line in the gutter, with that line (1-based).
+    package var onGutterLineClick: ((Int) -> Void)?
+    /// Escape in focus mode: the host leaves focus itself when set.
+    package var onFocusEscape: (() -> Bool)?
     private var findMatchByteRanges: [ByteRange]?
     private var findSelectionIndex: Int?
     private var foldOverridesByScope: [FoldScopeKey: FoldOverrides] = [:]
@@ -297,7 +311,7 @@ public final class ReaderTextView {
         textView.escapeHandler = { [weak self] in
             guard let self else { return false }
             if onHoverEscape?() == true { return true }
-            if isFocusMode { return exitFocusMode() }
+            if isFocusMode { return onFocusEscape?() ?? exitFocusMode() }
             guard occurrenceCount > 0 || pendingOccurrenceActivation != nil else { return false }
             clearOccurrences()
             return true
@@ -1531,7 +1545,7 @@ public final class ReaderTextView {
         return unfolded
     }
 
-    private func markNavigationLanding(at byteOffset: UInt32) {
+    package func markNavigationLanding(at byteOffset: UInt32) {
         guard let line = displayedDocument?.lineTable.lineColumn(
             at: byteOffset
         )?.line else { return }
@@ -2993,9 +3007,13 @@ public final class ReaderTextView {
         view.showFindIndicator(for: range)
     }
 
+    /// With `topInset`, the line lands that far below the viewport's top,
+    /// clear of a header laid over it; a negative one leaves the line's top
+    /// that far above the viewport (see `viewportAnchor()`).
     public func restore(
         scrollByteOffset: UInt32?,
-        selectionByteOffset: UInt32?
+        selectionByteOffset: UInt32?,
+        topInset: CGFloat = 0
     ) {
         if selectionByteOffset != nil { clearProjectionSelection() }
         invalidateReflowSequence()
@@ -3043,12 +3061,12 @@ public final class ReaderTextView {
             let clipView = scrollView.contentView
             clipView.scroll(to: NSPoint(
                 x: -clipView.contentInsets.left,
-                y: clampVerticalScrollOrigin(lineRect.minY, clipView: clipView)
+                y: clampVerticalScrollOrigin(lineRect.minY - topInset, clipView: clipView)
             ))
             scrollView.reflectScrolledClipView(clipView)
             // Settle this explicit scroll before measuring the restoration error.
             view.textLayoutManager?.textViewportLayoutController.layoutViewport()
-            guard let actualOffset = firstVisibleByteOffset(),
+            guard let actualOffset = firstVisibleByteOffset(belowTopInset: topInset > 0 ? topInset : nil),
                   let actual = document.lineTable.lineColumn(at: actualOffset)
             else { return }
             let lineDelta = Int(actual.line) - Int(desired.line)
@@ -3369,6 +3387,23 @@ public final class ReaderTextView {
         ruler?.needsDisplay = true
     }
 
+    /// Clicks on a numbered line while `onGutterLineClick` is set; true when it hit one.
+    func clickGutterLine(at point: NSPoint, in ruler: NSRulerView) -> Bool {
+        guard let onGutterLineClick, lineNumbers, point.x < lineNumberColumnWidth else { return false }
+        var hit: Int?
+        enumerateVisibleLayoutFragments { fragment, line in
+            guard hit == nil,
+                  gutterLabels.map({ $0.indices.contains(line - 1) && $0[line - 1] != nil }) ?? true,
+                  let firstRow = ReaderViewportGeometry.firstVisualRowRect(ofFragment: fragment, in: view)
+            else { return }
+            let row = ruler.convert(firstRow, from: view)
+            if row.minY <= point.y, point.y < row.maxY { hit = line }
+        }
+        guard let hit else { return false }
+        onGutterLineClick(hit)
+        return true
+    }
+
     /// Clicks on the ask marker's line number; true when it was one.
     func clickAskMarker(at point: NSPoint, in ruler: NSRulerView) -> Bool {
         guard let marked = askMarkerLine, lineNumbers, point.x < lineNumberColumnWidth else { return false }
@@ -3530,7 +3565,21 @@ public final class ReaderTextView {
         return sourceByteOffset(forDisplay: index)
     }
 
-    public func firstVisibleByteOffset() -> UInt32? {
+    /// The first line on screen. With `topInset`, the first line visible
+    /// below that much of the viewport's top (a header laid over it); a line
+    /// whose top edge is covered by less than 3 points still counts.
+    public func firstVisibleByteOffset(belowTopInset topInset: CGFloat? = nil) -> UInt32? {
+        firstVisibleLine(belowTopInset: topInset)?.byteOffset
+    }
+
+    /// The first line on screen and how far its top sits above the viewport's
+    /// top, for `restore(scrollByteOffset:selectionByteOffset:topInset:)` with
+    /// the negated distance to put the viewport back exactly.
+    public func viewportAnchor() -> (byteOffset: UInt32, offsetIntoLine: CGFloat)? {
+        firstVisibleLine(belowTopInset: nil)
+    }
+
+    private func firstVisibleLine(belowTopInset topInset: CGFloat?) -> (byteOffset: UInt32, offsetIntoLine: CGFloat)? {
         guard !isCommittingProjection, let layoutManager = view.textLayoutManager,
               let content = layoutManager.textContentManager
         else { return nil }
@@ -3543,8 +3592,14 @@ public final class ReaderTextView {
         // edge. Skip it, or a line restored exactly to the top reads as its
         // predecessor and restore(scrollByteOffset:) never converges.
         var firstLocation = viewport.location
+        var firstTop = controller.viewportBounds.minY
         layoutManager.enumerateTextLayoutFragments(from: viewport.location, options: []) { fragment in
             firstLocation = fragment.rangeInElement.location
+            firstTop = fragment.layoutFragmentFrame.minY
+            if let topInset {
+                // ponytail: 3pt of a covered top edge leaves the text readable.
+                return fragment.layoutFragmentFrame.minY < controller.viewportBounds.minY + topInset - 3
+            }
             return fragment.layoutFragmentFrame.maxY <= controller.viewportBounds.minY + 0.5
         }
         let location = content.offset(
@@ -3555,7 +3610,8 @@ public final class ReaderTextView {
         let lineStart = (backingTextStorage.mutableString).lineRange(
             for: NSRange(location: location, length: 0)
         ).location
-        return sourceByteOffset(forDisplay: lineStart)
+        guard let byteOffset = sourceByteOffset(forDisplay: lineStart) else { return nil }
+        return (byteOffset, max(0, controller.viewportBounds.minY - firstTop))
     }
 
     public func followAnchorByteOffset() -> UInt32? {
@@ -3898,7 +3954,7 @@ public final class ReaderTextView {
 
     private var lineNumberColumnWidth: CGFloat {
         guard lineNumbers else { return 0 }
-        let lineCount = displayedDocument?.lineTable.lineStarts.count ?? 1
+        let lineCount = largestGutterLabel ?? displayedDocument?.lineTable.lineStarts.count ?? 1
         let fontSize = CGFloat(max(10, theme.fontSize - 2))
         if let cache = lineNumberWidthCache, cache.lineCount == lineCount, cache.fontSize == fontSize {
             return cache.width
@@ -4104,17 +4160,24 @@ public final class ReaderTextView {
                     return
                 }
                 // ponytail: no caret yet → absolute numbers, like Vim's `number relativenumber`.
-                let label = relativeLineNumbers
-                    ? currentLineNumber.map { $0 == line ? line : abs(line - $0) } ?? line
-                    : line
-                lineNumberLabels.draw(
-                    label, font: font, color: theme.lineNumberColor,
-                    rightAlignedIn: labelRect, flipped: ruler.isFlipped
-                )
-                lastRulerLabelDrawRectsForTesting[line] = ruler.convert(
-                    labelRect,
-                    to: view
-                )
+                let label: Int?
+                if let gutterLabels {
+                    label = gutterLabels.indices.contains(line - 1) ? gutterLabels[line - 1] : nil
+                } else {
+                    label = relativeLineNumbers
+                        ? currentLineNumber.map { $0 == line ? line : abs(line - $0) } ?? line
+                        : line
+                }
+                if let label {
+                    lineNumberLabels.draw(
+                        label, font: font, color: theme.lineNumberColor,
+                        rightAlignedIn: labelRect, flipped: ruler.isFlipped
+                    )
+                    lastRulerLabelDrawRectsForTesting[line] = ruler.convert(
+                        labelRect,
+                        to: view
+                    )
+                }
                 lines.append(line)
                 if let kind = declarationKindsByLine[line] {
                     drawDeclarationMarker(

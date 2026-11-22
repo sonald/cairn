@@ -75,26 +75,46 @@ public struct AIProviderSettings: Equatable, Sendable {
     }
 }
 
-/// The API key, as a generic password in the login Keychain.
+/// The AI provider's API key, and the Jev scoring key in an item of its own.
 public enum AIKeychain {
+    private static let provider = KeychainKey(service: "Cairn AI provider")
+    /// Used by Overview to score skeletons; never by questions or guides.
+    public static let jev = KeychainKey(service: "Cairn Jev scoring")
+
+    public static func read() -> String? { provider.read() }
+    public static func exists() -> Bool { provider.exists() }
+    @discardableResult
+    public static func write(_ key: String) -> Bool { provider.write(key) }
+}
+
+/// A key, as a generic password in the login Keychain.
+public final class KeychainKey: @unchecked Sendable {
+    private let service: String
+    private let account = "api-key"
+    /// Read once per launch: a build whose signature changed is asked about
+    /// every read until the user picks Always Allow.
+    private var cached: String??
+    private var writes = 0
+    private let lock = NSLock()
+
     /// A build with another bundle identifier (a test build, `swift test`)
     /// gets its own item: it never asks for the release build's key, so it
     /// never brings up the Keychain access prompt for it.
-    private static let service = Bundle.main.bundleIdentifier == "dev.cairn.Cairn"
-        ? "Cairn AI provider" : "Cairn AI provider (\(Bundle.main.bundleIdentifier ?? "unbundled"))"
-    private static let account = "api-key"
-    /// Read once per launch: a build whose signature changed is asked about
-    /// every read until the user picks Always Allow.
-    nonisolated(unsafe) private static var cached: String??
-    private static let lock = NSLock()
+    init(service: String) {
+        self.service = Bundle.main.bundleIdentifier == "dev.cairn.Cairn"
+            ? service : "\(service) (\(Bundle.main.bundleIdentifier ?? "unbundled"))"
+    }
 
-    private static var query: [String: Any] {
+    private var query: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: service,
          kSecAttrAccount as String: account]
     }
 
-    public static func read() -> String? {
+    /// Changes on every save or removal in this run.
+    public var revision: Int { lock.withLock { writes } }
+
+    public func read() -> String? {
         lock.lock(); defer { lock.unlock() }
         if let cached { return cached }
         var query = query
@@ -109,7 +129,7 @@ public enum AIKeychain {
     }
 
     /// Asks only for the item's attributes, which needs no access prompt.
-    public static func exists() -> Bool {
+    public func exists() -> Bool {
         var query = query
         query[kSecReturnAttributes as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -119,9 +139,9 @@ public enum AIKeychain {
 
     /// An empty key removes it.
     @discardableResult
-    public static func write(_ key: String) -> Bool {
+    public func write(_ key: String) -> Bool {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        lock.lock(); cached = nil; lock.unlock()
+        lock.withLock { cached = nil; writes += 1 }
         SecItemDelete(query as CFDictionary)
         guard !key.isEmpty else { return true }
         var item = query

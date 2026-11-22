@@ -208,6 +208,7 @@ let package = Package(
                 "CodeInsightEngine",
                 "CodeInsightExact",
                 "CodeInsightGit",
+                "CodeInsightReaderCore",
                 "TreeSitterKit",
                 "CTreeSitterRust",
                 .product(

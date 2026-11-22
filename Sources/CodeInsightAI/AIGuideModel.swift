@@ -71,7 +71,7 @@ public final class AIGuideModel {
         run.update = { [weak self] in self?.apply($0) }
     }
 
-    public static var defaultDirectory: URL {
+    nonisolated public static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Cairn", isDirectory: true)
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "dev.cairn.Cairn", isDirectory: true)

@@ -158,8 +158,15 @@
 "main.forward" = "Forward";
 "main.function" = "Function";
 "main.go.to" = "Go to %@";
-"main.height.full.help" = "Full shows the whole file; Structure folds function bodies; Overview keeps only signatures and top-level items";
-"main.height.overview.help" = "Overview keeps only signatures and top-level items; folded bodies stay hidden";
+"main.height.full.help" = "Full shows the whole file; Structure folds function bodies; Overview shows a Rust or Python file as a skeleton, and other files as signatures and top-level items";
+"main.overview.distilling" = "Distilling the overview…";
+"main.overview.open.line" = "View This Line in Full";
+"main.overview.refining" = "Refining the overview…";
+"main.overview.refine.unauthorized" = "Jev did not accept the key; the overview keeps its local rules.";
+"main.overview.refine.network" = "Could not reach Jev; the overview keeps its local rules.";
+"main.overview.refine.busy" = "Jev is busy; the overview keeps its local rules.";
+"main.overview.refine.failed" = "Jev gave no usable answer; the overview keeps its local rules.";
+"main.height.overview.help" = "Overview shows a Rust or Python file as a skeleton in source order: functions on its main line keep their key statements, the others show only their signatures. Click a line number to read that line in Full. Other files keep only signatures and top-level items";
 "main.hide.definition.context" = "Hide definition context";
 "main.html.preview" = "HTML preview";
 "main.image.preview" = "Image preview";
@@ -947,6 +954,11 @@
 "settings.ai.check.noTools" = "The endpoint answered but did not call a tool. Asking about code needs tool calling.";
 "settings.ai.check.timeout" = "No answer within 45 seconds.";
 "settings.ai.privacy" = "When you ask a question, the model reads this project's code through Cairn's read-only tools, and those excerpts are sent to the address above. Cairn asks once per project before sending; a model on localhost is not asked about.";
+"settings.jev.section" = "Overview scoring (Jev)";
+"settings.jev.key" = "Jev key";
+"settings.jev.key.configured" = "A Jev key is saved.";
+"settings.jev.key.missing" = "No Jev key is saved.";
+"settings.jev.privacy" = "Once a key is saved, opening the Overview of a Rust or Python file sends that file's code (comments, docstrings and blank lines removed) to TypeSafe's Jev service (api.typesafe.ai), which judges which functions and statements matter. Only the scores are stored on this Mac, not the code sent. Without a key, Overview uses local rules only and does not go online.";
 "settings.ai.consent.revoke" = "Forget Allowed Projects";
 "settings.ai.consent.revoke.confirm" = "Ask again before sending code from any project?";
 

@@ -3,6 +3,7 @@ import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
+import CodeInsightReaderCore
 import CTreeSitterRust
 import Foundation
 import TreeSitterKit
@@ -12,7 +13,7 @@ struct CodeInsight: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Inspect Rust, Python and TypeScript source with CodeInsight.",
         subcommands: [
-            Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
+            Parse.self, Overview.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
             Search.self, Symsearch.self, Symbols.self, SnapshotCommand.self, SwitchStats.self,
             Goldset.self, ExactDef.self, ExactTypeDef.self, ExactHover.self,
@@ -593,6 +594,33 @@ extension CodeInsight {
             } else {
                 print(tree.rootNode.sExpression)
                 print("hasError: \(tree.rootNode.hasError)")
+            }
+        }
+    }
+
+    struct Overview: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Print the distilled skeleton of a Rust or Python file, each line after its first source line."
+        )
+
+        @Argument(help: "Path to a Rust or Python source file.")
+        var file: String
+
+        func run() throws {
+            let bytes = Array(try Data(contentsOf: URL(fileURLWithPath: file)))
+            guard let language = LanguageMode.classify(path: file)?.language,
+                  let lines = distillSkeleton(bytes: bytes, language: language)
+            else {
+                throw ValidationError("No skeleton for \(file): only Rust (.rs) and Python (.py) files are distilled.")
+            }
+            let width = max(4, String(lines.compactMap { $0.sourceLines?.lowerBound }.max() ?? 0).count)
+            for line in lines {
+                guard let first = line.sourceLines?.lowerBound else {
+                    print("")
+                    continue
+                }
+                let number = String(first)
+                print(String(repeating: " ", count: width - number.count) + number + " " + line.text)
             }
         }
     }

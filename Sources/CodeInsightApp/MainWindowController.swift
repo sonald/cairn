@@ -575,6 +575,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 handleReaderCaret(offset: offset, from: reader)
             }
         }
+        readerController.onSkeletonCaret = { [weak self] in self?.noteFocus(.primary) }
+        // Only the primary reader scores Overview skeletons; split and compare panes never send.
+        readerController.overviewScoring = OverviewScoring(allows: { [weak self] url in
+            self?.allowsOverviewScoring(url) ?? false
+        })
         for reader in [readerController, secondaryReaderController] {
             reader.onHover = { [weak self] request in self?.handleHover(request) }
             reader.onHoverRequest = { [weak self] request in
@@ -683,7 +688,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         highlightChips.onClearAll = { [weak self] in self?.clearHighlights() }
         // Timed like navigation failures: a notice raised while render()
         // navigates must outlive that pass's own status-bar refresh.
-        readerController.onFocusNotice = { [weak self] message in
+        readerController.onNotice = { [weak self] message in
             self?.showTransientStatus(message)
         }
         readerController.onSelectionChange = { [weak self] offset in
@@ -2680,8 +2685,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func findPreviousMatch() { readerController.findPreviousMatch() }
 
     var canFindInFile: Bool { readerController.canFindInFile }
+    var isShowingSkeleton: Bool { readerController.isShowingSkeleton }
 
-    var canToggleBookmark: Bool { model.bookmarkEligibility() == .eligible }
+    var canToggleBookmark: Bool {
+        // The model keeps the last source caret; over the Overview skeleton
+        // that is not where the reader is.
+        !readerController.isShowingSkeleton && model.bookmarkEligibility() == .eligible
+    }
 
     var bookmarkCommandAccessibilityHelp: String? {
         model.bookmarkEligibility().accessibilityHelp
@@ -2707,7 +2717,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func closeBookmarks() { bookmarkPanel?.closePanel() }
 
     func toggleBookmark() {
-        guard let record = model.captureCurrentBookmark() else { return }
+        guard !readerController.isShowingSkeleton, let record = model.captureCurrentBookmark() else { return }
         switch model.bookmarkModel.toggle(record) {
         case .added, .deleted, .rejected:
             render()
@@ -4544,7 +4554,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// `⌘\`: the current file at the current position, beside itself.
     func openCurrentFileToSide() {
         guard let file = model.selectedFile else { return }
-        openReference(file, byteOffset: readerController.currentSelectionByteOffset ?? 0)
+        // Over the Overview skeleton there is no source caret: the reading position stands in.
+        let skeletonPosition = readerController.isShowingSkeleton
+            ? readerController.currentReadingPosition()?.byteOffset : nil
+        openReference(file, byteOffset: readerController.currentSelectionByteOffset ?? skeletonPosition ?? 0)
     }
 
     var canOpenCurrentFileToSide: Bool {
@@ -4674,7 +4687,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func jumpToTypeDefinitionAtCaret() {
         let reader = focusedPaneReader
         let offset = reader === readerController
-            ? model.tabStrip.activeTab?.selectionByteOffset
+            ? (readerController.isShowingSkeleton ? nil : model.tabStrip.activeTab?.selectionByteOffset)
             : reader.currentSelectionByteOffset
         guard let offset else {
             showTransientStatus(modelText("model.typehop.noType"))
@@ -5044,6 +5057,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         else { return nil }
         return file.pathComponents.dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private func allowsOverviewScoring(_ file: URL) -> Bool {
+        guard let root = model.fileTree?.root else { return false }
+        return Self.allowsOverviewScoring(
+            file, root: root, rules: model.pathRules, appliesDefaults: model.currentRevision == nil
+        )
+    }
+
+    /// A file Overview may send to Jev: inside the project directory, symlinks
+    /// resolved, and not excluded by the project's rules or default skips.
+    static func allowsOverviewScoring(
+        _ file: URL, root: URL, rules: ProjectPathRules, appliesDefaults: Bool
+    ) -> Bool {
+        guard let path = projectRelativePath(
+            for: file.resolvingSymlinksInPath().standardizedFileURL,
+            under: root.resolvingSymlinksInPath().standardizedFileURL
+        ), !path.isEmpty
+        else { return false }
+        return !rules.verdict(for: path, isDirectory: false, appliesDefaults: appliesDefaults).isExcluded
     }
 
     private func projectPath(for file: URL) -> String? {

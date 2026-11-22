@@ -4,7 +4,8 @@ import SwiftUI
 /// Settings → AI: the one provider profile. The key goes to the Keychain;
 /// "Test connection" asks the endpoint for a tool call, which questions about
 /// code need. The endpoint's model list is fetched once there is a key, to
-/// choose from; any name can still be typed.
+/// choose from; any name can still be typed. The Jev key, for Overview
+/// scoring, is a Keychain item of its own.
 struct AISettingsView: View {
     @State private var settings = AIProviderSettings.load()
     @State private var keyDraft = ""
@@ -18,6 +19,8 @@ struct AISettingsView: View {
     @State private var loadingModels = false
     /// Bumped on every save, so replacing a saved key fetches the list again.
     @State private var keyRevision = 0
+    @State private var jevKeyDraft = ""
+    @State private var hasJevKey = AIKeychain.jev.exists()
 
     /// What the model list depends on; a change fetches it again.
     private var modelSource: String {
@@ -99,6 +102,26 @@ struct AISettingsView: View {
                         Button(localized("settings.cancel"), role: .cancel) {}
                     }
             }
+            Section(localized("settings.jev.section")) {
+                HStack {
+                    SecureField(localized("settings.jev.key"), text: $jevKeyDraft,
+                                prompt: Text(hasJevKey ? localized("settings.ai.key.saved") : ""))
+                        .onSubmit(saveJevKey)
+                    Button(localized("settings.ai.key.save"), action: saveJevKey)
+                        .disabled(jevKeyDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if hasJevKey {
+                        Button(localized("settings.ai.key.remove")) {
+                            AIKeychain.jev.write("")
+                            hasJevKey = false
+                        }
+                    }
+                }
+                Text(localized(hasJevKey ? "settings.jev.key.configured" : "settings.jev.key.missing"))
+                    .foregroundStyle(.secondary)
+                Text(localized("settings.jev.privacy"))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
         .task(id: modelSource) { await loadModels() }
@@ -148,6 +171,13 @@ struct AISettingsView: View {
         keyRevision += 1
         keyDraft = ""
         checkResult = nil
+    }
+
+    private func saveJevKey() {
+        let key = jevKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        hasJevKey = AIKeychain.jev.write(key)
+        jevKeyDraft = ""
     }
 
     private func check() async {

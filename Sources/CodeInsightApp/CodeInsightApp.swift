@@ -1450,7 +1450,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return target?.canFindInFile == true
         case #selector(toggleHighlight(_:)), #selector(jumpToMatchingBracket(_:)),
             #selector(selectInsideBrackets(_:)):
-            return target?.canFindInFile == true
+            // Caret commands; over the Overview skeleton the caret is not in the source.
+            return target?.canFindInFile == true && target?.isShowingSkeleton == false
         case #selector(clearHighlights(_:)):
             return target?.hasHighlights == true
         case #selector(goBack(_:)):
