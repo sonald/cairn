@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 import Observation
 
 /// One window's AI conversation: questions about the snapshot that was
@@ -115,8 +116,32 @@ public final class AIConversationModel {
             snapshot = fresh
         }
         turns.append(Turn(id: turns.count, question: question, selection: selection, startedAt: Date()))
-        run.ask(selection.map { $0.prompt + "\n\n" + question } ?? question,
-                in: snapshot!, system: systemPrompt(), config: access.helperConfig)
+        let text = (selection.map { $0.prompt + "\n\n" + question } ?? question)
+            + (Self.languageNote(for: question).map { "\n\n" + $0 } ?? "")
+        run.ask(text, in: snapshot!, system: systemPrompt(), config: access.helperConfig)
+    }
+
+    /// Names the question's language for the model: "answer in the language
+    /// of the question" alone was not enough, an English question came back
+    /// in Chinese though nothing sent was Chinese. Nil when the language is
+    /// unclear, as in a question that is mostly code; the system prompt's
+    /// rule still applies then. Code words are left out first: with them
+    /// "hooks.after_tool_use 返回什么" reads as English.
+    static func languageNote(for question: String) -> String? {
+        let prose = question.replacing(#/`[^`]*`/#, with: " ")
+            .split(whereSeparator: \.isWhitespace)
+            .filter { word in
+                !word.contains(where: "_.:()[]{}<>/\\#=&*".contains)
+                    && !(word.first!.isUppercase && word.dropFirst().contains(where: \.isUppercase))
+            }
+            .joined(separator: " ")
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(prose)
+        guard let (language, confidence) = recognizer.languageHypotheses(withMaximum: 1).first,
+              confidence >= 0.6,
+              let name = Locale(identifier: "en").localizedString(forIdentifier: language.rawValue)
+        else { return nil }
+        return "(The question is in \(name); answer in \(name).)"
     }
 
     public func cancel() {

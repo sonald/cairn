@@ -354,4 +354,13 @@ struct AIConversationTests {
         #expect(roles.filter { $0 == "assistant" }.isEmpty, "\(roles)")
         #expect(roles.filter { $0 == "user" }.count == 2)
     }
+
+    /// Code words must not decide the language: "hooks.after_tool_use 返回什么"
+    /// read as English and would have asked for an English answer.
+    @Test func theLanguageNoteFollowsTheProseNotTheCode() {
+        #expect(AIConversationModel.languageNote(for: "Who can change the result?")?.contains("English") == true)
+        #expect(AIConversationModel.languageNote(for: "hooks.after_tool_use 返回什么")?.contains("Chinese") == true)
+        #expect(AIConversationModel.languageNote(for: "`run()` 谁调用")?.contains("Chinese") == true)
+        #expect(AIConversationModel.languageNote(for: "AgentActor handle_tool_finished") == nil)
+    }
 }
