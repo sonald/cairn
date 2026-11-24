@@ -535,25 +535,31 @@ func exactCoordinatorRejectsPythonProfileMismatchBeforeProvider() async throws {
         )
     )
 
-    try coordinator.prepare(
-        projectURL: root,
-        revision: nil,
-        analysisProfile: exactPythonProfile(
-            language: .python,
-            configFingerprint: "wrong-config",
-            environmentFingerprint: ""
-        ),
-        generation: 1
-    )
+    var outdatedNotices = 0
+    coordinator.onProfileOutdated = { outdatedNotices += 1 }
+    // A second mismatch before any success must not ask for another
+    // re-index, or a persistent disagreement would refresh forever.
+    for generation in UInt64(1)...2 {
+        try coordinator.prepare(
+            projectURL: root,
+            revision: nil,
+            analysisProfile: exactPythonProfile(
+                language: .python,
+                configFingerprint: "wrong-config",
+                environmentFingerprint: ""
+            ),
+            generation: generation
+        )
 
-    #expect(await testWaitUntil("python mismatch leaves preparing") {
-        coordinator.readiness != .preparing
-    })
-    guard case .unavailable(let reason) = coordinator.readiness else {
-        Issue.record("python profile mismatch did not fail")
-        return
+        #expect(await testWaitUntil("python mismatch leaves preparing") {
+            coordinator.readiness != .preparing
+        })
+        guard case .unavailable = coordinator.readiness else {
+            Issue.record("python profile mismatch did not fail")
+            return
+        }
     }
-    #expect(reason.contains("profile"))
+    #expect(outdatedNotices == 1)
     #expect(state.prepareCount == 0)
 }
 
@@ -645,6 +651,8 @@ func exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() async thro
             fileURL: root.appendingPathComponent("trust.json")
         )
     )
+    var outdatedNotices = 0
+    coordinator.onProfileOutdated = { outdatedNotices += 1 }
 
     try coordinator.prepare(
         projectURL: root,
@@ -660,11 +668,11 @@ func exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() async thro
     #expect(await testWaitUntil("ts profile mismatch leaves preparing") {
         coordinator.readiness != .preparing
     })
-    guard case .unavailable(let reason) = coordinator.readiness else {
+    guard case .unavailable = coordinator.readiness else {
         Issue.record("ts profile mismatch did not fail")
         return
     }
-    #expect(reason.contains("profile"))
+    #expect(outdatedNotices == 1)
     #expect(state.prepareCount == 0)
 }
 

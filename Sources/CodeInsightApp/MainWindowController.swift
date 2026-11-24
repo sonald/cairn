@@ -470,6 +470,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.delegate = self
         refreshIndexButton.target = self
         refreshIndexButton.action = #selector(refreshProjectIndex(_:))
+        model.exactCoordinator.onProfileOutdated = { [weak self] in
+            guard let self, self.canRefreshIndex else { return }
+            self.refreshIndex()
+        }
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
             [weak self, weak window] event in
             guard event.keyCode == 53, let self else { return event }

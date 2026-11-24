@@ -321,6 +321,12 @@ public final class ExactCoordinator {
     @ObservationIgnored var memoryFootprint: (Int32) -> UInt64? = physicalFootprint(of:)
 
     public private(set) var readiness: Readiness = .off(localized("model.exact.noProject"))
+    /// Called when the project's build configuration changed after
+    /// indexing, so the owner can re-index.
+    @ObservationIgnored public var onProfileOutdated: (() -> Void)?
+    /// ponytail: one notice until a prepare succeeds; if the fresh index
+    /// still disagrees the status explains and Refresh Index stays manual.
+    @ObservationIgnored private var profileOutdatedNotified = false
     public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
     public private(set) var trustMode: TrustMode?
     public private(set) var trustedRepositories: [TrustedRepository] = []
@@ -1054,6 +1060,7 @@ public final class ExactCoordinator {
                 }
                 self.activate(prepared.active)
                 self.dependencyRoots = prepared.dependencyRoots
+                self.profileOutdatedNotified = false
             } catch {
                 self.takenSessions = []
                 if let candidate {
@@ -1064,6 +1071,14 @@ public final class ExactCoordinator {
                 guard self.epoch == currentEpoch,
                       self.expectedGeneration == generation
                 else { return }
+                if error is ExactProfileOutdated {
+                    self.readiness = .unavailable(localized("model.exact.profileOutdated"))
+                    if !self.profileOutdatedNotified {
+                        self.profileOutdatedNotified = true
+                        self.onProfileOutdated?()
+                    }
+                    return
+                }
                 self.readiness = trustMode == .safe && isSandboxUnavailable(error)
                     ? .off(localizedFormat("model.exact.safeDisabled", exactFailureReason(error)))
                     : .unavailable(exactFailureReason(error))
@@ -2136,12 +2151,12 @@ private func validateProfile(
     case .javascript:
         matches = false
     }
-    guard matches else {
-        throw ExactError.unavailable(
-            "exact profile does not match analysis profile"
-        )
-    }
+    guard matches else { throw ExactProfileOutdated() }
 }
+
+/// The build configuration (Cargo.toml, pyproject.toml, tsconfig.json,
+/// go.mod and their lock files) changed after the index was built.
+struct ExactProfileOutdated: Error {}
 
 private func exactFailureReason(_ error: Error) -> String {
     if case ExactError.unavailable(let detail) = error { return detail }

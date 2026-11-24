@@ -105,6 +105,7 @@
 "model.exact.closed" = "exact session closed during prepare";
 "model.exact.maintenance" = "cache maintenance";
 "model.exact.noProject" = "no project";
+"model.exact.profileOutdated" = "Project build settings (such as Cargo.toml, pyproject.toml, tsconfig.json, go.mod or a lock file) changed after indexing. Refresh Index to use them.";
 "model.exact.pyrightMissing" = "pyright-langserver is not installed";
 "model.exact.restartExhausted" = "exact helper restart exhausted: %@";
 "model.exact.restartFailed" = "exact helper restart failed: %@";

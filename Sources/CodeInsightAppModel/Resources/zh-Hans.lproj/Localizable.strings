@@ -105,6 +105,7 @@
 "model.exact.closed" = "精确分析会话在准备时已关闭";
 "model.exact.maintenance" = "缓存维护中";
 "model.exact.noProject" = "没有项目";
+"model.exact.profileOutdated" = "项目构建配置（如 Cargo.toml、pyproject.toml、tsconfig.json、go.mod 或锁文件）在建立索引后有变化，刷新索引后即可恢复。";
 "model.exact.pyrightMissing" = "未安装 pyright-langserver";
 "model.exact.restartExhausted" = "精确分析辅助进程重启次数已耗尽：%@";
 "model.exact.restartFailed" = "精确分析辅助进程重启失败：%@";

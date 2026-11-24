@@ -632,7 +632,7 @@ private func frozenReadinessReason(_ reason: String, language: String?) -> Strin
         "model.exact.goplsMissing",
         "model.exact.rustMissing", "model.exact.terminating", "model.exact.revoking",
         "model.exact.maintenance", "model.exact.sandboxMissing", "model.exact.closed",
-        "model.exact.revoked", "model.exact.cacheCleared",
+        "model.exact.revoked", "model.exact.cacheCleared", "model.exact.profileOutdated",
     ]
     for key in keys where ["en", "zh-Hans"].contains(where: {
         localized(key, language: $0) == reason
