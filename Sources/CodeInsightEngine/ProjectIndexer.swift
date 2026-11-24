@@ -35,6 +35,7 @@ public struct ProjectIndexer: Sendable {
         fileprivate let missingInputs: [ExtractionInput]
         fileprivate let deferredDrafts: [ExtractionDraft]
         fileprivate let cache: IndexCache?
+        fileprivate let sourceReader: SourceReader
         fileprivate let reusedCount: Int
         fileprivate let startedAt: Date
     }
@@ -94,12 +95,14 @@ public struct ProjectIndexer: Sendable {
         var fileInputs: [FileInput] = []
         var uniqueInputs: [ExtractionInput] = []
         var seenKeys: Set<ContentIndexKey> = []
+        var bytesByContent: [ContentID: [UInt8]] = [:]
 
         for fileURL in files {
             let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
             let bytes = [UInt8](data)
             let contentID = ContentID.sha256(of: data)
             let relativePath = relativePath(of: fileURL, under: root)
+            bytesByContent[contentID] = bytes
             guard let mode = LanguageMode.classify(path: relativePath, language: language)
             else { continue }
             let key = try contentKey(
@@ -206,12 +209,18 @@ public struct ProjectIndexer: Sendable {
             language: language,
             projectRoot: store.paths.intern(".")
         )
-        let snapshotView = SnapshotView(
+        store.insert(bytesByContent)
+        let snapshotView = try SnapshotView(
             store: store,
             manifest: manifest,
             stats: stats,
             analysisProfile: profile,
-            extractor: extractor
+            extractor: extractor,
+            // A directory index reads the file again, and the cache checks
+            // that it still has the indexed content.
+            sourceReader: SourceReader(vouchesIdentity: false) { path in
+                try [UInt8](Data(contentsOf: root.appendingPathComponent(path)))
+            }
         )
         return EngineSession(
             store: store,
@@ -265,20 +274,35 @@ public struct ProjectIndexer: Sendable {
         var missingKeys = Array(repeating: Set<ContentIndexKey>(), count: languages.count)
         var reusedKeys = Array(repeating: Set<ContentIndexKey>(), count: languages.count)
         var capturedBytes: [ContentID: [UInt8]] = [:]
+        let sourceReader = SourceReader.reading(snapshot)
+        let configurationPaths = Set(snapshot.configurationPaths)
 
         for (offset, file) in files.enumerated() {
             try Task.checkCancellation()
-            let bytes = try snapshot.readBytes(path: file.path)
             let mode = LanguageMode.classify(path: file.path, languages: languages)
-            // Only semantic sources and real configuration reach the
-            // long-lived store; non-source payloads stay in the snapshot,
-            // where previews and the manifest read them by path.
+            // Only semantic sources and real configuration are read and
+            // reach the store; non-source payloads stay in the snapshot,
+            // where previews and the manifest read them by path. A commit's
+            // source already in the shared cache is not read again.
+            var bytes: [UInt8]?
             if mode != nil
-                || snapshot.configurationPaths.contains(file.path)
+                || configurationPaths.contains(file.path)
                 || (languages.contains(.go) && (file.path == "go.mod" || file.path.hasSuffix("/go.mod")))
             {
-                capturedBytes[file.contentID] = bytes
+                // A file that changed on disk since the worktree capture (or
+                // a blob that cannot be read) is listed but not indexed, like
+                // a rejected file; reads of it report it unavailable, and
+                // opening it shows the stale-index notice.
+                do {
+                    bytes = try sourceReader.bytes(for: file.contentID, path: file.path, in: store.sourceBytes)
+                    capturedBytes[file.contentID] = bytes
+                } catch is SourceByteCache.Unavailable {
+                    // Registered without bytes, so later reads throw rather
+                    // than call it a non-source.
+                    if capturedBytes[file.contentID] == nil { capturedBytes[file.contentID] = [] }
+                }
             }
+            let size = try bytes.map { UInt64($0.count) } ?? snapshot.fileSize(path: file.path)
             guard let occurrenceID = UInt32(exactly: offset) else {
                 preconditionFailure("File count exceeds UInt32")
             }
@@ -289,9 +313,9 @@ public struct ProjectIndexer: Sendable {
                 detectedLanguage: mode?.language,
                 sourceKind: snapshot.sourceKind,
                 fileMode: file.fileMode,
-                size: UInt64(bytes.count)
+                size: size
             ))
-            guard let mode, file.fileMode != .lfsPointer,
+            guard let mode, let bytes, file.fileMode != .lfsPointer,
                   let slot = languages.firstIndex(of: mode.language)
             else { continue }
             let key = try contentKey(
@@ -310,7 +334,8 @@ public struct ProjectIndexer: Sendable {
             }
         }
         try Task.checkCancellation()
-        store.insert(capturedBytes)
+        // The bytes went through the cache already.
+        store.insert(capturedBytes, cachingBytes: false)
         var pending: [(
             missing: [ExtractionInput],
             deferred: [ExtractionDraft],
@@ -364,12 +389,13 @@ public struct ProjectIndexer: Sendable {
                 startedAt: startedAt
             )
             return PreparedSnapshot(
-                cachedSessions: unitSessions(
+                cachedSessions: try unitSessions(
                     store: store,
                     manifest: manifest,
                     stats: stats,
                     profiles: profiles[slot],
-                    extractor: extractors[slot]
+                    extractor: extractors[slot],
+                    sourceReader: sourceReader
                 ),
                 store: store,
                 manifest: manifest,
@@ -378,6 +404,7 @@ public struct ProjectIndexer: Sendable {
                 missingInputs: pending[slot].missing,
                 deferredDrafts: pending[slot].deferred,
                 cache: cache,
+                sourceReader: sourceReader,
                 reusedCount: pending[slot].reusedCount,
                 startedAt: startedAt
             )
@@ -391,16 +418,13 @@ public struct ProjectIndexer: Sendable {
     ) throws -> [EngineSession] {
         try Task.checkCancellation()
         // Every content was already installed for the cached sessions and
-        // the store has not grown since: they are the complete sessions.
+        // the store has no new indexes since: they are the complete
+        // sessions. Bytes are not part of a view, so they cannot be stale.
         if prepared.missingInputs.isEmpty, prepared.deferredDrafts.isEmpty,
-           let state = prepared.cachedSessions.first?.snapshotView.storeState
+           let state = prepared.cachedSessions.first?.snapshotView.storeState,
+           prepared.store.snapshot().contentIndexes.count == state.contentIndexes.count
         {
-            let now = prepared.store.snapshot()
-            if now.contentIndexes.count == state.contentIndexes.count,
-               now.sourceBytesByContent.count == state.sourceBytesByContent.count
-            {
-                return prepared.cachedSessions
-            }
+            return prepared.cachedSessions
         }
         let extractedDrafts = try extract(
             prepared.missingInputs,
@@ -423,12 +447,13 @@ public struct ProjectIndexer: Sendable {
             extractedCount: extractedDrafts.count,
             startedAt: prepared.startedAt
         )
-        return unitSessions(
+        return try unitSessions(
             store: prepared.store,
             manifest: prepared.manifest,
             stats: stats,
             profiles: prepared.profiles,
-            extractor: prepared.extractor
+            extractor: prepared.extractor,
+            sourceReader: prepared.sourceReader
         )
     }
 
@@ -440,8 +465,9 @@ public struct ProjectIndexer: Sendable {
         manifest: SnapshotManifest,
         stats: IndexStats,
         profiles: [AnalysisProfile],
-        extractor: any LanguageExtractor
-    ) -> [EngineSession] {
+        extractor: any LanguageExtractor,
+        sourceReader: SourceReader
+    ) throws -> [EngineSession] {
         let roots = profiles.map { store.paths.resolve($0.projectRoot) }
         let unitRoot = deepestUnitRootLookup(among: roots)
         var filesByRoot: [String: [FileOccurrence]] = [:]
@@ -452,14 +478,17 @@ public struct ProjectIndexer: Sendable {
             else { continue }
             filesByRoot[root, default: []].append(file)
         }
-        return zip(profiles, roots).map { profile, root in
-            EngineSession(store: store, snapshotView: SnapshotView(
+        let sourcePaths = SnapshotView.sourcePaths(manifest: manifest, store: store)
+        return try zip(profiles, roots).map { profile, root in
+            EngineSession(store: store, snapshotView: try SnapshotView(
                 store: store,
                 manifest: manifest,
                 stats: stats,
                 analysisProfile: profile,
                 extractor: extractor,
-                unitFiles: filesByRoot[root] ?? []
+                unitFiles: filesByRoot[root] ?? [],
+                sourceReader: sourceReader,
+                sourcePaths: sourcePaths
             ))
         }
     }

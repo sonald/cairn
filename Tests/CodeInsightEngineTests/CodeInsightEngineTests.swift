@@ -692,7 +692,7 @@ func storeAndSnapshotViewPreserveFixtureFieldsAndQueries() throws {
     #expect(session.manifest.snapshotID == view.manifest.snapshotID)
     #expect(session.manifest.files.map(\.pathID) == view.manifest.files.map(\.pathID))
     #expect(Set(session.contentIndexes.keys) == Set(store.contentIndexes.keys))
-    #expect(session.sourceBytesByContent == store.sourceBytesByContent)
+    #expect(try Set(allSourceBytes(of: session).keys) == store.retainedContentIDs())
     #expect(session.moduleChildren == view.moduleMap.moduleChildren)
     #expect(aggregateStatsDump(session.stats) == aggregateStatsDump(view.stats))
     #expect(session.stats.elapsedMilliseconds == view.stats.elapsedMilliseconds)
@@ -732,7 +732,7 @@ func engineSessionExposesOnlyTheClassifierSelectedLanguageMode() throws {
         "main.rs": "fn active() {}\nfn caller() { active(); }\n",
     ]) { session in
         let active = try #require(session.contentIndexes.first)
-        let bytes = try #require(session.sourceBytesByContent[active.key.contentID])
+        let bytes = try #require(try session.sourceBytes(for: active.key.contentID))
 
         func rekey(_ mode: LanguageMode) -> ContentIndex {
             ContentIndex(
@@ -772,7 +772,7 @@ func engineSessionExposesOnlyTheClassifierSelectedLanguageMode() throws {
 
         let rebuilt = EngineSession(
             store: session.store,
-            snapshotView: SnapshotView(
+            snapshotView: try SnapshotView(
                 store: session.store,
                 manifest: session.manifest,
                 stats: session.stats,
@@ -2573,7 +2573,7 @@ private func withManualTypeScriptProject(
         files: occurrences
     )
     let profile = AnalysisProfile.placeholder(language: .typescript, root: store.paths.intern("."))
-    let view = SnapshotView(
+    let view = try SnapshotView(
         store: store,
         manifest: manifest,
         stats: stats,
@@ -2715,7 +2715,7 @@ private func withManualPythonProject(
         files: occurrences
     )
     let profile = AnalysisProfile.placeholder(language: .python, root: store.paths.intern("."))
-    let view = SnapshotView(
+    let view = try SnapshotView(
         store: store,
         manifest: manifest,
         stats: IndexStats(

@@ -82,7 +82,7 @@ python3 scripts/check-search-repeat.py .build/release/codeinsight
   > /tmp/search-result.json 2> /tmp/search-timing.log
 ```
 
-`--repeat N` 要求正整数；stdout 只输出最后一次搜索结果，stderr 记录索引就绪时间、每轮首个非空批次与流结束的毫秒数及中位数。无命中时首批为 `none`。搜索计时包含查询准备和批次合并，不包含建索引、最后的排序、JSON 编码与打印；`completeness=truncated` 表示结束时仍有截断，不等于完整扫描。省略 `--repeat` 不输出计时。原生输入防抖和绘制另行测量。
+`--repeat N` 要求正整数；stdout 只输出最后一次搜索结果，stderr 记录索引就绪时间、每轮首个非空批次与流结束的毫秒数及中位数。无命中时首批为 `none`。搜索计时包含查询准备和批次合并，不包含建索引、最后的排序、JSON 编码与打印；`completeness=truncated` 表示结束时仍有截断，不等于完整扫描。省略 `--repeat` 不输出计时。原生输入防抖和绘制另行测量。`--commit <rev>` 改为搜索该 commit 的快照（源码字节经共享缓存读取，见 [architecture.md](architecture.md)“身份与源码事实”）；环境变量 `CAIRN_SOURCE_BYTE_CACHE_MIB` 设定源码字节缓存预算。`switch-stats --from <rev> --to <rev> [--to <rev> …] [--persist]` 在同一 store 里依次切换，每步打印进程物理内存占用、缓存中的源码字节和内容索引数量与粗略大小；`--persist` 读写该项目的持久索引缓存，测量时用 `CODEINSIGHT_INDEX_CACHE_ROOT` 指向隔离目录。
 
 冷/热持久化索引用新的隔离目录，先后执行两次；不要清理日常缓存：
 

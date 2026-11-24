@@ -93,7 +93,9 @@ public struct AISnapshot: Sendable {
     func bytes(of path: String) throws -> [UInt8] {
         guard fileSet.contains(path) else { throw AIToolError("not a file in this snapshot: \(path)") }
         for (session, _) in sessions {
-            if let captured = session.capturedSource(atManifestPath: path) { return captured.bytes }
+            // A source that cannot be read back is an error, not a reason
+            // to fall back to other bytes.
+            if let captured = try session.capturedSource(atManifestPath: path) { return captured.bytes }
         }
         let url = url(of: path)
         if let source { return try source(url) }

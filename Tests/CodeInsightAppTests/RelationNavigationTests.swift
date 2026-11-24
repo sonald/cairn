@@ -1976,7 +1976,7 @@ private func makeRelationUXFixture(
         verificationReadiness: { .ready },
         capturedSource: { path in
             guard capturedSourceAvailable else { return nil }
-            guard let source = session.capturedSource(atManifestPath: path)
+            guard let source = try? session.capturedSource(atManifestPath: path)
             else { return nil }
             return (
                 source.contentID,

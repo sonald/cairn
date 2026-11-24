@@ -103,7 +103,7 @@ func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
     })
     // S4b-2 contract: non-source payloads stay out of the semantic store;
     // their raw bytes remain available through the snapshot itself.
-    #expect(older.sourceBytesByContent[package.contentID] == nil)
+    #expect(try older.sourceBytes(for: package.contentID) == nil)
     #expect(try !olderSnapshot.readBytes(path: "Package.swift").isEmpty)
 
     let repeated = try indexer.indexSnapshot(olderSnapshot, into: store)
@@ -206,7 +206,7 @@ func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
     #expect(snapshot.counts.list == 0)
     #expect(snapshot.counts.read == 0)
     #expect(store.contentIndexes.isEmpty)
-    #expect(store.sourceBytesByContent.isEmpty)
+    #expect(store.retainedContentIDs().isEmpty)
 
     let nonexistent = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupportedIndexer-\(UUID().uuidString)")
@@ -552,8 +552,8 @@ func typescriptCommitAndWorktreeIndexAreContentEquivalent() throws {
     for key in worktreeActive.keys {
         #expect(try encodedIndex(worktreeActive[key]!)
             == encodedIndex(commitActive[key]!))
-        #expect(worktree.sourceBytesByContent[key.contentID]
-            == commit.sourceBytesByContent[key.contentID])
+        #expect(try worktree.sourceBytes(for: key.contentID)
+            == commit.sourceBytes(for: key.contentID))
         #expect(CanonicalDump.render(
             worktreeActive[key]!,
             names: worktree.names,
@@ -1113,7 +1113,7 @@ func activeViewKeepsUnionManifestButExcludesPathsOutsideManualUnitRoot() throws 
         edition: nil,
         trustMode: .safe
     )
-    let view = SnapshotView(
+    let view = try SnapshotView(
         store: store,
         manifest: base.manifest,
         stats: base.stats,
@@ -1231,7 +1231,7 @@ func snapshotIndexerCountsLFSPointerWithoutParsingItAsRust() throws {
     #expect(file.detectedLanguage == .rust)
     #expect(session.stats.fileCount == 3)
     #expect(session.stats.extractedCount == 2)
-    #expect(session.sourceBytesByContent[file.contentID] == pointer)
+    #expect(try session.sourceBytes(for: file.contentID) == pointer)
     #expect(!session.contentIndexes.keys.contains { $0.contentID == file.contentID })
 }
 
@@ -1608,12 +1608,12 @@ func batchInsertMatchesSequentialInsert() throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
     let session = try ProjectIndexer(parallelism: 1).index(root: fixture.root)
-    let entries = session.contentIndexes.values.sorted {
+    let entries = try session.contentIndexes.values.sorted {
         cacheKey(for: $0.key) < cacheKey(for: $1.key)
     }.map { index in
         (
             index,
-            session.sourceBytesByContent[index.key.contentID]!,
+            try session.sourceBytes(for: index.key.contentID)!,
             false
         )
     }
@@ -1631,7 +1631,8 @@ func batchInsertMatchesSequentialInsert() throws {
     let sequentialState = sequential.snapshot()
     let batchState = batch.snapshot()
     #expect(Set(sequentialState.contentIndexes.keys) == Set(batchState.contentIndexes.keys))
-    #expect(sequentialState.sourceBytesByContent == batchState.sourceBytesByContent)
+    #expect(sequential.retainedContentIDs() == batch.retainedContentIDs())
+    #expect(sequential.retainedContentByteCount() == batch.retainedContentByteCount())
     #expect(sequentialState.containsErrorNodes == batchState.containsErrorNodes)
     for key in sequentialState.contentIndexes.keys {
         #expect(try encodedIndex(sequentialState.contentIndexes[key]!)
@@ -1645,7 +1646,7 @@ private func expectEquivalentContent(
     _ cached: EngineSession
 ) throws {
     #expect(Set(direct.contentIndexes.keys) == Set(cached.contentIndexes.keys))
-    #expect(direct.sourceBytesByContent == cached.sourceBytesByContent)
+    #expect(try allSourceBytes(of: direct) == allSourceBytes(of: cached))
     for key in direct.contentIndexes.keys {
         let directIndex = direct.contentIndexes[key]!
         let cachedIndex = cached.contentIndexes[key]!
@@ -2053,7 +2054,7 @@ func s4aRetentionMeasurementMatrix() throws {
         )
     }
     func retainedBytes(_ store: ProjectIndexStore) -> Int {
-        store.sourceBytesByContent.values.reduce(0) { $0 + $1.count }
+        store.retainedContentByteCount()
     }
 
     // Scenario A: same sources plus a non-source payload, fresh store per
@@ -2075,7 +2076,7 @@ func s4aRetentionMeasurementMatrix() throws {
         lines.append(
             "A payloadMiB=\(payloadMiB) prepareMs=\(Int(elapsed * 1000))"
                 + " retainedKiB=\(retainedBytes(store) / 1024)"
-                + " entries=\(store.sourceBytesByContent.count)"
+                + " entries=\(store.retainedContentIDs().count)"
         )
     }
 
@@ -2229,7 +2230,7 @@ func snapshotIndexerKeepsIndexingWhenTheExtractorRejectsOneFile() throws {
     let rejected = try #require(session.manifest.files.first {
         session.paths.resolve($0.pathID) == "invalid.ts"
     })
-    #expect(session.sourceBytesByContent[rejected.contentID] == invalid)
+    #expect(try session.sourceBytes(for: rejected.contentID) == invalid)
     #expect(!session.contentIndexes.keys.contains { $0.contentID == rejected.contentID })
     #expect(session.contentIndexes.values.contains { index in
         index.symbols.contains { session.names.resolve($0.nameID) == "good" }
@@ -2247,3 +2248,12 @@ let hermeticGitEnvironment = ProcessInfo.processInfo.environment.merging([
     "GIT_COMMITTER_NAME": "CodeInsight Tests",
     "GIT_COMMITTER_EMAIL": "codeinsight@example.com",
 ]) { $1 }
+
+/// Every source content of the session's snapshot, read through the session.
+func allSourceBytes(of session: EngineSession) throws -> [ContentID: [UInt8]] {
+    var result: [ContentID: [UInt8]] = [:]
+    for file in session.manifest.files where result[file.contentID] == nil {
+        if let bytes = try session.sourceBytes(for: file.contentID) { result[file.contentID] = bytes }
+    }
+    return result
+}

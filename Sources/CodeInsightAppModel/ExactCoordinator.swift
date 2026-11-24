@@ -305,6 +305,10 @@ public final class ExactCoordinator {
         func readBytes(path: String) throws -> [UInt8] {
             try wrapped.readBytes(path: "\(prefix)/\(path)")
         }
+
+        func fileSize(path: String) throws -> UInt64 {
+            try wrapped.fileSize(path: "\(prefix)/\(path)")
+        }
     }
 
     private struct Prepared: Sendable {

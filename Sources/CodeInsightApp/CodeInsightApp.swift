@@ -60,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         return ReaderSettings(defaults: .standard)
     }()
     private let readerDerivedDataStore = ReaderDerivedDataStore()
+    /// Source bytes of every window's index, within one byte budget.
+    private let sharedSourceByteCache = SourceByteCache()
     nonisolated(unsafe) private var wrapKeyMonitor: Any?
     // Window collection and routing state (all MainActor, §4.1).
     private(set) var projectWindows: [MainWindowController] = []
@@ -169,6 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             sessionURL: windowSessionURL ?? AppModel.defaultSessionURL,
             recentProjectsStore: recentProjectsStore,
             sharedBookmarkStore: sharedBookmarkStore,
+            indexService: ProjectIndexService(sourceBytes: sharedSourceByteCache),
             exactCoordinator: ExactCoordinator(
                 trustRegistry: sharedTrustRegistry,
                 checkoutStore: sharedCheckoutStore

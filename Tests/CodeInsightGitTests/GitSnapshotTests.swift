@@ -339,7 +339,7 @@ private func expectCapture(
 }
 
 @Test
-func commitCapturesTakingBlobsFromALiveCaptureMatchTheWrittenHistory() throws {
+func commitCapturesTakingBlobFactsFromEarlierCapturesMatchTheWrittenHistory() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
     let history = try commitSeededHistory(in: fixture, seed: 0xB10B, commits: 8)
@@ -356,17 +356,19 @@ func commitCapturesTakingBlobsFromALiveCaptureMatchTheWrittenHistory() throws {
     })
     #expect(Set(history.compactMap { $0.files["a.rs"]?.content }).count > 1)
 
-    // Nothing of this repository is alive: every blob is read.
+    // With nothing of this repository known, every blob is read.
     for (index, commit) in history.enumerated() {
+        try CommitSnapshot.forgetKnownBlobs(repositoryURL: fixture.root)
         let fresh = try CommitSnapshot(repositoryURL: fixture.root, revision: commit.oid)
         #expect(fresh.reusedBlobCount == 0)
         try expectCapture(fresh, matches: commit.files, "fresh \(index)")
     }
 
-    // Each capture keeps the one before alive, in a seeded order that
-    // revisits commits, so most blobs come from it.
+    // Captures in a seeded order that revisits commits take most blob
+    // facts from earlier ones, which need not be alive; the bytes are read
+    // from the object database either way.
+    try CommitSnapshot.forgetKnownBlobs(repositoryURL: fixture.root)
     var state: UInt64 = 0x0DDBA11
-    var previous: CommitSnapshot?
     var reused = 0
     for step in 0..<24 {
         state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
@@ -374,8 +376,6 @@ func commitCapturesTakingBlobsFromALiveCaptureMatchTheWrittenHistory() throws {
         let snapshot = try CommitSnapshot(repositoryURL: fixture.root, revision: history[index].oid)
         try expectCapture(snapshot, matches: history[index].files, "step \(step) commit \(index)")
         reused += snapshot.reusedBlobCount
-        withExtendedLifetime(previous) {}
-        previous = snapshot
     }
     #expect(reused > 0)
 }
@@ -392,18 +392,16 @@ func commitCaptureNeverTakesBlobsFromAnotherRepository() throws {
     let history = try commitSeededHistory(in: first, seed: 0x5A5E, commits: 1)
     _ = try commitSeededHistory(in: second, seed: 0x5A5E, commits: 1)
 
-    let alive = try CommitSnapshot(repositoryURL: first.root)
+    _ = try CommitSnapshot(repositoryURL: first.root)
     let again = try CommitSnapshot(repositoryURL: first.root)
     #expect(again.reusedBlobCount > 0)
     let other = try CommitSnapshot(repositoryURL: second.root)
     #expect(other.reusedBlobCount == 0)
     try expectCapture(other, matches: history[0].files, "other repository")
-    withExtendedLifetime(alive) {}
-    withExtendedLifetime(again) {}
 }
 
 @Test
-func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
+func worktreeSnapshotRefusesFilesChangedOrRemovedAfterCapture() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
 
@@ -415,11 +413,19 @@ func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
     try Data(capturedCargo).write(to: cargo)
     let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
 
-    try Data("changed later".utf8).write(to: file)
-    try Data("[package]\nname = \"changed\"\n".utf8).write(to: cargo)
-    #expect(try snapshot.readBytes(path: "sample.rs") == captured)
     #expect(try snapshot.readBytes(path: "Cargo.toml") == capturedCargo)
+    // The bytes are not kept: a changed or removed file is refused, never
+    // returned with other content; the manifest still has the capture.
+    try Data("changed later".utf8).write(to: file)
+    try FileManager.default.removeItem(at: cargo)
+    #expect(throws: GitError.self) { try snapshot.readBytes(path: "sample.rs") }
+    #expect(throws: GitError.self) { try snapshot.readBytes(path: "Cargo.toml") }
+    #expect(try snapshot.fileSize(path: "sample.rs") == UInt64(captured.count))
+    #expect(snapshot.listFiles().first { $0.path == "sample.rs" }?.contentID == ContentID.sha256(of: captured))
     #expect(snapshot.listFiles().contains { $0.path == "Cargo.toml" })
+    // Restoring the captured bytes makes the file readable again.
+    try Data(captured).write(to: file)
+    #expect(try snapshot.readBytes(path: "sample.rs") == captured)
     #expect(snapshot.projectRootName == fixture.root.lastPathComponent)
 }
 
@@ -467,7 +473,7 @@ func worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() throw
     try Data("changed\n".utf8).write(
         to: fixture.root.appendingPathComponent("README.md")
     )
-    #expect(try snapshot.readBytes(path: "README.md") == Array("# read me\n".utf8))
+    #expect(throws: GitError.self) { try snapshot.readBytes(path: "README.md") }
 }
 
 @Test

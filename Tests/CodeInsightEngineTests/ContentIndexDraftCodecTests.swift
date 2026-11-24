@@ -269,7 +269,7 @@ func cachedDraftsOfWholeCorporaRoundTrip() throws {
         }
         @Sendable func check(_ offset: Int) {
             let key = keys[offset]
-            let bytes = state.sourceBytesByContent[key.contentID]!
+            let bytes = store.sourceBytes.cachedBytes(key.contentID)!
             let payload = payloads[cacheKey(for: key)]!
             let problem: String? = {
                 do {

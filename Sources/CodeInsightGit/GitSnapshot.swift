@@ -53,6 +53,9 @@ public enum GitObjectFormat: String, Hashable, Sendable, Codable {
 public enum GitError: Error, LocalizedError {
     case git(operation: String, code: Int32, message: String)
     case missingPath(String)
+    /// A worktree file is gone or no longer has the content it was
+    /// captured with.
+    case changedSinceCapture(String)
     case notAWorktree(String)
     case unsupportedObjectFormat(Int32)
 
@@ -62,6 +65,8 @@ public enum GitError: Error, LocalizedError {
             return "\(operation) failed (\(code)): \(message)"
         case let .missingPath(path):
             return "snapshot path not found: \(path)"
+        case let .changedSinceCapture(path):
+            return "file changed since capture: \(path)"
         case let .notAWorktree(path):
             return "repository has no worktree: \(path)"
         case let .unsupportedObjectFormat(rawValue):
@@ -78,6 +83,8 @@ public protocol Snapshot: Sendable {
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)]
     func readBytes(path: String) throws -> [UInt8]
+    /// The file's byte count, without reading it where the snapshot knows it.
+    func fileSize(path: String) throws -> UInt64
 
     var configurationPaths: [String] { get }
     /// Paths the project's own exclusion rules removed: the topmost excluded
@@ -97,6 +104,7 @@ public extension Snapshot {
     var ruleExcludedPaths: [String] { [] }
     var unreadablePaths: [String] { [] }
     var languages: [LanguageID] { detectedLanguages(in: listFiles()) }
+    func fileSize(path: String) throws -> UInt64 { UInt64(try readBytes(path: path).count) }
 }
 
 /// Symlinks and gitlinks are not sources: the worktree walk never captures
@@ -113,7 +121,9 @@ func detectedLanguages(
     return LanguageMode.supported.filter(found.contains)
 }
 
-public final class GitRepository {
+/// Every use of `raw` goes through `LibGit2Executor`, so a snapshot may
+/// keep the repository open and read from it on any thread.
+public final class GitRepository: @unchecked Sendable {
     let raw: OpaquePointer
 
     public let objectFormat: GitObjectFormat
@@ -175,17 +185,18 @@ public final class GitRepository {
 
             let count = git_blob_rawsize(blob)
             guard count > 0, let bytes = git_blob_rawcontent(blob) else { return [] }
-            return [UInt8](Data(bytes: bytes, count: Int(count)))
+            return Array(UnsafeBufferPointer(start: bytes.assumingMemoryBound(to: UInt8.self), count: Int(count)))
         }
     }
 }
 
 public final class CommitSnapshot: Snapshot, Sendable {
-    private let files: [String: CapturedFile]
-    /// Every blob this capture holds, by object ID, for the next capture of
-    /// the same repository to take instead of reading it again.
-    private let blobs: [GitOID: CapturedBlob]
-    /// Blobs taken from a live earlier capture instead of read; diagnostic.
+    /// A manifest, not the content: each file's bytes are read from the
+    /// object database by object ID when asked for.
+    private let files: [String: ManifestFile]
+    private let repository: GitRepository
+    /// Blobs whose content ID was already known from an earlier capture of
+    /// the same repository, so they were not read; diagnostic.
     package let reusedBlobCount: Int
     public let ruleExcludedPaths: [String]
 
@@ -199,148 +210,140 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let languages: [LanguageID]
 
     /// Built-in skipped directories never hide tracked files here; only the
-    /// user's rules do, and excluded blobs are never read. A blob the
-    /// repository's latest live capture already holds is taken from it: an
-    /// object ID names one content, so its bytes and content ID are the same.
+    /// user's rules do, and excluded blobs are never read. A blob seen by an
+    /// earlier capture of this repository in this process is not read again:
+    /// an object ID names one content, so its content ID is the same. A new
+    /// blob is read and hashed once, and its bytes are dropped.
     public init(
         repositoryURL: URL,
         revision: String = "HEAD",
         pathRules: ProjectPathRules = ProjectPathRules()
     ) throws {
-        let loaded: (
-            [String: CapturedFile], [GitOID: CapturedBlob], Int,
-            GitObjectFormat, GitOID, [String], String
-        ) =
-            try LibGit2Executor.sync {
-                let repository = try GitRepository(url: repositoryURL)
-                let reuseKey = repository.reuseKey
-                let earlier = liveCommitSnapshots.latest(for: reuseKey)?.blobs ?? [:]
-
-                var object: OpaquePointer?
-                try revision.withCString { spec in
-                    try check(
-                        git_revparse_single(&object, repository.raw, spec),
-                        "git_revparse_single"
-                    )
-                }
-                guard let object else {
-                    throw GitError.git(
-                        operation: "git_revparse_single",
-                        code: -1,
-                        message: "returned no object"
-                    )
-                }
-                defer { git_object_free(object) }
-
-                var commit: OpaquePointer?
+        let repository = try GitRepository(url: repositoryURL)
+        // The tree walk holds the serial libgit2 queue once; each blob read
+        // below takes it on its own, so other readers interleave.
+        let walked: (entries: [TreeEntry], commitOID: GitOID) = try LibGit2Executor.sync {
+            var object: OpaquePointer?
+            try revision.withCString { spec in
                 try check(
-                    git_object_peel(&commit, object, GIT_OBJECT_COMMIT),
-                    "git_object_peel(commit)"
-                )
-                guard let commit, let commitID = git_object_id(commit) else {
-                    throw GitError.git(
-                        operation: "git_object_peel(commit)",
-                        code: -1,
-                        message: "returned no commit"
-                    )
-                }
-                defer { git_object_free(commit) }
-
-                var tree: OpaquePointer?
-                try check(git_commit_tree(&tree, commit), "git_commit_tree")
-                guard let tree else {
-                    throw GitError.git(
-                        operation: "git_commit_tree",
-                        code: -1,
-                        message: "returned no tree"
-                    )
-                }
-                defer { git_tree_free(tree) }
-
-                let collector = TreeWalkCollector()
-                let payload = Unmanaged.passUnretained(collector).toOpaque()
-                try check(
-                    git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
-                    "git_tree_walk"
-                )
-
-                var captured: [String: CapturedFile] = [:]
-                var blobs: [GitOID: CapturedBlob] = [:]
-                var reused = 0
-                var excluded: [String] = []
-                // As in the worktree walk, a file under an excluded directory
-                // stays out even if a `!` rule matches the file itself.
-                var excludedDirectory: [String: Bool] = [:]
-                func isExcluded(_ path: String) -> Bool {
-                    var directory = ""
-                    for component in path.split(separator: "/").dropLast() {
-                        directory += directory.isEmpty ? String(component) : "/" + component
-                        let verdict = excludedDirectory[directory] ?? pathRules.verdict(
-                            for: directory, isDirectory: true, appliesDefaults: false
-                        ).isExcluded
-                        excludedDirectory[directory] = verdict
-                        if verdict { return true }
-                    }
-                    return pathRules.verdict(for: path, isDirectory: false, appliesDefaults: false).isExcluded
-                }
-                for entry in collector.entries {
-                    if isExcluded(entry.path) {
-                        excluded.append(entry.path)
-                        continue
-                    }
-                    // A gitlink names a commit, not a blob; its bytes are
-                    // the object ID itself.
-                    let blob: CapturedBlob
-                    if entry.fileMode == .gitlink {
-                        let bytes = Array(entry.oid.hex.utf8)
-                        blob = CapturedBlob(bytes: bytes, contentID: ContentID.sha256(of: bytes))
-                    } else if let known = blobs[entry.oid] {
-                        blob = known
-                    } else if let known = earlier[entry.oid] {
-                        blob = known
-                        blobs[entry.oid] = known
-                        reused += 1
-                    } else {
-                        let bytes = try repository.readBlob(oid: entry.rawOID)
-                        blob = CapturedBlob(bytes: bytes, contentID: ContentID.sha256(of: bytes))
-                        blobs[entry.oid] = blob
-                    }
-                    // The mode is this entry's own: one blob can be a file
-                    // in one place and a symlink target in another.
-                    captured[entry.path] = CapturedFile(
-                        bytes: blob.bytes,
-                        contentID: blob.contentID,
-                        fileMode: capturedFileMode(blob.bytes, fallback: entry.fileMode)
-                    )
-                }
-                return (
-                    captured, blobs, reused, repository.objectFormat, oidString(commitID),
-                    Self.topmostExcluded(excluded, rules: pathRules), reuseKey
+                    git_revparse_single(&object, repository.raw, spec),
+                    "git_revparse_single"
                 )
             }
+            guard let object else {
+                throw GitError.git(
+                    operation: "git_revparse_single",
+                    code: -1,
+                    message: "returned no object"
+                )
+            }
+            defer { git_object_free(object) }
+
+            var commit: OpaquePointer?
+            try check(
+                git_object_peel(&commit, object, GIT_OBJECT_COMMIT),
+                "git_object_peel(commit)"
+            )
+            guard let commit, let commitID = git_object_id(commit) else {
+                throw GitError.git(
+                    operation: "git_object_peel(commit)",
+                    code: -1,
+                    message: "returned no commit"
+                )
+            }
+            defer { git_object_free(commit) }
+
+            var tree: OpaquePointer?
+            try check(git_commit_tree(&tree, commit), "git_commit_tree")
+            guard let tree else {
+                throw GitError.git(
+                    operation: "git_commit_tree",
+                    code: -1,
+                    message: "returned no tree"
+                )
+            }
+            defer { git_tree_free(tree) }
+
+            let collector = TreeWalkCollector()
+            let payload = Unmanaged.passUnretained(collector).toOpaque()
+            try check(
+                git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
+                "git_tree_walk"
+            )
+            return (collector.entries, oidString(commitID))
+        }
+
+        let reuseKey = repository.reuseKey
+        var known = knownBlobs.facts(for: reuseKey)
+        var learned: [GitOID: BlobFacts] = [:]
+        var captured: [String: ManifestFile] = [:]
+        var reused = 0
+        var excluded: [String] = []
+        // As in the worktree walk, a file under an excluded directory
+        // stays out even if a `!` rule matches the file itself.
+        var excludedDirectory: [String: Bool] = [:]
+        func isExcluded(_ path: String) -> Bool {
+            var directory = ""
+            for component in path.split(separator: "/").dropLast() {
+                directory += directory.isEmpty ? String(component) : "/" + component
+                let verdict = excludedDirectory[directory] ?? pathRules.verdict(
+                    for: directory, isDirectory: true, appliesDefaults: false
+                ).isExcluded
+                excludedDirectory[directory] = verdict
+                if verdict { return true }
+            }
+            return pathRules.verdict(for: path, isDirectory: false, appliesDefaults: false).isExcluded
+        }
+        for entry in walked.entries {
+            if isExcluded(entry.path) {
+                excluded.append(entry.path)
+                continue
+            }
+            // A gitlink names a commit, not a blob; its bytes are the
+            // object ID itself.
+            let facts: BlobFacts
+            if entry.fileMode == .gitlink {
+                facts = BlobFacts(bytes: Array(entry.oid.hex.utf8))
+            } else if let seen = known[entry.oid] {
+                facts = seen
+                if learned.updateValue(seen, forKey: entry.oid) == nil { reused += 1 }
+            } else {
+                facts = BlobFacts(bytes: try repository.readBlob(oid: entry.rawOID))
+                known[entry.oid] = facts
+                learned[entry.oid] = facts
+            }
+            // The mode is this entry's own: one blob can be a file in one
+            // place and a symlink target in another.
+            captured[entry.path] = ManifestFile(
+                oid: entry.rawOID,
+                contentID: facts.contentID,
+                fileMode: entry.fileMode == .regular && facts.isLFSPointer
+                    ? .lfsPointer : entry.fileMode,
+                size: facts.size
+            )
+        }
+        knownBlobs.record(learned, for: reuseKey)
 
         snapshotID = SnapshotID(rawValue: UUID())
-        blobs = loaded.1
-        reusedBlobCount = loaded.2
-        objectFormat = loaded.3
+        self.repository = repository
+        reusedBlobCount = reused
+        objectFormat = repository.objectFormat
         self.revision = revision
-        commitOID = loaded.4
-        ruleExcludedPaths = loaded.5
+        commitOID = walked.commitOID
+        ruleExcludedPaths = Self.topmostExcluded(excluded, rules: pathRules)
         projectRootName = repositoryURL.standardizedFileURL.lastPathComponent
-        let capturedFiles = loaded.0
-        files = capturedFiles
-        configurationPaths = capturedFiles.keys
+        files = captured
+        configurationPaths = captured.keys
             .filter { entry in
                 guard configurationLanguage(
                     for: fileName(of: entry)
                 ) != nil,
-                      capturedFiles[entry]?.fileMode != .symlink
+                      captured[entry]?.fileMode != .symlink
                 else { return false }
                 return true
             }
             .sorted()
-        languages = detectedLanguages(in: capturedFiles.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
-        liveCommitSnapshots.register(self, for: loaded.6)
+        languages = detectedLanguages(in: captured.map { ($0.key, $0.value.contentID, $0.value.fileMode) })
     }
 
     public func listFiles() -> [(
@@ -353,9 +356,26 @@ public final class CommitSnapshot: Snapshot, Sendable {
         }
     }
 
+    /// Reads the blob again; throws when the object database no longer
+    /// has it. The bytes are not checked against the content ID here.
     public func readBytes(path: String) throws -> [UInt8] {
         guard let file = files[path] else { throw GitError.missingPath(path) }
-        return file.bytes
+        if file.fileMode == .gitlink {
+            var oid = file.oid
+            return Array(oidString(&oid).hex.utf8)
+        }
+        return try repository.readBlob(oid: file.oid)
+    }
+
+    public func fileSize(path: String) throws -> UInt64 {
+        guard let file = files[path] else { throw GitError.missingPath(path) }
+        return file.size
+    }
+
+    /// Forgets the blobs this process has seen in the repository, so the
+    /// next capture reads every blob; for tests.
+    package static func forgetKnownBlobs(repositoryURL: URL) throws {
+        knownBlobs.forget(try GitRepository(url: repositoryURL).reuseKey)
     }
 
     /// Reports excluded files the way a worktree walk does: the topmost
@@ -375,7 +395,10 @@ public final class CommitSnapshot: Snapshot, Sendable {
 }
 
 public final class WorktreeSnapshot: Snapshot, Sendable {
-    private let files: [String: CapturedFile]
+    /// A manifest, not the content: each file is read again from disk when
+    /// asked for and must still have the content it was captured with.
+    private let files: [String: WorktreeFile]
+    private let root: URL
     public let ruleExcludedPaths: [String]
     public let unreadablePaths: [String]
 
@@ -391,6 +414,8 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     /// A directory that is not itself a Git repository (including a
     /// repository subdirectory: `git_repository_open` does not search
     /// upward) is captured as a plain directory; other Git errors throw.
+    /// Every file is read once, one at a time, to hash it; no bytes are
+    /// kept.
     public init(
         repositoryURL: URL,
         pathRules: ProjectPathRules = ProjectPathRules()
@@ -417,7 +442,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         }
         let root = repositoryInfo.0
 
-        var captured: [String: CapturedFile] = [:]
+        var captured: [String: WorktreeFile] = [:]
         var excluded: [String] = []
         let walked = try ProjectTreeWalk.regularFiles(under: root, rules: pathRules)
         var unreadable = walked.unreadableDirectories
@@ -430,17 +455,17 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 unreadable.append(relative)
                 continue
             }
-            let bytes = [UInt8](data)
-            captured[relative] = CapturedFile(
-                bytes: bytes,
-                contentID: ContentID.sha256(of: bytes),
-                fileMode: capturedFileMode(bytes, fallback: .regular)
+            captured[relative] = WorktreeFile(
+                contentID: ContentID.sha256(of: data),
+                fileMode: data.starts(with: lfsPointerPrefix) ? .lfsPointer : .regular,
+                size: UInt64(data.count)
             )
         }
 
         snapshotID = SnapshotID(rawValue: UUID())
         objectFormat = repositoryInfo.1
         projectRootName = root.lastPathComponent
+        self.root = root
         files = captured
         ruleExcludedPaths = excluded
         unreadablePaths = unreadable.sorted()
@@ -462,11 +487,22 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         }
     }
 
+    /// Reads the file again; throws `changedSinceCapture` when it is gone
+    /// or its bytes no longer hash to the captured content ID, so a caller
+    /// never gets other content under the captured identity.
     public func readBytes(path: String) throws -> [UInt8] {
         guard let file = files[path] else {
             throw GitError.missingPath(path)
         }
-        return file.bytes
+        guard let data = try? Data(contentsOf: root.appendingPathComponent(path), options: .mappedIfSafe),
+              ContentID.sha256(of: data) == file.contentID
+        else { throw GitError.changedSinceCapture(path) }
+        return [UInt8](data)
+    }
+
+    public func fileSize(path: String) throws -> UInt64 {
+        guard let file = files[path] else { throw GitError.missingPath(path) }
+        return file.size
     }
 
 }
@@ -562,50 +598,58 @@ private func configurationLanguage(for name: String) -> LanguageID? {
     }
 }
 
-private struct CapturedFile: Sendable {
-    let bytes: [UInt8]
+private struct WorktreeFile: Sendable {
     let contentID: ContentID
     let fileMode: FileMode
+    let size: UInt64
 }
 
-private struct CapturedBlob: Sendable {
-    let bytes: [UInt8]
+private struct ManifestFile: @unchecked Sendable {
+    let oid: git_oid
     let contentID: ContentID
+    let fileMode: FileMode
+    let size: UInt64
 }
 
-/// The latest commit snapshot of each repository, held weakly: a capture
-/// takes the blobs a still-open one already read (the commit the window
-/// shows, the language server's checkout), and keeps nothing alive itself.
-private final class LiveCommitSnapshots: @unchecked Sendable {
-    private struct Entry {
-        weak var snapshot: CommitSnapshot?
-    }
+/// What a blob's bytes say about it, kept after the bytes are dropped.
+private struct BlobFacts: Sendable {
+    let contentID: ContentID
+    let isLFSPointer: Bool
+    let size: UInt64
 
+    init(bytes: [UInt8]) {
+        contentID = ContentID.sha256(of: bytes)
+        isLFSPointer = bytes.starts(with: lfsPointerPrefix)
+        size = UInt64(bytes.count)
+    }
+}
+
+/// Blob facts by object ID for each repository this process captured from
+/// (keyed like `GitRepository.reuseKey`). It holds no bytes and is never
+/// trimmed: about a hundred bytes per distinct blob seen.
+private final class KnownBlobs: @unchecked Sendable {
     private let lock = NSLock()
-    private var entries: [String: Entry] = [:]
+    private var tables: [String: [GitOID: BlobFacts]] = [:]
 
-    func latest(for key: String) -> CommitSnapshot? {
-        lock.withLock { entries[key]?.snapshot }
+    func facts(for key: String) -> [GitOID: BlobFacts] {
+        lock.withLock { tables[key] ?? [:] }
     }
 
-    func register(_ snapshot: CommitSnapshot, for key: String) {
-        lock.withLock { entries[key] = Entry(snapshot: snapshot) }
+    func record(_ facts: [GitOID: BlobFacts], for key: String) {
+        guard !facts.isEmpty else { return }
+        lock.withLock { tables[key, default: [:]].merge(facts) { current, _ in current } }
+    }
+
+    func forget(_ key: String) {
+        _ = lock.withLock { tables.removeValue(forKey: key) }
     }
 }
 
-private let liveCommitSnapshots = LiveCommitSnapshots()
+private let knownBlobs = KnownBlobs()
 
 private let lfsPointerPrefix = Array(
     "version https://git-lfs.github.com/spec".utf8
 )
-
-private func capturedFileMode(
-    _ bytes: [UInt8],
-    fallback: FileMode
-) -> FileMode {
-    fallback == .regular && bytes.starts(with: lfsPointerPrefix)
-        ? .lfsPointer : fallback
-}
 
 struct TreeEntry {
     let path: String

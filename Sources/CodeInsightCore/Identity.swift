@@ -16,7 +16,14 @@ public struct ContentID: Codable, Hashable, Sendable {
     }
 
     public static func sha256(of bytes: [UInt8]) -> ContentID {
-        sha256(of: Data(bytes))
+        ContentID(algorithm: 1, bytes: Array(SHA256.hash(data: bytes)))
+    }
+
+    /// One combine over the digest instead of one per byte; equal IDs still
+    /// hash alike.
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(algorithm)
+        bytes.withUnsafeBytes { hasher.combine(bytes: $0) }
     }
 }
 

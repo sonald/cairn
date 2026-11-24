@@ -75,7 +75,9 @@ public extension IndexService {
 }
 
 public final class ProjectIndexService: IndexService, @unchecked Sendable {
-    private var store = ProjectIndexStore()
+    /// One per application: every window's stores share its byte budget.
+    private let sourceBytes: SourceByteCache
+    private var store: ProjectIndexStore
     private let lock = NSLock()
     private var indexer = ProjectIndexer()
     private var pathRules = ProjectPathRules()
@@ -84,7 +86,10 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         lock.withLock { pathRules = rules }
     }
 
-    public init() {}
+    public init(sourceBytes: SourceByteCache = SourceByteCache()) {
+        self.sourceBytes = sourceBytes
+        store = ProjectIndexStore(sourceBytes: sourceBytes)
+    }
 
     /// Content identities the service store currently retains. Regression
     /// surface for the project-boundary lifetime contract.
@@ -97,7 +102,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     /// provide reuse without retaining every revision in memory.
     private func beginSnapshotScope() {
         lock.withLock {
-            store = ProjectIndexStore()
+            store = ProjectIndexStore(sourceBytes: sourceBytes)
         }
     }
 
@@ -1919,9 +1924,19 @@ public final class AppModel {
         selectReadingSet()
     }
 
+    /// nil when the file is absent or cannot be read back; callers that
+    /// can report the difference use `readCapturedProjectSource`.
     package func capturedProjectSource(
         at path: String
     ) -> (contentID: ContentID, bytes: [UInt8])? {
+        (try? readCapturedProjectSource(at: path)) ?? nil
+    }
+
+    /// nil when the path is not a source of the current snapshot; throws
+    /// when its captured bytes cannot be read back.
+    package func readCapturedProjectSource(
+        at path: String
+    ) throws -> (contentID: ContentID, bytes: [UInt8])? {
         let language = LanguageMode.classify(
             path: path,
             languages: projectLanguages
@@ -1932,7 +1947,7 @@ public final class AppModel {
                 && $0.analysisProfile.language == language
         }
         guard let session else { return nil }
-        return session.capturedSource(atManifestPath: path)
+        return try session.capturedSource(atManifestPath: path)
     }
 
     package func bookmarkEligibility() -> BookmarkEligibility {
@@ -1999,11 +2014,21 @@ public final class AppModel {
         guard let anchor = currentBookmarkAnchor(), anchor == record.snapshot else {
             return .notEvaluated
         }
+        // A source that cannot be read back is not an absent file: a commit
+        // blob makes the revision unavailable, a worktree file has drifted
+        // since capture.
+        let captured: (contentID: ContentID, bytes: [UInt8])?
+        do {
+            captured = try readCapturedProjectSource(at: record.path)
+        } catch {
+            if case .worktree = record.snapshot { return .drifted }
+            return .revisionUnavailable
+        }
         return BookmarkStatus.evaluate(
             record: record,
             snapshot: anchor,
             revisionAvailable: true,
-            capturedSource: capturedProjectSource(at: record.path)
+            capturedSource: captured
         )
     }
 
@@ -3054,12 +3079,13 @@ public final class AppModel {
         }
         guard !sessions.isEmpty else { return nil }
         return { file in
-            guard let path = Self.relativePath(of: file, under: root),
-                  let bytes = sessions.lazy.compactMap({
-                      $0.capturedSource(atManifestPath: path)?.bytes
-                  }).first
-            else { throw CocoaError(.fileReadNoSuchFile) }
-            return bytes
+            guard let path = Self.relativePath(of: file, under: root) else {
+                throw CocoaError(.fileReadNoSuchFile)
+            }
+            for session in sessions {
+                if let captured = try session.capturedSource(atManifestPath: path) { return captured.bytes }
+            }
+            throw CocoaError(.fileReadNoSuchFile)
         }
     }
 

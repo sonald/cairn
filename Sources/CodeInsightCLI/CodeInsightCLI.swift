@@ -483,6 +483,10 @@ extension CodeInsight {
         func readBytes(path: String) throws -> [UInt8] {
             try wrapped.readBytes(path: "\(prefix)/\(path)")
         }
+
+        func fileSize(path: String) throws -> UInt64 {
+            try wrapped.fileSize(path: "\(prefix)/\(path)")
+        }
     }
 
     struct SnapshotCommand: ParsableCommand {
@@ -520,17 +524,20 @@ extension CodeInsight {
     struct SwitchStats: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "switch-stats",
-            abstract: "Measure content reuse between two commits."
+            abstract: "Measure content reuse and memory across commit switches."
         )
 
         @Option(name: .long, help: "Git repository root.")
         var project: String
 
-        @Option(name: .long, help: "Commit indexed first.")
+        @Option(name: .long, help: "Commit indexed first; `worktree` captures the working tree as the app does.")
         var from: String
 
-        @Option(name: .long, help: "Commit switched to second.")
-        var to: String
+        @Option(name: .long, help: "Commit switched to next; repeat to switch several times in one store.")
+        var to: [String] = []
+
+        @Flag(name: .long, help: "Read and write the project's persistent index cache.")
+        var persist = false
 
         @Option(
             name: .long,
@@ -541,18 +548,24 @@ extension CodeInsight {
         func run() throws {
             let root = URL(fileURLWithPath: project, isDirectory: true)
             let language = try resolvedLanguage(language, project: project)
-            let indexer = ProjectIndexer()
+            let indexer = persist ? ProjectIndexer(persistingProjectAt: root) : ProjectIndexer()
+            defer { if persist { indexer.flushPersistentWrites() } }
             let store = ProjectIndexStore()
-            let fromSnapshot = try CommitSnapshot(
-                repositoryURL: root,
-                revision: from
-            )
-            _ = try indexer.indexSnapshot(fromSnapshot, into: store, language: language)
-
-            let startedAt = Date()
-            let toSnapshot = try CommitSnapshot(repositoryURL: root, revision: to)
-            let session = try indexer.indexSnapshot(toSnapshot, into: store, language: language)
-            let elapsed = Date().timeIntervalSince(startedAt) * 1_000
+            let fromSnapshot: any CodeInsightGit.Snapshot = from == "worktree"
+                ? try WorktreeSnapshot(repositoryURL: root)
+                : try CommitSnapshot(repositoryURL: root, revision: from)
+            var session = try indexer.indexSnapshot(fromSnapshot, into: store, language: language)
+            printMemory("from", store: store)
+            var elapsed = 0.0
+            // The previous session stays alive while the next one is built,
+            // as a window keeps its commit until the switch lands.
+            for revision in to {
+                let startedAt = Date()
+                let toSnapshot = try CommitSnapshot(repositoryURL: root, revision: revision)
+                session = try indexer.indexSnapshot(toSnapshot, into: store, language: language)
+                elapsed = Date().timeIntervalSince(startedAt) * 1_000
+                printMemory(revision, store: store, milliseconds: elapsed)
+            }
             FileHandle.standardError.write(Data(
                 "unit: \(session.paths.resolve(session.analysisProfile.projectRoot))\n".utf8
             ))
@@ -1285,6 +1298,12 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         @Option(name: .customLong("repeat"), help: "Run the search N times after indexing once; report timings to stderr.")
         var repeatCount: Int?
 
+        @Option(name: .long, help: "Search this commit's snapshot instead of the working tree's files.")
+        var commit: String?
+
+        @Flag(name: .long, help: "Search a captured snapshot of the working tree, as the app does, instead of indexing the directory.")
+        var worktreeSnapshot = false
+
         func validate() throws {
             guard patterns.count == 1 else {
                 throw ValidationError("Supply exactly one quoted query; check for unrecognized options. Use -- before a query that matches an option name.")
@@ -1302,11 +1321,27 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
                 throw ValidationError("Invalid query at UTF-16 offset \(error.range.lowerBound): \(error.localizedDescription)")
             }
             let indexStarted = ContinuousClock.now
-            let session = try indexProject(
-                options.project,
-                persist: options.persist,
-                language: options.languageID()
-            )
+            let projectURL = URL(fileURLWithPath: options.project, isDirectory: true)
+            let snapshot: (any CodeInsightGit.Snapshot)? = if let commit {
+                try CommitSnapshot(repositoryURL: projectURL, revision: commit)
+            } else if worktreeSnapshot {
+                try WorktreeSnapshot(repositoryURL: projectURL)
+            } else {
+                nil
+            }
+            let session = if let snapshot {
+                try ProjectIndexer().indexSnapshot(
+                    snapshot,
+                    into: ProjectIndexStore(),
+                    language: options.languageID()
+                )
+            } else {
+                try indexProject(
+                    options.project,
+                    persist: options.persist,
+                    language: options.languageID()
+                )
+            }
             if repeatCount != nil {
                 timing("index ready_ms=\(milliseconds(since: indexStarted)) files=\(session.stats.fileCount) extracted=\(session.stats.extractedCount) reused=\(session.stats.reusedCount)")
             }
@@ -1741,6 +1776,29 @@ private struct ContentSearchMatchJSON: Codable {
         conditionRanges = match.conditionRanges.mapValues { $0.map(ByteRangeJSON.init) }
         symbolName = match.symbolName
     }
+}
+
+/// One line per switch: process footprint, source bytes the store
+/// keeps, and a rough size of its content indexes (array payloads only).
+private func printMemory(_ label: String, store: ProjectIndexStore, milliseconds: Double = 0) {
+    var info = rusage_info_v2()
+    let footprint = withUnsafeMutablePointer(to: &info) { pointer in
+        pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) {
+            proc_pid_rusage(getpid(), RUSAGE_INFO_V2, $0)
+        }
+    } == 0 ? info.ri_phys_footprint : 0
+    let indexes = store.contentIndexes.values
+    func size<T>(_ array: [T]) -> Int { array.count * MemoryLayout<T>.stride }
+    let indexBytes = indexes.reduce(0) { total, index in
+        total + size(index.scopes) + size(index.bindings) + size(index.executableRegions)
+            + size(index.symbols) + size(index.implRelations) + size(index.supertypes)
+            + size(index.calls) + size(index.imports) + size(index.exports)
+            + size(index.lineTable.lineStarts) + size(index.regions)
+    }
+    let mib = { (bytes: Int) in String(format: "%.1f", Double(bytes) / 1_048_576) }
+    print("switch \(label) ms=\(String(format: "%.0f", milliseconds)) footprintMiB=\(mib(Int(footprint)))"
+        + " sourceBytesMiB=\(mib(store.retainedContentByteCount())) contentIndexes=\(indexes.count)"
+        + " contentIndexMiB≈\(mib(indexBytes))")
 }
 
 private func indexProject(

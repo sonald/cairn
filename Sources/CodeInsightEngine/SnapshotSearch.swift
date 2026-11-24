@@ -6,6 +6,10 @@ public protocol SnapshotContentSource: Sendable {
     var manifest: SnapshotManifest { get }
     func path(for pathID: PathID) -> String?
     func bytes(for contentID: ContentID) -> [UInt8]?
+    /// The bytes of each content that are at hand without reading (nil
+    /// where not), in order, in one call; the parallel scan takes them
+    /// before its workers start. Empty means none.
+    func cachedBytes(for contentIDs: [ContentID]) -> [[UInt8]?]
     func searchIndex(for pathID: PathID) -> ContentIndex?
     func searchName(for nameID: NameID) -> String?
     var searchProjectExcludedPathCount: Int? { get }
@@ -15,6 +19,7 @@ public protocol SnapshotContentSource: Sendable {
 }
 
 public extension SnapshotContentSource {
+    func cachedBytes(for contentIDs: [ContentID]) -> [[UInt8]?] { [] }
     func searchIndex(for pathID: PathID) -> ContentIndex? { nil }
     func searchName(for nameID: NameID) -> String? { nil }
     var searchProjectExcludedPathCount: Int? { nil }
@@ -284,6 +289,9 @@ public struct SnapshotSearchService: Sendable {
                     batchMatchCount = 0
                 }
 
+                // One cache lookup for the whole scan: workers that each took
+                // the cache lock per file queued behind one another at start.
+                let cached = source.cachedBytes(for: scanGroups.map { $0[0].contentID })
                 let events = AsyncThrowingStream<ScanEvent, Error>.makeStream()
                 do {
                     try await withThrowingTaskGroup(of: Void.self) { group in
@@ -300,7 +308,8 @@ public struct SnapshotSearchService: Sendable {
                                 for offset in lower..<upper {
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { return }
-                                    let bytes = source.bytes(for: scanGroups[offset][0].contentID)
+                                    let bytes = (offset < cached.count ? cached[offset] : nil)
+                                        ?? source.bytes(for: scanGroups[offset][0].contentID)
                                     try Task.checkCancellation()
                                     if Self.expired(startedAt, limit: wallClockLimit) { return }
                                     var ranges: [ByteRange]?
@@ -802,8 +811,14 @@ extension EngineSession: SnapshotContentSource {
         paths.resolve(pathID)
     }
 
+    /// A content that cannot be read back is nil here; search reports
+    /// its files as truncated.
     public func bytes(for contentID: ContentID) -> [UInt8]? {
-        sourceBytesByContent[contentID]
+        (try? sourceBytes(for: contentID)) ?? nil
+    }
+
+    public func cachedBytes(for contentIDs: [ContentID]) -> [[UInt8]?] {
+        store.sourceBytes.cachedBytes(contentIDs)
     }
 
     public func search(

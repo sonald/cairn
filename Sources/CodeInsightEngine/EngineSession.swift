@@ -110,7 +110,6 @@ public final class EngineSession: Sendable {
     let store: ProjectIndexStore
     let snapshotView: SnapshotView
     let extractor: any LanguageExtractor
-    private let storeState: ProjectIndexStore.State
     private let filesByPath: [PathID: FileOccurrence]
     private let contentKeysByPath: [PathID: ContentIndexKey]
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
@@ -118,9 +117,6 @@ public final class EngineSession: Sendable {
     private let callOwnershipByContent: [ContentIndexKey: CallOwnershipIndex]
     private let implIndex: ImplIndex
     private let searchableDefinitionNameIDs: [NameID]
-    var sourceBytesByContent: [ContentID: [UInt8]] {
-        storeState.sourceBytesByContent
-    }
     private let symbolSearchCache = SymbolSearchCache()
 
     init(
@@ -131,7 +127,6 @@ public final class EngineSession: Sendable {
         self.store = store
         self.snapshotView = snapshotView
         extractor = snapshotView.extractor
-        storeState = snapshotView.storeState
         let manifest = snapshotView.manifest
         let contentIndexes = snapshotView.contentIndexes
         filesByPath = Dictionary(uniqueKeysWithValues: manifest.files.map {
@@ -992,17 +987,25 @@ public final class EngineSession: Sendable {
             .joined(separator: "/")
     }
 
-    package func sourceBytes(at pathID: PathID) -> [UInt8]? {
-        filesByPath[pathID]
-            .flatMap { sourceBytesByContent[$0.contentID] }
+    /// nil when no source file of this snapshot has the content; throws
+    /// when its bytes cannot be read back with the same identity.
+    package func sourceBytes(for contentID: ContentID) throws -> [UInt8]? {
+        try snapshotView.sourceBytes(for: contentID)
     }
 
+    /// nil for a file that is not a source, and for one that cannot be read
+    /// back; callers that can report the difference use `capturedSource`.
+    package func sourceBytes(at pathID: PathID) -> [UInt8]? {
+        filesByPath[pathID].flatMap { try? sourceBytes(for: $0.contentID) }
+    }
+
+    /// nil when the path is not a source file of this snapshot.
     package func capturedSource(
         atManifestPath path: String
-    ) -> (contentID: ContentID, bytes: [UInt8])? {
+    ) throws -> (contentID: ContentID, bytes: [UInt8])? {
         guard let file = manifest.files.first(where: {
             paths.resolve($0.pathID) == path
-        }), let bytes = sourceBytesByContent[file.contentID]
+        }), let bytes = try sourceBytes(for: file.contentID)
         else { return nil }
         return (file.contentID, bytes)
     }

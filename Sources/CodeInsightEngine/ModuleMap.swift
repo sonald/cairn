@@ -18,20 +18,20 @@ public struct ModuleMap: Sendable {
         manifest: SnapshotManifest,
         language: LanguageID,
         indexes: [ContentIndexKey: ContentIndex],
-        bytesByContent: [ContentID: [UInt8]],
+        bytes: (ContentID) throws -> [UInt8]?,
         names: Interner<NameID>,
         paths: Interner<PathID>,
         projectRoot: String,
         goModules: [String: String] = [:]
-    ) {
+    ) throws {
         let files = manifest.files
         switch language {
         case .rust:
             self.language = .rust
-            let rust = Self.rustModuleMap(
+            let rust = try Self.rustModuleMap(
                 files: files,
                 indexes: indexes,
-                bytesByContent: bytesByContent,
+                bytes: bytes,
                 names: names,
                 paths: paths,
                 projectRoot: projectRoot
@@ -85,11 +85,11 @@ public struct ModuleMap: Sendable {
             pathsByID = [:]
             pythonRootsByFile = [:]
             moduleChildren = [:]
-            go = GoPackages(files: files.map {
+            go = GoPackages(files: try files.map {
                 (
                     $0.pathID,
                     Self.relativePath(paths.resolve($0.pathID), root: projectRoot),
-                    bytesByContent[$0.contentID].flatMap(Self.goPackageClause)
+                    try bytes($0.contentID).flatMap(Self.goPackageClause)
                 )
             }, modules: goModules)
         case .javascript:
@@ -163,11 +163,11 @@ public struct ModuleMap: Sendable {
     private static func rustModuleMap(
         files: [FileOccurrence],
         indexes: [ContentIndexKey: ContentIndex],
-        bytesByContent: [ContentID: [UInt8]],
+        bytes: (ContentID) throws -> [UInt8]?,
         names: Interner<NameID>,
         paths: Interner<PathID>,
         projectRoot: String
-    ) -> (
+    ) throws -> (
         children: [PathID: [NameID: PathID]],
         parents: [PathID: PathID],
         roots: Set<PathID>
@@ -191,8 +191,8 @@ public struct ModuleMap: Sendable {
                 roots.insert(file.pathID)
             }
             guard
-                let bytes = bytesByContent[file.contentID],
-                let index = indexesByContent[file.contentID]
+                let index = indexesByContent[file.contentID],
+                let bytes = try bytes(file.contentID)
             else { continue }
 
             let directory = path.split(separator: "/").dropLast()

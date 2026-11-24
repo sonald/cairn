@@ -650,7 +650,7 @@ func snapshotProfileReadsCargoDirectlyWithoutIndexingIt() throws {
     #expect(session.manifest.files.count == 1)
     #expect(session.paths.resolve(session.manifest.files[0].pathID) == "src/main.rs")
     #expect(session.contentIndexes.count == 1)
-    #expect(session.sourceBytesByContent[ContentID.sha256(of: cargo)] == nil)
+    #expect(try session.sourceBytes(for: ContentID.sha256(of: cargo)) == nil)
 }
 
 @Test
