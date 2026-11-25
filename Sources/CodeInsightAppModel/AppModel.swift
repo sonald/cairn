@@ -1131,8 +1131,9 @@ public final class AppModel {
         switch failure {
         case let .invalidTarget(message): localizedFormat("model.remote.invalidTarget", message)
         case let .connectFailed(message, command): localizedFormat("model.remote.connectFailed", message, command)
-        case let .disconnected(message): localizedFormat("model.remote.disconnected", message)
-        case let .timedOut(message): localizedFormat("model.remote.timedOut", message)
+        // The transport's own notes on a lost link are English diagnostics.
+        case .disconnected: localized("model.remote.disconnected")
+        case .timedOut: localized("model.remote.timedOut")
         case let .remote(message): localizedFormat("model.remote.error", message)
         }
     }
@@ -1160,14 +1161,12 @@ public final class AppModel {
     private func adoptRemoteTransport(_ transport: SSHTransport) {
         remoteTransport = transport
         remoteDisconnectedNotice = nil
-        transport.onConnectionLoss = { [weak self, weak transport] failure in
+        transport.onConnectionLoss = { [weak self, weak transport] _ in
             Task { @MainActor in
                 guard let self, let transport, self.remoteTransport === transport,
                       let origin = self.remoteOrigin
                 else { return }
-                self.remoteDisconnectedNotice = localizedFormat(
-                    "model.remote.lost", origin.displayName, Self.remoteFailureText(failure)
-                )
+                self.remoteDisconnectedNotice = localizedFormat("model.remote.lost", origin.displayName)
             }
         }
     }

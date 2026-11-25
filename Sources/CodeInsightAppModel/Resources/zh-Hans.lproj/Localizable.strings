@@ -213,11 +213,11 @@
 "model.relation.unsupportedReferences" = "无法验证：服务器不支持引用查询";
 "model.relation.verified" = "已验证";
 "model.remote.connectFailed" = "ssh 无法连接：%@。可在终端运行：%@";
-"model.remote.disconnected" = "连接已断开：%@";
+"model.remote.disconnected" = "连接已断开";
 "model.remote.error" = "远端出错：%@";
 "model.remote.invalidTarget" = "远端地址无效：%@";
-"model.remote.lost" = "已断开与 %@ 的连接（%@），重连即可恢复。";
-"model.remote.timedOut" = "远端操作超时：%@";
+"model.remote.lost" = "已断开与 %@ 的连接，重连即可恢复。";
+"model.remote.timedOut" = "远端操作超时，没有应答";
 "model.search.empty" = "没有匹配结果。";
 "model.search.error" = "搜索失败。";
 "model.search.failed" = "项目索引失败。";

@@ -177,7 +177,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var panelPreset = PanelPresetModel.reading
     private var readingSetLayoutActive = false
     private var lastOpenedProjectRoot: URL?
-    private var pendingRecentProjectRoot: URL?
+    private var pendingRecentProjectRoot: URL? {
+        didSet {
+            // A remote target that never opened and was never listed leaves
+            // no placeholder behind.
+            guard let oldValue, oldValue != pendingRecentProjectRoot, !model.projectState.isOpen,
+                  RemoteOrigin(placeholder: oldValue) != nil,
+                  !recentProjectsStore.paths.contains(oldValue.path)
+            else { return }
+            try? FileManager.default.removeItem(at: oldValue)
+        }
+    }
     private var pendingTabRestore: TabStripModel.Tab?
     private var pendingRefreshContentID: ContentID?
     private var sessionRestoreTask: Task<Void, Never>?
@@ -2303,6 +2313,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if runFinalCheckpoint {
             checkpointSessionSynchronously()
         }
+        pendingRecentProjectRoot = nil
         onProjectWindowClosing?(self)
         closeAuxiliaryPanels()
         cancelSessionRestore()

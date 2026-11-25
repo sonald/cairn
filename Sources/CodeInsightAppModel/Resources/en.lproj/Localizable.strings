@@ -213,11 +213,11 @@
 "model.relation.unsupportedReferences" = "Verified unavailable: server does not support references";
 "model.relation.verified" = "Verified";
 "model.remote.connectFailed" = "ssh could not connect: %@. Try it in Terminal: %@";
-"model.remote.disconnected" = "the connection was lost: %@";
+"model.remote.disconnected" = "the connection was lost";
 "model.remote.error" = "the remote side failed: %@";
 "model.remote.invalidTarget" = "invalid remote target: %@";
-"model.remote.lost" = "Disconnected from %@ (%@). Reconnect to resume.";
-"model.remote.timedOut" = "a remote operation timed out: %@";
+"model.remote.lost" = "Disconnected from %@. Reconnect to resume.";
+"model.remote.timedOut" = "a remote operation timed out";
 "model.search.empty" = "No matches.";
 "model.search.error" = "Search failed.";
 "model.search.failed" = "Project indexing failed.";

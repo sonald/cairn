@@ -459,10 +459,38 @@ public final class SSHTransport: @unchecked Sendable {
         guard lstat(directory, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
               info.st_uid == getuid(), info.st_mode & 0o077 == 0
         else { throw Failure.invalidTarget("\(directory) is not a private directory") }
+        removeDeadSockets(in: directory)
         let seed = "\(host)\0\(remotePath)\0\(getpid())\0\(UUID().uuidString)"
         let name = ContentID.sha256(of: Array(seed.utf8)).bytes.prefix(8)
             .map { String(format: "%02x", $0) }.joined()
         return "\(directory)/\(name)"
+    }
+
+    /// An app that quit or was killed leaves its socket files behind: remove
+    /// those nothing listens on. Recent ones are left alone, a master still
+    /// starting has bound its socket before it listens.
+    private static func removeDeadSockets(in directory: String) {
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [] {
+            let path = directory + "/" + name
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFSOCK,
+                  time(nil) - info.st_mtimespec.tv_sec > 60
+            else { continue }
+            var address = sockaddr_un()
+            address.sun_family = sa_family_t(AF_UNIX)
+            let capacity = MemoryLayout.size(ofValue: address.sun_path)
+            guard path.utf8.count < capacity else { continue }
+            withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path.utf8) }
+            let descriptor = socket(AF_UNIX, SOCK_STREAM, 0)
+            guard descriptor >= 0 else { continue }
+            let refused = withUnsafePointer(to: &address) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) != 0 && errno == ECONNREFUSED
+                }
+            }
+            Darwin.close(descriptor)
+            if refused { unlink(path) }
+        }
     }
 
     private func spawn(_ remoteCommand: String) throws -> Channel {
