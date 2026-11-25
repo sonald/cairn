@@ -109,7 +109,7 @@ public extension Snapshot {
 
 /// Symlinks and gitlinks are not sources: the worktree walk never captures
 /// them, so a commit must not count them either.
-func detectedLanguages(
+package func detectedLanguages(
     in files: [(path: String, contentID: ContentID, fileMode: FileMode)]
 ) -> [LanguageID] {
     var found = Set<LanguageID>()
@@ -579,11 +579,11 @@ public enum ProjectTreeWalk {
 /// The last component of a snapshot-relative path. Plain string work: a
 /// relative file URL would ask the system for the working directory on
 /// every one of thousands of paths.
-private func fileName(of path: String) -> String {
+package func fileName(of path: String) -> String {
     path.split(separator: "/").last.map(String.init) ?? path
 }
 
-private func configurationLanguage(for name: String) -> LanguageID? {
+package func configurationLanguage(for name: String) -> LanguageID? {
     switch name {
     case "Cargo.toml", "Cargo.lock":
         return .rust
@@ -647,7 +647,7 @@ private final class KnownBlobs: @unchecked Sendable {
 
 private let knownBlobs = KnownBlobs()
 
-private let lfsPointerPrefix = Array(
+package let lfsPointerPrefix = Array(
     "version https://git-lfs.github.com/spec".utf8
 )
 

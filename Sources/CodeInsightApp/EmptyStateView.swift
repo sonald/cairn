@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightEngine
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 
@@ -297,8 +298,9 @@ final class EmptyStateView: NSView {
                 theme: theme
             )
             button.hoverColor = theme.mossSoftColor
-            button.toolTip = path
-            button.setAccessibilityLabel(localizedFormat("welcome.openRecent", URL(fileURLWithPath: path).lastPathComponent))
+            let url = URL(fileURLWithPath: path, isDirectory: true)
+            button.toolTip = RemoteOrigin(placeholder: url)?.displayName ?? path
+            button.setAccessibilityLabel(localizedFormat("welcome.openRecent", RemoteOrigin.displayName(for: url)))
             recentStack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: recentStack.widthAnchor).isActive = true
             button.heightAnchor.constraint(equalToConstant: 42).isActive = true
@@ -342,8 +344,9 @@ final class EmptyStateView: NSView {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.lineSpacing = 1
+        let remote = RemoteOrigin(placeholder: URL(fileURLWithPath: path, isDirectory: true))
         let title = NSMutableAttributedString(
-            string: URL(fileURLWithPath: path).lastPathComponent,
+            string: remote?.displayName ?? URL(fileURLWithPath: path).lastPathComponent,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
                 .foregroundColor: theme.foregroundColor,
@@ -367,7 +370,7 @@ final class EmptyStateView: NSView {
             .paragraphStyle: paragraph,
         ]
         title.append(NSAttributedString(
-            string: "\n" + (path as NSString).abbreviatingWithTildeInPath,
+            string: "\n" + (remote.map { _ in localized("welcome.remote") } ?? (path as NSString).abbreviatingWithTildeInPath),
             attributes: detailAttributes
         ))
         if let lastRead {

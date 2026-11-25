@@ -139,6 +139,16 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
+            name: "CZstd",
+            path: "Sources/CZstd",
+            exclude: ["LICENSE", "VENDORED.md"],
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("ZSTD_DISABLE_ASM"),
+                .define("XXH_NAMESPACE", to: "ZSTD_"),
+            ]
+        ),
+        .target(
             name: "TreeSitterKit",
             dependencies: ["CTreeSitter", "CodeInsightCore"]
         ),
@@ -192,6 +202,8 @@ let package = Package(
         .target(
             name: "CodeInsightEngine",
             dependencies: [
+                "CProcessGuard",
+                "CZstd",
                 "CodeInsightCore",
                 "CodeInsightGit",
                 "CodeInsightPythonExtractor",

@@ -301,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             alert.messageText = localized("app.save.failed")
             alert.informativeText =
                 localizedFormat("app.save.failureDetail",
-                    controller.projectURL?.lastPathComponent ?? localized("app.save.project"),
+                    controller.projectURL.map(RemoteOrigin.displayName(for:)) ?? localized("app.save.project"),
                     String(describing: error))
             alert.addButton(withTitle: localized("app.save.retry"))
             alert.addButton(withTitle: localized("app.save.quit"))
@@ -670,6 +670,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         enqueueOpenRequest(root: root, sourceWindow: projectCommandTarget())
     }
 
+    /// Asks for `host:/absolute/path` (keyboard only: the field has focus
+    /// and Return opens) and opens its placeholder like any folder, so a
+    /// second open of the same directory activates its window.
+    @objc private func openRemoteProject(_ sender: Any?) {
+        let sourceWindow = projectCommandTarget()
+        var text = ""
+        var problem: String?
+        while true {
+            let alert = NSAlert()
+            alert.messageText = localized("app.remote.title")
+            alert.informativeText = problem ?? localized("app.remote.detail")
+            let open = alert.addButton(withTitle: localized("app.open.action"))
+            alert.addButton(withTitle: localized("app.cancel")).keyEquivalent = "\u{1b}"
+            let field = NSTextField(string: text)
+            field.placeholderString = localized("app.remote.placeholder")
+            field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
+            field.target = open
+            field.action = #selector(NSButton.performClick(_:))
+            alert.accessoryView = field
+            alert.layout()
+            alert.window.initialFirstResponder = field
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            text = field.stringValue
+            guard let origin = RemoteOrigin(parsing: text) else {
+                problem = localized("app.remote.invalid")
+                continue
+            }
+            do {
+                enqueueOpenRequest(root: try origin.placeholder(), sourceWindow: sourceWindow)
+            } catch {
+                reportOpenFailure(
+                    localizedFormat("app.open.failureDetail", origin.displayName, error.localizedDescription),
+                    preferredWindow: sourceWindow
+                )
+            }
+            return
+        }
+    }
+
     @objc private func clearReadingSession(_ sender: Any?) {
         projectCommandTarget()?.confirmClearReadingSession()
     }
@@ -914,14 +953,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             menu.addItem(emptyItem)
         } else {
             for path in paths {
+                let url = URL(fileURLWithPath: path, isDirectory: true)
+                let remote = RemoteOrigin(placeholder: url)
                 let item = NSMenuItem(
-                    title: URL(fileURLWithPath: path).lastPathComponent,
+                    title: remote?.displayName ?? url.lastPathComponent,
                     action: #selector(openRecentProject(_:)),
                     keyEquivalent: ""
                 )
                 item.target = self
                 item.representedObject = path
-                item.toolTip = path
+                item.toolTip = remote?.displayName ?? path
                 item.isEnabled = true
                 menu.addItem(item)
             }
@@ -1635,6 +1676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .appSettings: CommandAction(#selector(AppDelegate.showSettings(_:))),
         .appQuit: CommandAction(#selector(NSApplication.terminate(_:)), .application),
         .fileOpenProject: CommandAction(#selector(AppDelegate.openProject(_:))),
+        .fileOpenRemote: CommandAction(#selector(AppDelegate.openRemoteProject(_:))),
         .fileNewWindow: CommandAction(#selector(AppDelegate.newWindow(_:))),
         .fileQuickOpen: CommandAction(#selector(AppDelegate.quickOpen(_:))),
         .fileOpenInNewTab: CommandAction(#selector(AppDelegate.openSelectedFileInNewTab(_:))),
@@ -1870,6 +1912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: localized("app.menu.file"))
         appendMenuItem(for: .fileOpenProject, to: fileMenu)
+        appendMenuItem(for: .fileOpenRemote, to: fileMenu)
         appendMenuItem(for: .fileNewWindow, to: fileMenu)
         appendMenuItem(for: .fileQuickOpen, to: fileMenu)
         let recentItem = NSMenuItem(

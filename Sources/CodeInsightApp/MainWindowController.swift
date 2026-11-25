@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightAI
 import CodeInsightAppModel
 import CodeInsightCore
+import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
 import CodeInsightReaderCore
@@ -2250,7 +2251,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 alert.alertStyle = .warning
                 alert.messageText = localized("main.reading.session.not.saved")
                 alert.informativeText =
-                    localizedFormat("main.session.save.failure", projectURL?.lastPathComponent ?? localized("main.this.project"), Self.sessionSaveFailureSummary(error))
+                    localizedFormat("main.session.save.failure", projectURL.map(RemoteOrigin.displayName(for:)) ?? localized("main.this.project"), Self.sessionSaveFailureSummary(error))
                 alert.addButton(withTitle: localized("main.retry.save"))
                 alert.addButton(withTitle: localized("main.close.without.saving"))
                 alert.addButton(withTitle: localized("main.cancel"))
@@ -2996,6 +2997,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.isRestoringSession
             _ = model.isRefreshingIndex
             _ = model.indexRefreshNotice
+            _ = model.remoteDisconnectedNotice
             _ = model.projectFailureReason
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.currentBranchName
@@ -3229,7 +3231,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             displayedNavigationGeneration = model.navigationGeneration
         }
         if let root = model.fileTree?.root {
-            projectLabel.stringValue = root.lastPathComponent
+            projectLabel.stringValue = RemoteOrigin.displayName(for: root)
             projectLabel.textColor = .labelColor
         } else {
             projectLabel.stringValue = "Cairn"
@@ -3446,6 +3448,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard let window else { return }
         guard let identity = projectURL ?? model.fileTree?.root else {
             window.title = "Cairn"
+            return
+        }
+        if let remote = RemoteOrigin(placeholder: identity) {
+            window.title = "\(remote.displayName) — Cairn"
             return
         }
         let name = identity.lastPathComponent
@@ -3665,6 +3671,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.isRestoringSession ? localized("main.restoring.reading.session") : nil,
             initialIndexStatus,
             model.isRefreshingIndex ? localized("main.refreshing.index") : nil,
+            model.remoteDisconnectedNotice,
             model.indexRefreshNotice,
             coverageStatus,
             model.replayNotice,
@@ -3677,8 +3684,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         indexLabel.stringValue = indexStatus
         indexLabel.isHidden = indexStatus.isEmpty
         refreshIndexButton.isHidden = model.isRefreshingIndex
-            || (model.staleIndexNotice == nil && model.indexRefreshNotice == nil)
+            || (model.staleIndexNotice == nil && model.indexRefreshNotice == nil
+                && model.remoteDisconnectedNotice == nil)
         refreshIndexButton.isEnabled = !model.isRefreshingIndex
+        // For a remote project Refresh Index is the reconnect: it connects
+        // again and recaptures.
+        let reconnects = model.remoteDisconnectedNotice != nil
+        refreshIndexButton.title = localized(reconnects ? "main.reconnect" : "main.refresh.index")
+        refreshIndexButton.setAccessibilityLabel(refreshIndexButton.title)
+        refreshIndexButton.toolTip = localized(
+            reconnects ? "main.reconnect.help" : "main.recapture.the.working.tree.as.a.new.index.generation"
+        )
         truncatedLabel.isHidden = !model.relationTree.hasTruncatedResults
     }
 

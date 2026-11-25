@@ -35,6 +35,8 @@ bash scripts/make-app.sh
 
 `make-app.sh` 与普通 SwiftPM 的默认 libgit2 模式不同；以脚本参数为准。脚本会复制 SwiftPM 资源 bundle 并生成 `Sources/CLibGit2Vendored` 头文件/shim，不手工编辑生成目录。默认 ad-hoc 签名，不代表已经完成 Developer ID、公证、staple 或另一台 Mac 的发布验收。
 
+远端目录的捕获流用 zstd 解码。`Sources/CZstd` 是 vendored 的 Zstandard 1.5.7，只含解码部分，按 BSD 许可使用；源码已在仓库里，构建不需要联网，也不需要本机装 zstd。升级时运行 `bash scripts/vendor-zstd.sh`（需联网，校验发布包的 SHA-256，重写 `lib/`、`LICENSE` 和 `VENDORED.md`），来源与保留范围见 [VENDORED.md](../Sources/CZstd/VENDORED.md)。
+
 ## CLI 定位语义问题
 
 先用相同快照、语言与位置复现，再判断是提取、解析、Exact 还是 UI 接线问题：

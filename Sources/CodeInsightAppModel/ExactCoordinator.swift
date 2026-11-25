@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
 import Darwin
@@ -762,6 +763,13 @@ public final class ExactCoordinator {
         guard !checkoutStore.isUnderMaintenance else {
             invalidate(generation: generation)
             readiness = .off(localized("model.exact.maintenance"))
+            return
+        }
+        // A remote project's root is an empty placeholder: no snapshot of it
+        // and no language server, which would analyze nothing here.
+        guard RemoteOrigin(placeholder: root) == nil else {
+            invalidate(generation: generation)
+            markUnavailable(localized("model.exact.remote"))
             return
         }
         let language = analysisProfile.language

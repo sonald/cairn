@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightAI
 import CodeInsightAppModel
 import CodeInsightCore
+import CodeInsightEngine
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
@@ -1084,7 +1085,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         pathControl.toolTip = file.path
         if let root = projectRoot,
            let index = pathControl.pathItems.firstIndex(where: { $0.url?.standardizedFileURL == root.standardizedFileURL }) {
-            pathControl.pathItems = Array(pathControl.pathItems.dropFirst(index))
+            let items = Array(pathControl.pathItems.dropFirst(index))
+            // A remote project's root is a placeholder named by a hash: show
+            // the remote directory instead.
+            if let remote = RemoteOrigin(placeholder: root) {
+                items.first?.title = remote.path.split(separator: "/").last.map(String.init) ?? "/"
+                let relative = file.pathComponents.dropFirst(root.pathComponents.count).joined(separator: "/")
+                pathControl.toolTip = remote.displayName + "/" + relative
+            }
+            pathControl.pathItems = items
         }
     }
 
@@ -3025,6 +3034,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private func displayPreviewError(_ message: String) {
         let errorLabel = NSTextField(labelWithString: message)
         errorLabel.alignment = .center
+        // Pinned to the preview area on all sides: a label's default
+        // hugging outranks the window's size and would shrink the window
+        // to one line.
+        errorLabel.setContentHuggingPriority(.defaultLow, for: .vertical)
         errorLabel.textColor = readerTheme.chromeSecondaryColor
         errorLabel.setAccessibilityLabel(localizedFormat("main.preview.failure", message))
         previewKind = "Error"

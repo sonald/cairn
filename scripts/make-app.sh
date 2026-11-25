@@ -132,6 +132,7 @@ mkdir -p "$licenses"
 for grammar in CTreeSitter CTreeSitterPython CTreeSitterRust CTreeSitterTypeScript; do
     cp "Sources/$grammar/LICENSE" "$licenses/$grammar-LICENSE"
 done
+cp Sources/CZstd/LICENSE "$licenses/zstd-LICENSE"
 python3 scripts/ai-helper-notices.py "$licenses/cairn-ai"
 if [[ "${CAIRN_LIBGIT2:-}" == "vendored" ]]; then
     cp Vendor/libgit2/LICENSE "$licenses/libgit2-LICENSE"

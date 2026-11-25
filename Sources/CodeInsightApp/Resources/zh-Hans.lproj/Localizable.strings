@@ -38,6 +38,7 @@
 "app.menu.next.diff.hunk" = "下一个差异块";
 "app.menu.next.tab" = "下一个标签页";
 "app.menu.open.in.new.tab" = "在新标签页中打开";
+"app.menu.open.remote" = "打开远端目录…";
 "app.menu.open.project" = "打开项目…";
 "app.menu.open.recent" = "最近打开";
 "app.menu.open.symbol" = "打开符号…";
@@ -80,6 +81,10 @@
 "app.open.notLocal" = "不是本地文件夹";
 "app.recent.clear" = "清除菜单";
 "app.recent.empty" = "没有最近打开的项目";
+"app.remote.detail" = "输入 主机:/绝对路径。主机是 ssh 认得的名字（例如 ~/.ssh/config 里的）；Cairn 只读取该目录。";
+"app.remote.invalid" = "请输入 主机:/绝对路径：路径须以 / 开头，主机不能以 - 开头或含空格。";
+"app.remote.placeholder" = "主机:/绝对路径";
+"app.remote.title" = "打开远端目录";
 "app.save.cancel" = "取消退出";
 "app.save.failed" = "阅读会话未保存";
 "app.save.failureDetail" = "无法保存 %@ 的阅读会话：%@。磁盘上的原有文件已保留。";
@@ -225,6 +230,8 @@
 "main.reading.height.0.1.2" = "阅读层级（⌥⌘0/1/2）";
 "main.reading.session.not.saved" = "阅读会话未保存";
 "main.reading.set" = "阅读集 · %@";
+"main.reconnect" = "重连";
+"main.reconnect.help" = "重新连接远端主机并重新捕获目录";
 "main.recapture.the.working.tree.as.a.new.index.generation" = "重新采集工作区并生成新索引";
 "main.refresh.index" = "刷新索引";
 "main.refreshing.index" = "正在刷新索引…";
@@ -534,6 +541,7 @@
 "welcome.open" = "打开项目";
 "welcome.openFailure" = "打开失败原因";
 "welcome.openRecent" = "打开 %@";
+"welcome.remote" = "经 ssh 的远端目录";
 "welcome.openShortcut" = "打开项目…  ⌘O";
 "welcome.otherFolder" = "打开其他文件夹…";
 "welcome.otherFolderAX" = "打开其他文件夹";

@@ -2039,14 +2039,25 @@ public final class ContextWindowModel {
         // Identity only needs the bytes; building a reader document here
         // would run the full syntax pass for every verification.
         let source = contentSource
-        let current = await Task.detached(priority: .userInitiated) {
-            let bytes: [UInt8]? = if let source {
-                try? source(file)
+        let current = await Task.detached(priority: .userInitiated) { () -> ContentID?? in
+            let bytes: [UInt8]?
+            if let source {
+                do {
+                    bytes = try source(file)
+                } catch let failure as SSHTransport.Failure where failure.isConnectionLoss {
+                    // A lost remote link cannot say the file changed; the
+                    // index's captured bytes stand and the window shows the
+                    // disconnect.
+                    return .none
+                } catch {
+                    bytes = nil
+                }
             } else {
-                (try? Data(contentsOf: file, options: .mappedIfSafe)).map { [UInt8]($0) }
+                bytes = (try? Data(contentsOf: file, options: .mappedIfSafe)).map { [UInt8]($0) }
             }
-            return bytes.map { ContentID.sha256(of: $0) }
+            return .some(bytes.map { ContentID.sha256(of: $0) })
         }.value
+        guard let current else { return true }
         return current == expected
     }
 

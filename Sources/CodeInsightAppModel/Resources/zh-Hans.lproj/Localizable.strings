@@ -106,6 +106,7 @@
 "model.exact.maintenance" = "缓存维护中";
 "model.exact.noProject" = "没有项目";
 "model.exact.profileOutdated" = "项目构建配置（如 Cargo.toml、pyproject.toml、tsconfig.json、go.mod 或锁文件）在建立索引后有变化，刷新索引后即可恢复。";
+"model.exact.remote" = "远端项目暂不支持";
 "model.exact.pyrightMissing" = "未安装 pyright-langserver";
 "model.exact.restartExhausted" = "精确分析辅助进程重启次数已耗尽：%@";
 "model.exact.restartFailed" = "精确分析辅助进程重启失败：%@";
@@ -211,6 +212,12 @@
 "model.relation.unsupportedImplementations" = "无法验证：服务器不支持实现查询";
 "model.relation.unsupportedReferences" = "无法验证：服务器不支持引用查询";
 "model.relation.verified" = "已验证";
+"model.remote.connectFailed" = "ssh 无法连接：%@。可在终端运行：%@";
+"model.remote.disconnected" = "连接已断开：%@";
+"model.remote.error" = "远端出错：%@";
+"model.remote.invalidTarget" = "远端地址无效：%@";
+"model.remote.lost" = "已断开与 %@ 的连接（%@），重连即可恢复。";
+"model.remote.timedOut" = "远端操作超时：%@";
 "model.search.empty" = "没有匹配结果。";
 "model.search.error" = "搜索失败。";
 "model.search.failed" = "项目索引失败。";

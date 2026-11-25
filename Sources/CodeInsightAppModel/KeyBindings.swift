@@ -131,6 +131,7 @@ extension CommandID {
     public static let appQuit = CommandID(rawValue: "app.quit")
 
     public static let fileOpenProject = CommandID(rawValue: "file.openProject")
+    public static let fileOpenRemote = CommandID(rawValue: "file.openRemote")
     public static let fileNewWindow = CommandID(rawValue: "file.newWindow")
     public static let fileQuickOpen = CommandID(rawValue: "file.quickOpen")
     public static let fileOpenInNewTab = CommandID(rawValue: "file.openInNewTab")
@@ -294,6 +295,8 @@ public extension KeyBindingScheme {
 
             def(.fileOpenProject, .file, "app.menu.open.project",
                 [keyboard([.command], .character("o"))]),
+            def(.fileOpenRemote, .file, "app.menu.open.remote",
+                [keyboard([.command, .shift], .character("o"))]),
             def(.fileNewWindow, .file, "app.menu.new.window",
                 [keyboard([.command], .character("n"))]),
             def(.fileQuickOpen, .file, "app.menu.quick.open",

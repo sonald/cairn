@@ -6,6 +6,7 @@ import os
 /// recently used entries leave first. A miss is filled by the caller's
 /// reader, and the bytes must hash to the content ID they are asked for:
 /// a reader that fails or returns other bytes is an error, never content.
+/// A remote link that is lost passes through as `SSHTransport.Failure`.
 public final class SourceByteCache: @unchecked Sendable {
     public struct Unavailable: Error, LocalizedError {
         public let contentID: ContentID
@@ -85,6 +86,10 @@ public final class SourceByteCache: @unchecked Sendable {
         let bytes: [UInt8]
         do {
             bytes = try read()
+        } catch let failure as SSHTransport.Failure where failure.isConnectionLoss {
+            // A lost link is not a missing source: callers that would record
+            // the file as unavailable must fail (and say so) instead.
+            throw failure
         } catch {
             throw Unavailable(contentID: contentID, reason: error.localizedDescription)
         }

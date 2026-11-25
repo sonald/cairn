@@ -129,7 +129,7 @@ public struct AISnapshot: Sendable {
     @MainActor
     func overview() -> String {
         let place = revision.map { "commit \($0.prefix(12))" } ?? "the working tree"
-        var lines = ["Project \(root.lastPathComponent), \(place), \(files.count) files. Git history: \(hasGit ? "available (history tool)" : "none, not a Git repository")."]
+        var lines = ["Project \(RemoteOrigin.displayName(for: root)), \(place), \(files.count) files. Git history: \(hasGit ? "available (history tool)" : "none, not a Git repository")."]
         let units = sessions.map { session, _ in
             let profile = session.analysisProfile
             let dir = session.paths.resolve(profile.projectRoot)

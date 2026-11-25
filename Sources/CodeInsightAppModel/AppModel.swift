@@ -67,11 +67,15 @@ public protocol IndexService: Sendable {
     func flushPersistentIndexCache()
     /// The project's exclusion rules for every later capture and index.
     func setPathRules(_ rules: ProjectPathRules)
+    /// Ends the remote project's ssh connection, if any (window closed or
+    /// another project opened).
+    func closeRemoteConnection()
 }
 
 public extension IndexService {
     func setPathRules(_ rules: ProjectPathRules) {}
     func flushPersistentIndexCache() {}
+    func closeRemoteConnection() {}
 }
 
 public final class ProjectIndexService: IndexService, @unchecked Sendable {
@@ -81,14 +85,39 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     private let lock = NSLock()
     private var indexer = ProjectIndexer()
     private var pathRules = ProjectPathRules()
+    private let makeRemoteTransport: @Sendable (RemoteOrigin) throws -> SSHTransport
+    /// The window's remote project: one long-lived connection, and its last
+    /// capture so a recapture takes only what changed.
+    private var remote: (root: URL, transport: SSHTransport, last: RemoteSnapshot?)?
 
     public func setPathRules(_ rules: ProjectPathRules) {
         lock.withLock { pathRules = rules }
     }
 
-    public init(sourceBytes: SourceByteCache = SourceByteCache()) {
+    public convenience init(sourceBytes: SourceByteCache = SourceByteCache()) {
+        self.init(sourceBytes: sourceBytes) { try SSHTransport(host: $0.host, remotePath: $0.path) }
+    }
+
+    /// `remoteTransport` builds the connection for a remote project; tests
+    /// pass one that runs the remote side locally.
+    package init(
+        sourceBytes: SourceByteCache,
+        remoteTransport: @escaping @Sendable (RemoteOrigin) throws -> SSHTransport
+    ) {
         self.sourceBytes = sourceBytes
         store = ProjectIndexStore(sourceBytes: sourceBytes)
+        makeRemoteTransport = remoteTransport
+    }
+
+    /// Closes off the caller's thread: a request stuck on a dead link holds
+    /// the connection until its timeout, and the window must not wait on it.
+    public func closeRemoteConnection() {
+        let closing = lock.withLock {
+            defer { remote = nil }
+            return remote?.transport
+        }
+        guard let closing else { return }
+        Task.detached(priority: .utility) { closing.close() }
     }
 
     /// Content identities the service store currently retains. Regression
@@ -112,6 +141,11 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     ) async throws -> any Snapshot {
         beginSnapshotScope()
         let rules = lock.withLock { pathRules }
+        // A remote project's commits fall through to `CommitSnapshot`, which
+        // fails on the placeholder as on any folder that is not a repository.
+        if revision == nil, let origin = RemoteOrigin(placeholder: root) {
+            return try await captureRemote(origin, root: root, rules: rules)
+        }
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
@@ -122,6 +156,25 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
             try Task.checkCancellation()
             return snapshot
         }
+    }
+
+    private func captureRemote(_ origin: RemoteOrigin, root: URL, rules: ProjectPathRules) async throws -> any Snapshot {
+        let (transport, previous, replaced) = try lock.withLock { () throws -> (SSHTransport, RemoteSnapshot?, SSHTransport?) in
+            if let remote, remote.root == root { return (remote.transport, remote.last, nil) }
+            let replaced = remote?.transport
+            let transport = try makeRemoteTransport(origin)
+            remote = (root, transport, nil)
+            return (transport, nil, replaced)
+        }
+        replaced?.close()
+        let sourceBytes = sourceBytes
+        let snapshot = try await detachedValue {
+            try RemoteSnapshot(transport: transport, pathRules: rules, sourceBytes: sourceBytes, previous: previous)
+        }
+        lock.withLock {
+            if remote?.transport === transport { remote?.last = snapshot }
+        }
+        return snapshot
     }
 
     public func prepareSnapshots(
@@ -365,9 +418,17 @@ public final class AppModel {
     package var bookmarkModel = BookmarkModel()
 
     public var canTrustCurrentRepository: Bool {
-        guard case .ready = projectState, let projectRoot else { return false }
+        guard case .ready = projectState, let projectRoot, remoteOrigin == nil else { return false }
         return !exactCoordinator.isTrusted(projectRoot)
     }
+
+    /// The ssh host and directory when the open project is remote (its root
+    /// is then a local placeholder holding no source).
+    package private(set) var remoteOrigin: RemoteOrigin?
+    /// Set when the remote project's link was found lost; Refresh Index
+    /// reconnects and clears it.
+    public private(set) var remoteDisconnectedNotice: String?
+    @ObservationIgnored private var remoteTransport: SSHTransport?
 
     public var activeAnalysisProfileDisplay: (
         language: LanguageID,
@@ -931,6 +992,10 @@ public final class AppModel {
         snapshotDestinations.removeAll(keepingCapacity: true)
         pendingReplay = nil
         documentSource = nil
+        indexService.closeRemoteConnection()
+        remoteTransport = nil
+        remoteOrigin = nil
+        remoteDisconnectedNotice = nil
         // A closing window bypasses the transition state machine: its
         // surfaces are closing with it, and no late callback may publish a
         // ready/failed state back onto this model (§7.1).
@@ -978,8 +1043,12 @@ public final class AppModel {
             highlightedNames.removeAll()
             referencePane = nil
             cancelDependencyFetch()
+            indexService.closeRemoteConnection()
+            remoteTransport = nil
         }
         projectRoot = root
+        remoteOrigin = RemoteOrigin(placeholder: root)
+        remoteDisconnectedNotice = nil
         projectLanguages = []
         pathRules = pathRulesStore?.load(forProject: root) ?? ProjectPathRules()
         indexService.setPathRules(pathRules)
@@ -1049,10 +1118,58 @@ public final class AppModel {
     /// Errors like a provider's exit report can embed unbounded stderr; the
     /// UI reason stays short while the original error is not replaced.
     nonisolated package static func failureSummary(_ error: Error) -> String {
-        let text = (error as? LocalizedError)?.errorDescription
+        let text = (error as? SSHTransport.Failure).map(remoteFailureText)
+            ?? (error as? LocalizedError)?.errorDescription
             ?? String(describing: error)
         guard text.count > 280 else { return text }
         return String(text.prefix(280)) + "…"
+    }
+
+    /// A remote failure in the UI language; ssh's own words stay as they
+    /// are, and a failed connect names the command to try in a terminal.
+    nonisolated package static func remoteFailureText(_ failure: SSHTransport.Failure) -> String {
+        switch failure {
+        case let .invalidTarget(message): localizedFormat("model.remote.invalidTarget", message)
+        case let .connectFailed(message, command): localizedFormat("model.remote.connectFailed", message, command)
+        case let .disconnected(message): localizedFormat("model.remote.disconnected", message)
+        case let .timedOut(message): localizedFormat("model.remote.timedOut", message)
+        case let .remote(message): localizedFormat("model.remote.error", message)
+        }
+    }
+
+    /// The current content of a worktree's files: nil reads the local disk;
+    /// a remote project reads the remote directory as it is now, and while
+    /// the link is down falls back to the captured bytes still in memory.
+    nonisolated private static func worktreeSource(
+        of snapshot: any Snapshot,
+        root: URL
+    ) -> DocumentLoader.ContentSource? {
+        guard let remote = snapshot as? RemoteSnapshot else { return nil }
+        return { file in
+            guard let path = relativePath(of: file, under: root) else { throw CocoaError(.fileReadNoSuchFile) }
+            do {
+                guard let bytes = try remote.transport.readFile(path) else { throw CocoaError(.fileReadNoSuchFile) }
+                return bytes
+            } catch let failure as SSHTransport.Failure where failure.isConnectionLoss {
+                guard let bytes = remote.capturedBytes(path: path) else { throw failure }
+                return bytes
+            }
+        }
+    }
+
+    private func adoptRemoteTransport(_ transport: SSHTransport) {
+        remoteTransport = transport
+        remoteDisconnectedNotice = nil
+        transport.onConnectionLoss = { [weak self, weak transport] failure in
+            Task { @MainActor in
+                guard let self, let transport, self.remoteTransport === transport,
+                      let origin = self.remoteOrigin
+                else { return }
+                self.remoteDisconnectedNotice = localizedFormat(
+                    "model.remote.lost", origin.displayName, Self.remoteFailureText(failure)
+                )
+            }
+        }
     }
 
     /// Restores a saved session. The language set is detected from the
@@ -1787,6 +1904,9 @@ public final class AppModel {
                         source: source
                     )
                 }
+            } catch let failure as SSHTransport.Failure where failure.isConnectionLoss {
+                // Not a changed file: the window already says the link is lost.
+                return
             } catch {
                 verified = false
             }
@@ -2982,8 +3102,11 @@ public final class AppModel {
         } else {
             .worktree
         }
+        if revision == nil, let remote = snapshot as? RemoteSnapshot {
+            adoptRemoteTransport(remote.transport)
+        }
         documentSource = if revision == nil {
-            nil
+            Self.worktreeSource(of: snapshot, root: root)
         } else {
             { file in
                 guard let path = Self.relativePath(of: file, under: root) else {
@@ -3442,7 +3565,7 @@ public final class AppModel {
                 try Task.checkCancellation()
                 let source: DocumentLoader.ContentSource?
                 if revision == nil {
-                    source = nil
+                    source = Self.worktreeSource(of: snapshot, root: root)
                 } else {
                     source = { _ in try snapshot.readBytes(path: record.jump.path) }
                 }

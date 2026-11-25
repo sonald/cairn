@@ -106,6 +106,7 @@
 "model.exact.maintenance" = "cache maintenance";
 "model.exact.noProject" = "no project";
 "model.exact.profileOutdated" = "Project build settings (such as Cargo.toml, pyproject.toml, tsconfig.json, go.mod or a lock file) changed after indexing. Refresh Index to use them.";
+"model.exact.remote" = "not available for remote projects yet";
 "model.exact.pyrightMissing" = "pyright-langserver is not installed";
 "model.exact.restartExhausted" = "exact helper restart exhausted: %@";
 "model.exact.restartFailed" = "exact helper restart failed: %@";
@@ -211,6 +212,12 @@
 "model.relation.unsupportedImplementations" = "Verified unavailable: server does not support implementations";
 "model.relation.unsupportedReferences" = "Verified unavailable: server does not support references";
 "model.relation.verified" = "Verified";
+"model.remote.connectFailed" = "ssh could not connect: %@. Try it in Terminal: %@";
+"model.remote.disconnected" = "the connection was lost: %@";
+"model.remote.error" = "the remote side failed: %@";
+"model.remote.invalidTarget" = "invalid remote target: %@";
+"model.remote.lost" = "Disconnected from %@ (%@). Reconnect to resume.";
+"model.remote.timedOut" = "a remote operation timed out: %@";
 "model.search.empty" = "No matches.";
 "model.search.error" = "Search failed.";
 "model.search.failed" = "Project indexing failed.";

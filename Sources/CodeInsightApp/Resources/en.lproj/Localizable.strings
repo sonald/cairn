@@ -38,6 +38,7 @@
 "app.menu.next.diff.hunk" = "Next Diff Hunk";
 "app.menu.next.tab" = "Next Tab";
 "app.menu.open.in.new.tab" = "Open in New Tab";
+"app.menu.open.remote" = "Open Remote Folder…";
 "app.menu.open.project" = "Open Project…";
 "app.menu.open.recent" = "Open Recent";
 "app.menu.open.symbol" = "Open Symbol…";
@@ -80,6 +81,10 @@
 "app.open.notLocal" = "not a local folder";
 "app.recent.clear" = "Clear Menu";
 "app.recent.empty" = "No Recent Projects";
+"app.remote.detail" = "Enter host:/absolute/path. The host is a name ssh knows (for example from ~/.ssh/config); Cairn only reads that folder.";
+"app.remote.invalid" = "Enter host:/absolute/path: the path must start with /, and the host cannot start with - or contain spaces.";
+"app.remote.placeholder" = "host:/absolute/path";
+"app.remote.title" = "Open Remote Folder";
 "app.save.cancel" = "Cancel Quit";
 "app.save.failed" = "Reading Session Not Saved";
 "app.save.failureDetail" = "The reading session for %@ could not be saved: %@ The previous file on disk is kept.";
@@ -225,6 +230,8 @@
 "main.reading.height.0.1.2" = "Reading height (⌥⌘0/1/2)";
 "main.reading.session.not.saved" = "Reading Session Not Saved";
 "main.reading.set" = "Reading Set · %@";
+"main.reconnect" = "Reconnect";
+"main.reconnect.help" = "Connect to the remote host again and recapture the folder";
 "main.recapture.the.working.tree.as.a.new.index.generation" = "Recapture the working tree as a new index generation";
 "main.refresh.index" = "Refresh Index";
 "main.refreshing.index" = "Refreshing index…";
@@ -534,6 +541,7 @@
 "welcome.open" = "Open Project";
 "welcome.openFailure" = "Open failure reason";
 "welcome.openRecent" = "Open %@";
+"welcome.remote" = "Remote folder over ssh";
 "welcome.openShortcut" = "Open Project…  ⌘O";
 "welcome.otherFolder" = "Open Another Folder…";
 "welcome.otherFolderAX" = "Open Another Folder";

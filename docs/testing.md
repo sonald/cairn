@@ -58,6 +58,8 @@ AI 测试（`CodeInsightAITests`）启动真实的 `cairn-ai` 辅助进程，让
 
 Jev 评分的测试（`JevClientTests`）用 `URLProtocol` 桩代替网络，检查请求体与鉴权头、429/529 与断线的重试次数和间隔、取消、缺字段的回答，以及评分缓存的命中条件和文件内容；只用假密钥，鉴权头先比较成布尔值再断言，失败输出不打印头部。应用侧的 `ReaderSkeletonTests` 给阅读区注入假评分服务，验证规则版先出现、原地替换、切换与离开时取消、失败只提示一次和发送条件。骨架的评分不变量（任意评分下的映射、全零评分、提高评分不丢行、问题与取舍一一对应）在 `SkeletonScoreTests`。真实 Jev 不在测试里调用。
 
+远端目录的测试不连 ssh：`SSHTransport` 的命令前缀换成像 ssh 那样把参数拼起来交给本机 zsh 的命令，对临时目录跑同一段远端脚本。`RemoteSnapshotTests`（`engine` 域）在含空格、引号、非 ASCII、超长路径、符号链接、无权限文件与目录、LFS 指针的目录树和固定种子生成的目录树上，核对 Python、bash 与 gzip 三条路径得到的清单与本地 `WorktreeSnapshot` 相同，捕获后改动或删除的文件读成 `changedSinceCapture`；另有字节缓存太小时仍能读、读循环被杀后报断开直到重连、重新捕获只取变化的文件、无响应时超时与取消、长窗口 zstd 流解码。本机 PATH 上有 `zstd` 时默认路径断言为 zstd，否则为 gzip。`RemoteProjectTests`（`app` 域）走打开 → 索引 → 读当前内容 → 断开 → 重连 → 只取变化 → 从会话恢复的完整旅程，以及断线时搜索报告截断与断开、`RemoteOrigin` 的解析和占位目录判定。真机冒烟 `realHostCapturesAgreeAcrossScriptPaths` 默认跳过（打印 SKIP），只有显式设置 `CAIRN_SSH_TEST_TARGET=主机:/绝对路径` 时连接该主机，只读不写。
+
 日常 GitHub CI 根据改动路径选择域；文档不会触发 Swift 全套。产品语料质量和性能工作流改为手动触发，避免每个 PR 下载完整语料、安装全部语言工具链并重复运行性能测试。手动门禁用于明确的跨域验收或发布决策。
 
 日常 CI 与产品门禁均安装 Rust 1.97.1 的 `rust-analyzer` 组件并选择该工具链。镜像中存在 `rust-analyzer` 的 rustup 代理不代表组件可运行；日常 CI 安装后先执行 `rust-analyzer --version`，避免等到 LSP 集成测试才发现环境缺失。
