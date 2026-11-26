@@ -7,8 +7,8 @@ import Testing
 /// lines; these tests hold the mapping invariants on real and mutated input.
 @Suite struct SkeletonTests {
     @Test func everyLineMapsInsideTheFileAndGutterNumbersStrictlyIncrease() throws {
-        for (label, bytes, language) in try inputs() {
-            let lines = try #require(distillSkeleton(bytes: bytes, language: language), "\(label)")
+        for (label, bytes, language, variant) in try inputs() {
+            let lines = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant), "\(label)")
             #expect(!lines.isEmpty, "\(label)")
             let issues = mappingIssues(lines, bytes: bytes)
             #expect(issues.isEmpty, "\(label): \(issues.prefix(5))")
@@ -16,8 +16,8 @@ import Testing
     }
 
     @Test func linesUseOnlyIdentifiersOfTheirOwnSourceLines() throws {
-        for (label, bytes, language) in try inputs() {
-            let lines = try #require(distillSkeleton(bytes: bytes, language: language), "\(label)")
+        for (label, bytes, language, variant) in try inputs() {
+            let lines = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant), "\(label)")
             let issues = identifierIssues(lines, bytes: bytes)
             #expect(issues.isEmpty, "\(label): \(issues.prefix(5))")
         }
@@ -25,9 +25,11 @@ import Testing
 
     @Test func distillingTheSameBytesTwiceGivesTheSameSkeleton() throws {
         let all = try inputs()
-        let first = all.map { distillSkeleton(bytes: $0.bytes, language: $0.language) }
+        let first = all.map { distillSkeleton(bytes: $0.bytes, language: $0.language, variant: $0.variant) }
         // Other files in between must not leave anything behind.
-        let second = all.reversed().map { distillSkeleton(bytes: $0.bytes, language: $0.language) }.reversed()
+        let second = all.reversed().map {
+            distillSkeleton(bytes: $0.bytes, language: $0.language, variant: $0.variant)
+        }.reversed()
         for (index, (a, b)) in zip(first, second).enumerated() {
             #expect(a == b, "\(all[index].label)")
         }
@@ -42,26 +44,33 @@ import Testing
         let python = Array(pythonSample.utf8)
         let expectedPython = try #require(distillSkeleton(bytes: python, language: .python))
         #expect(distillSkeleton(bytes: crlf(python), language: .python) == expectedPython)
+
+        let typeScript = Array(typeScriptSample.utf8)
+        let expectedTypeScript = try #require(distillSkeleton(bytes: typeScript, language: .typescript))
+        #expect(distillSkeleton(bytes: crlf(typeScript), language: .typescript) == expectedTypeScript)
     }
 
     @Test func brokenSourceNeverCrashesAndKeepsTheInvariants() throws {
         var generator = SplitMix64(seed: 0x5EED_2026_1121)
         var distilled = 0
-        for (label, bytes, language) in [("main.rs", try mainRs(), LanguageID.rust),
-                                         ("sample.rs", Array(rustSample.utf8), .rust),
-                                         ("sample.py", Array(pythonSample.utf8), .python)] {
+        for (label, bytes, language, variant) in [("main.rs", try mainRs(), LanguageID.rust, nil),
+                                                  ("sample.rs", Array(rustSample.utf8), .rust, nil),
+                                                  ("sample.py", Array(pythonSample.utf8), .python, nil),
+                                                  ("sample.ts", Array(typeScriptSample.utf8), .typescript, nil),
+                                                  ("sample.tsx", Array(tsxSample.utf8), .typescript, "tsx")] {
             for index in 0..<60 {
                 let mutated = mutate(bytes, &generator)
                 let name = "\(label) mutation \(index) (\(mutated.kind))"
-                guard let lines = distillSkeleton(bytes: mutated.bytes, language: language) else { continue }
+                guard let lines = distillSkeleton(bytes: mutated.bytes, language: language, variant: variant)
+                else { continue }
                 distilled += 1
                 let issues = mappingIssues(lines, bytes: mutated.bytes) + identifierIssues(lines, bytes: mutated.bytes)
                 #expect(issues.isEmpty, "\(name): \(issues.prefix(5))")
-                #expect(distillSkeleton(bytes: mutated.bytes, language: language) == lines, "\(name)")
+                #expect(distillSkeleton(bytes: mutated.bytes, language: language, variant: variant) == lines, "\(name)")
             }
         }
         // Parsing recovers from errors, so most mutations still distil.
-        #expect(distilled > 150)
+        #expect(distilled > 250)
         // Thousands of nested blocks: the walk must not exhaust the stack.
         let depth = 3000
         let nested = "fn main() {\n" + String(repeating: "if a {\n", count: depth) + "step();\n"
@@ -72,19 +81,21 @@ import Testing
         // off the main thread, and test bodies also run on small stacks.
         let terms = Array(repeating: "a", count: 5000).joined(separator: " + ")
         for (source, language) in [("fn main() {\n    let x = \(terms);\n    step(x);\n}\nfn step(_: u8) {}\n", LanguageID.rust),
-                                   ("def main():\n    x = \(terms)\n    step(x)\n\ndef step(x):\n    pass\n", .python)] {
+                                   ("def main():\n    x = \(terms)\n    step(x)\n\ndef step(x):\n    pass\n", .python),
+                                   ("function main() {\n    const x = \(terms);\n    step(x);\n}\nfunction step(x) {}\n", .typescript)] {
             let chain = try #require(distillSkeleton(bytes: Array(source.utf8), language: language))
             #expect(mappingIssues(chain, bytes: Array(source.utf8)).isEmpty, "\(language)")
         }
         for empty in [[], Array("\n".utf8), Array("\r\n\r\n".utf8)] as [[UInt8]] {
             #expect(distillSkeleton(bytes: empty, language: .rust) == [])
             #expect(distillSkeleton(bytes: empty, language: .python) == [])
+            #expect(distillSkeleton(bytes: empty, language: .typescript) == [])
         }
     }
 
     @Test func landingFollowsSourcePositionAndLeavingThenReenteringNeverDrifts() throws {
         var maps = try inputs().map { input in
-            SkeletonLineMap(try #require(distillSkeleton(bytes: input.bytes, language: input.language)))
+            SkeletonLineMap(try #require(distillSkeleton(bytes: input.bytes, language: input.language, variant: input.variant)))
         }
         // Generated maps add what real skeletons rarely have: overlaps,
         // gaps, blank runs at either end, no rows at all. Starts always grow.
@@ -134,10 +145,10 @@ import Testing
     }
 
     @Test func overviewDocumentHasOneLinePerSkeletonRowAndNoFolds() throws {
-        for (label, bytes, language) in try inputs() {
-            let lines = try #require(distillSkeleton(bytes: bytes, language: language))
+        for (label, bytes, language, variant) in try inputs() {
+            let lines = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant))
             let source = ReaderDocument(
-                bytes: bytes, languageMode: LanguageMode(language: language),
+                bytes: bytes, languageMode: LanguageMode(language: language, variant: variant),
                 lineTable: LineTable(bytes: bytes), byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
                 highlightSpans: [], outlineFacets: [], foldRegions: []
             )
@@ -206,6 +217,62 @@ import Testing
         #expect(lines[classRow + 1].text == "def __init__(self, width=70, *, tabsize=8): …")
         #expect(lines.contains { $0.text == "    return \"\\n\".join(self.wrap(text))" && $0.sourceLines == 13...13 })
     }
+
+    @Test func typeScriptReadsAsSignaturesAndKeyStatementsWithoutTypes() throws {
+        let bytes = Array(typeScriptSample.utf8)
+        let lines = try #require(distillSkeleton(bytes: bytes, language: .typescript))
+        let texts = lines.map(\.text)
+        #expect(texts.filter { !$0.isEmpty && !$0.hasPrefix(" ") && $0 != "}" } == [
+            "enum Mode { Fast, Slow, \"中文\" }",
+            "interface Options { width, label, render }",
+            "type Pair = { left, right }",
+            "type Name",
+            "const 宽度 = (文本, 列 = 2): number => 文本.length * 列",
+            "function main(path, ...rest): Promise<void> {",
+            "function lines(path): string[] { … }",
+            "class Engine extends Base implements Runner",
+            "constructor(options) { … }",
+            "feed(line, limit): Promise<void> {",
+            "static get size(): number { … }",
+            "measure = (line): number => {",
+            "finish<T>(): T { … }",
+        ])
+        for line in [
+            "    const first = lines(path)[0];",
+            "    return engine.finish();",
+            "    lines(`${path}…`);",
+            "    const tail = lines(path);",
+            "    const later = () => { lines(path); };",
+            "    const width = this.measure(line);",
+            "    if (this.ready()) { this.total = this.parse(line).length; }",
+            "        case Mode.Slow: { this.flush(); break; }",
+            "    } catch (error) {",
+            "    return 宽度(line, this.options.width) + \"😀\".length;",
+        ] {
+            #expect(texts.contains(line), "\(line)")
+        }
+        // A case's own line maps to that source line; its statements follow it.
+        let source = sourceLines(bytes)
+        let fast = try #require(source.firstIndex { $0.contains("case Mode.Fast:") }) + 1
+        let caseRow = try #require(lines.firstIndex { $0.text == "        case Mode.Fast:" })
+        #expect(lines[caseRow].sourceLines == fast...fast)
+        #expect(lines[caseRow + 1].text == "            this.total += width;")
+
+        let tsx = try #require(distillSkeleton(bytes: Array(tsxSample.utf8), language: .typescript, variant: "tsx"))
+        let tsxTexts = tsx.map(\.text)
+        for line in [
+            "function List({ title, items }): JSX.Element {",
+            "    const toggle = () => { track(\"toggle\"); };",
+            "const Row = ({ label }) => <li className=\"row\">{label}</li>",
+            "handle = (event) => {",
+            "    this.save(event);",
+        ] {
+            #expect(tsxTexts.contains(line), "\(line)")
+        }
+        // The JSX return is one line, cut at a word boundary.
+        let jsx = try #require(tsxTexts.first { $0.hasPrefix("    return (<section") })
+        #expect(jsx.count <= 4 + 120 && jsx.hasSuffix("…"))
+    }
 }
 
 /// Scores from a service only choose among what the rules already offer:
@@ -214,26 +281,26 @@ import Testing
 @Suite struct SkeletonScoreTests {
     @Test func anyScoresKeepTheMappingInvariantsAndUnaskedIdsChangeNothing() throws {
         var generator = SplitMix64(seed: 0x5EED_2026_1123)
-        for (label, bytes, language) in try inputs() {
-            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language), "\(label)")
+        for (label, bytes, language, variant) in try inputs() {
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant), "\(label)")
             for round in 0..<12 {
                 var scores = randomScores(questions, &generator)
-                let lines = try #require(distillSkeleton(bytes: bytes, language: language, scores: scores))
+                let lines = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores))
                 let issues = mappingIssues(lines, bytes: bytes) + identifierIssues(lines, bytes: bytes)
                 #expect(issues.isEmpty, "\(label) round \(round): \(issues.prefix(5))")
-                #expect(distillSkeleton(bytes: bytes, language: language, scores: scores) == lines)
+                #expect(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores) == lines)
                 for _ in 0..<20 { scores["s\(generator.next(bytes.count))x"] = 1; scores["f\(generator.next(99))?"] = 0 }
-                #expect(distillSkeleton(bytes: bytes, language: language, scores: scores) == lines, "\(label)")
+                #expect(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores) == lines, "\(label)")
             }
         }
     }
 
     @Test func allZeroScoresKeepOnlyTheEntriesWithTheirRuleStatements() throws {
-        for (label, bytes, language) in try inputs() {
-            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language))
+        for (label, bytes, language, variant) in try inputs() {
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
             let zero = Dictionary(questions.questions.map { ($0.id, 0.0) }) { first, _ in first }
-            let ruled = mainSections(try #require(distillSkeleton(bytes: bytes, language: language)))
-            let zeroed = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, scores: zero)))
+            let ruled = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, variant: variant)))
+            let zeroed = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: zero)))
             let candidates = Set(questions.questions.filter { $0.id.hasPrefix("f") }.map(\.lines.lowerBound))
             #expect(!zeroed.isEmpty, "\(label)")
             #expect(zeroed == ruled.filter { !candidates.contains($0.key) }, "\(label)")
@@ -244,17 +311,17 @@ import Testing
     /// statement can split a joined row, so row text is not monotone.
     @Test func raisingAScoreNeverDropsARowOfAFunctionStillOnTheMainLine() throws {
         var generator = SplitMix64(seed: 0x5EED_2026_1124)
-        for (label, bytes, language) in try inputs() {
-            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language))
+        for (label, bytes, language, variant) in try inputs() {
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
             let zero = Dictionary(questions.questions.map { ($0.id, 0.0) }) { first, _ in first }
             // Each question raised alone from the rules, then random raises from random scores.
             for round in 0..<(questions.questions.count + 40) {
                 let single = round < questions.questions.count
                 var scores = single ? zero : randomScores(questions, &generator)
-                let before = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, scores: scores)))
+                let before = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores)))
                 let raised = questions.questions[single ? round : generator.next(questions.questions.count)].id
                 scores[raised] = max(scores[raised] ?? 0, 0.5 + Double(generator.next(51)) / 100)
-                let after = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, scores: scores)))
+                let after = mainSections(try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores)))
                 for (start, rows) in before {
                     guard let raisedRows = after[start] else { continue }
                     let lost = Set(rows.compactMap { $0.sourceLines?.lowerBound })
@@ -267,24 +334,24 @@ import Testing
 
     @Test func everyQuestionIsAChoiceTheDistillerMakes() throws {
         var generator = SplitMix64(seed: 0x5EED_2026_1125)
-        for (label, bytes, language) in try inputs() {
-            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language))
+        for (label, bytes, language, variant) in try inputs() {
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
             let ones = Dictionary(questions.questions.map { ($0.id, 1.0) }) { first, _ in first }
-            let kept = try #require(distillSkeleton(bytes: bytes, language: language, scores: ones))
+            let kept = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: ones))
             for _ in 0..<40 {
                 let question = questions.questions[generator.next(questions.questions.count)]
                 var scores = ones
                 scores[question.id] = 0
-                #expect(distillSkeleton(bytes: bytes, language: language, scores: scores) != kept,
+                #expect(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores) != kept,
                         "\(label): \(question.id) changes nothing")
             }
         }
     }
 
     @Test func questionsAreUniqueStableAndPointIntoTheState() throws {
-        for (label, bytes, language) in try inputs() {
-            let first = try #require(SkeletonQuestions(bytes: bytes, language: language))
-            let second = try #require(SkeletonQuestions(bytes: bytes, language: language))
+        for (label, bytes, language, variant) in try inputs() {
+            let first = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
+            let second = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
             #expect(first.questions == second.questions && first.state == second.state
                 && first.requestBody == second.requestBody, "\(label)")
             #expect(Set(first.questions.map(\.id)).count == first.questions.count, "\(label)")
@@ -336,7 +403,18 @@ import Testing
             wrap = fill(note)
             print(wrap)
         """#.utf8)
-        for (bytes, language) in [(rust, LanguageID.rust), (python, .python)] {
+        let typeScript = Array(#"""
+        /** SENTINEL jsdoc */
+        export function main(): void {
+            // SENTINEL line comment
+            const url = "https://example.com/#x"; // SENTINEL trailing
+            step(url /* SENTINEL inline */, 2);
+            log(url);
+        }
+        function step(url: string, n: number) {}
+        function log(url: string) {}
+        """#.utf8)
+        for (bytes, language) in [(rust, LanguageID.rust), (python, .python), (typeScript, .typescript)] {
             let questions = try #require(SkeletonQuestions(bytes: bytes, language: language))
             let state = questions.state
             for phrase in ["SENTINEL", "Module docstring", "A wrapper.", "Fill the text", "Remember that wrapping ran",
@@ -367,8 +445,8 @@ import Testing
         for index in 0..<7 { source += "fn compute_\(index)(n: u32) -> u32 { n }\n" }
         #expect(source.utf8.count > SkeletonQuestions.maxRequestBytes / 2)
         #expect(SkeletonQuestions(bytes: Array(source.utf8), language: .rust) == nil)
-        for (label, bytes, language) in try inputs() {
-            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language), "\(label)")
+        for (label, bytes, language, variant) in try inputs() {
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant), "\(label)")
             #expect(questions.requestBody.count <= SkeletonQuestions.maxRequestBytes)
         }
         #expect(SkeletonQuestions(bytes: Array("package main\n".utf8), language: .go) == nil)
@@ -464,16 +542,20 @@ private func sourceLines(_ bytes: [UInt8]) -> [String] {
 
 // MARK: - Inputs
 
-private func inputs() throws -> [(label: String, bytes: [UInt8], language: LanguageID)] {
+private func inputs() throws -> [(label: String, bytes: [UInt8], language: LanguageID, variant: String?)] {
     let rust = try mainRs()
     let python = Array(pythonSample.utf8)
+    let typeScript = Array(typeScriptSample.utf8)
     return [
-        ("main.rs", rust, .rust),
-        ("main.rs crlf", crlf(rust), .rust),
-        ("main.rs unindented", unindented(rust), .rust),
-        ("sample.rs", Array(rustSample.utf8), .rust),
-        ("sample.py", python, .python),
-        ("sample.py crlf", crlf(python), .python),
+        ("main.rs", rust, .rust, nil),
+        ("main.rs crlf", crlf(rust), .rust, nil),
+        ("main.rs unindented", unindented(rust), .rust, nil),
+        ("sample.rs", Array(rustSample.utf8), .rust, nil),
+        ("sample.py", python, .python, nil),
+        ("sample.py crlf", crlf(python), .python, nil),
+        ("sample.ts", typeScript, .typescript, nil),
+        ("sample.ts crlf", crlf(typeScript), .typescript, nil),
+        ("sample.tsx", Array(tsxSample.utf8), .typescript, "tsx"),
     ]
 }
 
@@ -515,6 +597,7 @@ private struct SplitMix64 {
 private let fragments = [
     "{", "}", "(", ")", "[", "fn ", "def ", ":", "\n", "\"", "'", "#", "//", "/*", "=> ", "else ",
     "变量", "\"中文 é 😀\"", "\r\n", "\t", "match x {", "if a:", "    ", "é", "self.", "return ", "?;",
+    "`", "=> {", "case 1:", "this.", "<div>", ": string", "await ",
 ]
 
 private func mutate(_ bytes: [UInt8], _ generator: inout SplitMix64) -> (kind: String, bytes: [UInt8]) {
@@ -674,4 +757,135 @@ def run(text, wrap=str.split):
 
 def test_fill():
     assert fill("a b") == "a b"
+"""#
+
+/// Exports, a class with methods, a field arrow and `this` calls, arrow
+/// constants, a switch, try/catch, a template string, types to strip, a
+/// `.ts`-only type assertion and non-ASCII names.
+private let typeScriptSample = #"""
+import { readFile } from "node:fs/promises";
+
+/** A sentinel enum. */
+export enum Mode { Fast, Slow = 2, "中文" }
+
+export interface Options {
+    width: number;
+    label?: string;
+    render(text: string): string;
+}
+
+type Pair = { left: number; right: number };
+type Name = string | number;
+
+const 宽度 = (文本: string, 列 = 2): number => 文本.length * 列;
+
+export function main(path: string, ...rest: string[]): Promise<void> {
+    const engine = new Engine({ width: 80 } as Options);
+    const first = <string>lines(path)[0];
+    lines(`${path}
+.bak`);
+    const tail = lines(path)!.slice() as string[];
+    const later = async () => { await lines(path); };
+    for (const line of lines(path)) {
+        engine.feed(line!);
+    }
+    return engine.finish<string>();
+}
+
+function lines(path: string): string[] {
+    return readFile(path).toString().split("\n");
+}
+
+export class Engine extends Base<Options> implements Runner {
+    private readonly total: number = 0;
+    static count = 0;
+
+    constructor(private options: Options) {
+        super();
+    }
+
+    public async feed(line: string, limit?: number): Promise<void> {
+        const width = this.measure(line) satisfies number;
+        if (await this.ready()) { this.total = (await this.parse(line)).length; }
+        switch (this.mode) {
+            case Mode.Fast:
+                this.total += width;
+                break;
+            case Mode.Slow: {
+                await this.flush();
+                break;
+            }
+            default:
+                log(`odd ${line}`);
+        }
+        try {
+            this.state = await this.parse(line);
+        } catch (error: unknown) {
+            this.state = undefined;
+        } finally {
+            this.done = true;
+        }
+    }
+
+    static get size(): number {
+        return Engine.count;
+    }
+
+    private measure = (line: string): number => {
+        return 宽度(line, this.options.width) + "😀".length;
+    };
+
+    finish<T>(): T {
+        const report = `total ${this.total}
+lines ${Engine.count}`;
+        this.write(report);
+        return report as unknown as T;
+    }
+}
+"""#
+
+/// JSX, a default-exported class component and an expression-bodied arrow.
+private let tsxSample = #"""
+import React, { useState } from "react";
+
+type Props = { title: string; items: string[] };
+
+export function List({ title, items }: Props): JSX.Element {
+    const [open, setOpen] = useState<boolean>(false);
+    const toggle = () => {
+        setOpen(!open);
+        track("toggle");
+    };
+    return (
+        <section onClick={toggle}>
+            <h1>{title} 标题 😀</h1>
+            {open && items.map((item) => <Row key={item} label={format(item)} />)}
+        </section>
+    );
+}
+
+const Row = ({ label }: { label: string }) => <li className="row">{label}</li>;
+
+function format(item: string): string {
+    return `${item.trim()} ✓`;
+}
+
+function track(name: string) {
+    window.dispatchEvent(new CustomEvent(name));
+}
+
+export default class Panel extends React.Component<Props> {
+    render() {
+        return <List title={this.props.title} items={this.props.items} />;
+    }
+
+    handle = async (event: Event) => {
+        await this.save(event);
+        this.setState({ saved: true });
+    };
+
+    save(event: Event): Promise<void> {
+        return send(event.type);
+    }
+}
 """#

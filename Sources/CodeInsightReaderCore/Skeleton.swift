@@ -1,5 +1,6 @@
 import CTreeSitterPython
 import CTreeSitterRust
+import CTreeSitterTypeScript
 import CodeInsightCore
 import Foundation
 import TreeSitterKit
@@ -17,7 +18,7 @@ public struct SkeletonLine: Equatable, Sendable {
     }
 }
 
-/// The distilled skeleton of one Rust or Python file, in source order:
+/// The distilled skeleton of one Rust, Python or TypeScript file, in source order:
 /// each type as one row, each function on the main line with its key
 /// statements, every other function as its signature. A block of several
 /// rows stands apart by blank rows; the first source lines of the rows
@@ -30,29 +31,36 @@ public struct SkeletonLine: Equatable, Sendable {
 /// less is a signature; a statement the rules drop is kept when scored 0.5
 /// or more. Without a score the rules decide; entries are always on the
 /// main line. No scores gives the rule-based skeleton.
+///
+/// `variant` is the TypeScript variant of `LanguageMode`: "tsx" parses JSX,
+/// anything else plain TypeScript, whose `<T>x` and generic arrows TSX reads
+/// differently. JavaScript always parses as TSX.
 public func distillSkeleton(
-    bytes: [UInt8], language: LanguageID, scores: [String: Double] = [:]
+    bytes: [UInt8], language: LanguageID, variant: String? = nil, scores: [String: Double] = [:]
 ) -> [SkeletonLine]? {
-    withDistiller(bytes: bytes, language: language) { distiller, root in
+    withDistiller(bytes: bytes, language: language, variant: variant) { distiller, root in
         distiller.scores = scores
         return distiller.run(root: root)
     }
 }
 
 private func withDistiller<T>(
-    bytes: [UInt8], language: LanguageID, _ body: (inout SkeletonDistiller, Node) -> T
+    bytes: [UInt8], language: LanguageID, variant: String?, _ body: (inout SkeletonDistiller, Node) -> T
 ) -> T? {
     let grammar: OpaquePointer?
+    let kind: SkeletonLanguage
     switch language {
-    case .rust: grammar = tree_sitter_rust()
-    case .python: grammar = tree_sitter_python()
-    default: return nil
+    case .rust: (grammar, kind) = (tree_sitter_rust(), .rust)
+    case .python: (grammar, kind) = (tree_sitter_python(), .python)
+    case .typescript: (grammar, kind) = (variant == "tsx" ? tree_sitter_tsx() : tree_sitter_typescript(), .typescript)
+    case .javascript: (grammar, kind) = (tree_sitter_tsx(), .typescript)
+    case .go: return nil
     }
     guard let grammar,
           let parser = Parser(language: grammar),
           let tree = parser.parse(bytes)
     else { return nil }
-    var distiller = SkeletonDistiller(bytes: bytes, rust: language == .rust)
+    var distiller = SkeletonDistiller(bytes: bytes, language: kind)
     return body(&distiller, tree.rootNode)
 }
 
@@ -83,8 +91,8 @@ public struct SkeletonQuestions: Sendable {
 
     /// Nil for other languages, unparsable source, nothing to ask, or a
     /// request over `maxRequestBytes`.
-    public init?(bytes: [UInt8], language: LanguageID) {
-        guard let (state, questions) = withDistiller(bytes: bytes, language: language, { distiller, root in
+    public init?(bytes: [UInt8], language: LanguageID, variant: String? = nil) {
+        guard let (state, questions) = withDistiller(bytes: bytes, language: language, variant: variant, { distiller, root in
             distiller.questions(root: root)
         }), !questions.isEmpty else { return nil }
         struct Ask: Encodable { let type = "noul"; let instructions: String }
@@ -136,7 +144,7 @@ public struct SkeletonLineMap: Equatable, Sendable {
     }
 }
 
-/// A Rust or Python file's Overview as a document of its own: the skeleton
+/// A Rust, Python or TypeScript file's Overview as a document of its own: the skeleton
 /// text, highlighted, with no folds, and the map back to the source.
 package struct SkeletonOverview: Sendable {
     package let document: ReaderDocument
@@ -144,7 +152,10 @@ package struct SkeletonOverview: Sendable {
 
     /// Nil when the file has no skeleton; it keeps its ordinary Overview.
     package init?(source: ReaderDocument, scores: [String: Double] = [:]) {
-        guard let lines = distillSkeleton(bytes: source.bytes, language: source.languageMode.language, scores: scores),
+        guard let lines = distillSkeleton(
+            bytes: source.bytes, language: source.languageMode.language,
+            variant: source.languageMode.variant, scores: scores
+        ),
               !lines.isEmpty
         else { return nil }
         let bytes = Array(lines.map(\.text).joined(separator: "\n").utf8)
@@ -212,10 +223,14 @@ private struct RenderedBody {
 
 // MARK: - Distiller
 
+private enum SkeletonLanguage { case rust, python, typescript }
+
 private struct SkeletonDistiller {
     let bytes: [UInt8]
-    let rust: Bool
+    let language: SkeletonLanguage
     let lineTable: LineTable
+    /// Rust and TypeScript: bodies open with `{` and close with `}`.
+    var braces: Bool { language != .python }
 
     var functions: [SkeletonFunction] = []
     var typeNodes: [Node] = []
@@ -239,16 +254,18 @@ private struct SkeletonDistiller {
     static let maxLine = 120
     static let maxDepth = 48
     static let noiseMethods: Set<String> = ["clone", "to_string", "to_owned", "into", "as_str", "as_ref"]
+    static let typeScriptNoiseMethods: Set<String> = ["toString", "slice"]
+    static let typeScriptOpaque: Set<String> = ["object", "jsx_element", "jsx_self_closing_element", "jsx_fragment"]
     static let effectNames: Set<String> = ["send", "spawn", "append", "insert", "push"]
 
-    init(bytes: [UInt8], rust: Bool) {
+    init(bytes: [UInt8], language: SkeletonLanguage) {
         self.bytes = bytes
-        self.rust = rust
+        self.language = language
         self.lineTable = LineTable(bytes: bytes)
     }
 
     mutating func run(root: Node) -> [SkeletonLine] {
-        if !rust {
+        if language == .python {
             forEachNode(in: root) { node in
                 let body = node.kind == "module" ? node
                     : ["function_definition", "class_definition"].contains(node.kind) ? node.field("body") : nil
@@ -256,7 +273,11 @@ private struct SkeletonDistiller {
                 return true
             }
         }
-        if rust { collectRust(root, owner: nil) } else { collectPython(root, owner: nil) }
+        switch language {
+        case .rust: collectRust(root, owner: nil)
+        case .python: collectPython(root, owner: nil)
+        case .typescript: collectTypeScript(root)
+        }
         for index in functions.indices {
             functions[index].callees = callees(of: functions[index])
         }
@@ -376,7 +397,7 @@ private struct SkeletonDistiller {
 
         func lines(_ range: Range<Int>) -> ClosedRange<Int> { line(range.lowerBound)...line(range.upperBound - 1) }
         func name(_ function: SkeletonFunction) -> String {
-            function.owner.map { $0 + (rust ? "::" : ".") + function.name } ?? function.name
+            function.owner.map { $0 + (language == .rust ? "::" : ".") + function.name } ?? function.name
         }
         var questions: [SkeletonQuestions.Question] = []
         for function in log.functions {
@@ -468,11 +489,53 @@ private struct SkeletonDistiller {
         }
     }
 
-    mutating func addFunction(_ node: Node, owner: String?) {
-        guard let body = node.field("body"), let nameNode = node.field("name"), node.end > node.start
+    /// Top-level functions, arrow-function constants, classes with their
+    /// methods, interfaces, enums and type aliases; `export` is looked through.
+    mutating func collectTypeScript(_ program: Node) {
+        for child in program.namedChildren {
+            let node = child.kind == "export_statement" ? child.field("declaration") ?? child : child
+            switch node.kind {
+            case "function_declaration", "generator_function_declaration":
+                addFunction(node, owner: nil)
+            case "lexical_declaration", "variable_declaration":
+                // ponytail: one declarator only, so the function's id (its start) stays unique.
+                let declarators = node.namedChildren.filter { $0.kind == "variable_declarator" }
+                guard declarators.count == 1, let name = declarators[0].field("name"), name.kind == "identifier",
+                      let value = functionValue(declarators[0])
+                else { break }
+                addFunction(node, owner: nil, name: name, body: value.field("body"))
+            case "class_declaration", "abstract_class_declaration":
+                guard let name = node.field("name") else { break }
+                typeNodes.append(node)
+                for member in node.field("body")?.namedChildren ?? [] {
+                    if member.kind == "method_definition" {
+                        addFunction(member, owner: text(name))
+                    } else if member.kind == "public_field_definition", let field = member.field("name"),
+                              let value = functionValue(member) {
+                        addFunction(member, owner: text(name), name: field, body: value.field("body"))
+                    }
+                }
+            case "interface_declaration", "enum_declaration", "type_alias_declaration":
+                typeNodes.append(node)
+            default:
+                break
+            }
+        }
+    }
+
+    /// The arrow function or function expression a declarator or class field holds.
+    func functionValue(_ holder: Node) -> Node? {
+        guard let value = holder.field("value"), ["arrow_function", "function_expression"].contains(value.kind)
+        else { return nil }
+        return value
+    }
+
+    /// `name` and `body` default to the node's own fields.
+    mutating func addFunction(_ node: Node, owner: String?, name: Node? = nil, body: Node? = nil) {
+        guard let body = body ?? node.field("body"), let nameNode = name ?? node.field("name"), node.end > node.start
         else { return }
         var headerEnd = body.start
-        if !rust {
+        if language == .python {
             // The line of the `:` that opens the body.
             for child in node.children where child.kind == ":" && child.start < body.start {
                 headerEnd = child.start
@@ -517,7 +580,7 @@ private struct SkeletonDistiller {
 
     /// A Python body's docstring: its first statement, when that is a lone string.
     func docstring(of body: Node) -> Node? {
-        guard !rust, let first = body.namedChildren.first(where: { !isComment($0) }),
+        guard language == .python, let first = body.namedChildren.first(where: { !isComment($0) }),
               first.kind == "expression_statement", first.namedChildren.count == 1,
               first.namedChildren[0].kind == "string"
         else { return nil }
@@ -547,7 +610,8 @@ private struct SkeletonDistiller {
     /// functions of this file, and `self.method(...)` calls to its methods.
     /// Calls on any other receiver are not resolved.
     func resolvedCalls(_ node: Node, owner: String?) -> [(Int, Int)] {
-        if rust {
+        switch language {
+        case .rust:
             if node.kind == "call_expression", var callee = node.field("function") {
                 if callee.kind == "generic_function", let inner = callee.field("function") { callee = inner }
                 if let index = rustCallee(callee, owner: owner) { return [(callee.start, index)] }
@@ -555,13 +619,25 @@ private struct SkeletonDistiller {
                 return tokenTreeCalls(node, owner: owner)
             }
             return []
+        case .python:
+            return memberCalls(node, owner: owner, call: "call", member: "attribute", name: "attribute", receiver: "self")
+        case .typescript:
+            return memberCalls(
+                node, owner: owner, call: "call_expression", member: "member_expression", name: "property", receiver: "this"
+            )
         }
-        guard node.kind == "call", let callee = node.field("function") else { return [] }
+    }
+
+    /// `name(...)` to a free function, `self.name(...)` / `this.name(...)` to a method.
+    func memberCalls(
+        _ node: Node, owner: String?, call: String, member: String, name: String, receiver: String
+    ) -> [(Int, Int)] {
+        guard node.kind == call, let callee = node.field("function") else { return [] }
         if callee.kind == "identifier", let index = freeFunctions[text(callee)] {
             return [(callee.start, index)]
         }
-        if callee.kind == "attribute", let object = callee.field("object"), text(object) == "self",
-           let attribute = callee.field("attribute"),
+        if callee.kind == member, let object = callee.field("object"), text(object) == receiver,
+           let attribute = callee.field(name),
            let index = method(text(attribute), owner: owner) {
             return [(attribute.start, index)]
         }
@@ -664,32 +740,41 @@ private struct SkeletonDistiller {
     // MARK: Statement walk
 
     mutating func distill(_ function: SkeletonFunction) -> [Row]? {
+        // An arrow function with an expression body is one row.
+        guard language != .typescript || function.body.kind == "statement_block" else { return nil }
         current = function
         defer { current = nil }
         let body = renderBody(function.body, depth: 1)
         guard !body.rows.isEmpty else { return nil }
         var rows = [Row(
-            text: signature(function) + (rust ? " {" : ""),
+            text: signature(function) + (braces ? " {" : ""),
             depth: 0,
             lines: function.lines.lowerBound...max(function.lines.lowerBound, function.headerEndLine)
         )]
         rows += body.rows
-        if rust {
+        if braces {
             rows.append(Row(text: "}", depth: 0, lines: function.lines.upperBound...function.lines.upperBound))
         }
         return rows
     }
 
     func statements(of body: Node) -> [SkeletonStatement] {
-        let skipped: Set<String> = rust
-            ? ["line_comment", "block_comment", "attribute_item", "inner_attribute_item", "ERROR",
+        let skipped: Set<String> = switch language {
+        case .rust: ["line_comment", "block_comment", "attribute_item", "inner_attribute_item", "ERROR",
                "use_declaration", "const_item", "static_item", "function_item", "struct_item",
                "enum_item", "impl_item", "trait_item", "type_item", "mod_item", "macro_definition",
                "label", "empty_statement", "extern_crate_declaration", "union_item"]
-            : ["comment", "ERROR", "function_definition", "class_definition", "decorated_definition"]
+        case .python: ["comment", "ERROR", "function_definition", "class_definition", "decorated_definition"]
+        case .typescript: ["comment", "ERROR", "function_declaration", "generator_function_declaration",
+                           "class_declaration", "abstract_class_declaration", "interface_declaration",
+                           "type_alias_declaration", "enum_declaration", "import_statement", "empty_statement"]
+        }
         let children = body.children
+        // A switch case's statements follow its `case value:`.
+        let first = body.kind == "switch_case" ? caseColon(body)?.end ?? body.end : body.start
         var found: [SkeletonStatement] = []
-        for (index, child) in children.enumerated() where child.isNamed && !skipped.contains(child.kind) {
+        for (index, child) in children.enumerated()
+        where child.isNamed && !skipped.contains(child.kind) && child.start >= first {
             guard child.end > child.start else { continue }
             var end = child.end
             // A match arm's separating comma belongs to the arm.
@@ -698,7 +783,7 @@ private struct SkeletonDistiller {
             }
             found.append(SkeletonStatement(node: child, range: child.start..<end, isValue: false))
         }
-        if rust, body.kind == "block", let last = found.last, isBlockValue(last.node) {
+        if language == .rust, body.kind == "block", let last = found.last, isBlockValue(last.node) {
             found[found.count - 1] = SkeletonStatement(node: last.node, range: last.range, isValue: true)
         }
         return found
@@ -733,12 +818,16 @@ private struct SkeletonDistiller {
         let node = statement.node
         let range = statement.range
         let whole = line(range.lowerBound)...line(range.upperBound - 1)
-        var edits = rust ? rustEdits(in: node) : []
-        if rust, let happy = successPath(node) {
+        var edits = noiseEdits(in: node)
+        if language == .rust, let happy = successPath(node) {
             edits += happy
             return ([Row(text: render(node, range, edits), depth: depth, lines: whole)], false)
         }
-        let blocks = depth < Self.maxDepth ? bodies(of: node) : []
+        if depth < Self.maxDepth, let colon = caseColon(node) {
+            return (caseRows(statement, colon: colon, edits: edits, depth: depth), true)
+        }
+        let blocks = depth >= Self.maxDepth ? []
+            : language == .typescript && node.kind == "statement_block" ? [node] : bodies(of: node)
         guard !blocks.isEmpty else {
             return ([Row(text: render(node, range, edits), depth: depth, lines: whole)], false)
         }
@@ -747,11 +836,11 @@ private struct SkeletonDistiller {
         var rendered: [RenderedBody] = []
         var cursor = range.lowerBound
         for block in blocks {
-            let opens = rust && block.end > block.start && bytes[block.start] == UInt8(ascii: "{")
+            let opens = braces && block.end > block.start && bytes[block.start] == UInt8(ascii: "{")
             let open = block.start + (opens ? 1 : 0)
             clauses.append(clause(node, cursor..<max(cursor, open), edits, depth))
             rendered.append(renderBody(block, depth: depth + 1))
-            let closes = rust && block.end > block.start && bytes[block.end - 1] == UInt8(ascii: "}")
+            let closes = braces && block.end > block.start && bytes[block.end - 1] == UInt8(ascii: "}")
             cursor = max(cursor, block.end - (closes ? 1 : 0))
         }
         clauses.append(clause(node, cursor..<max(cursor, range.upperBound), edits, depth))
@@ -772,7 +861,7 @@ private struct SkeletonDistiller {
                 if let clause { pieces.append(clause.text) }
                 if index < rendered.count { pieces.append("…") }
             }
-            return ([Row(text: pieces.joined(separator: " "), depth: depth, lines: whole)], true)
+            return ([Row(text: fitted(pieces.joined(separator: " ")), depth: depth, lines: whole)], true)
         }
 
         if rendered.count == 1, let joined = joinedLine(clauses[0], rendered[0], clauses[1], blocks: blocks) {
@@ -795,7 +884,7 @@ private struct SkeletonDistiller {
         guard let head else { return nil }
         let inner = body.rows.map(\.text)
         var text: String
-        if rust {
+        if braces {
             guard let tail,
                   body.rows.count == body.keptStatements, (1...2).contains(inner.count)
             else { return nil }
@@ -830,7 +919,36 @@ private struct SkeletonDistiller {
     func isBranch(_ clause: String) -> Bool {
         var text = Substring(clause)
         if text.hasPrefix("}") { text = text.dropFirst().drop { $0 == " " } }
-        return ["else", "elif", "except", "finally"].contains { text.hasPrefix($0) }
+        let words = language == .typescript ? ["else", "catch", "finally"] : ["else", "elif", "except", "finally"]
+        return words.contains { text.hasPrefix($0) }
+    }
+
+    /// The `:` ending a TypeScript `case value:` or `default:`.
+    func caseColon(_ node: Node) -> Node? {
+        guard language == .typescript, node.kind == "switch_case" || node.kind == "switch_default" else { return nil }
+        return node.children.first { $0.kind == ":" }
+    }
+
+    /// A switch case as its `case value:` line and its statements, or one
+    /// line when a single short statement is left.
+    func caseRows(_ statement: SkeletonStatement, colon: Node, edits: [Edit], depth: Int) -> [Row] {
+        let node = statement.node
+        let whole = line(statement.range.lowerBound)...line(statement.range.upperBound - 1)
+        guard let head = clause(node, statement.range.lowerBound..<colon.end, edits, depth) else {
+            return [Row(text: render(node, statement.range, edits), depth: depth, lines: whole)]
+        }
+        // `case X: { … }`: the block is the case's body, at the case's depth.
+        let inner = statements(of: node)
+        if inner.count == 1, inner[0].node.kind == "statement_block" {
+            return [head] + renderStatement(inner[0], depth: depth).0
+        }
+        let body = renderBody(node, depth: depth + 1)
+        if body.rows.isEmpty { return [Row(text: head.text + " …", depth: depth, lines: whole)] }
+        if body.rows.count == 1, body.simpleStatements == 1 {
+            let text = head.text + " " + body.rows[0].text
+            if text.count <= Self.maxLine { return [Row(text: text, depth: depth, lines: whole)] }
+        }
+        return [head] + body.rows
     }
 
     func clause(_ node: Node, _ range: Range<Int>, _ edits: [Edit], _ depth: Int) -> Row? {
@@ -839,15 +957,25 @@ private struct SkeletonDistiller {
         return Row(text: text, depth: depth, lines: line(span.lowerBound)...line(span.upperBound))
     }
 
+    func isBlock(_ node: Node) -> Bool {
+        switch language {
+        case .rust: node.kind == "block" || node.kind == "match_block"
+        case .python: node.kind == "block"
+        case .typescript: node.kind == "statement_block" || node.kind == "switch_body"
+        }
+    }
+
     /// The blocks a statement holds, outermost first, in source order.
     func bodies(of node: Node) -> [Node] {
         var found: [Node] = []
         var stack = Array(node.children.reversed())
         while let next = stack.popLast() {
-            if next.kind == "block" || (rust && next.kind == "match_block") {
+            if isBlock(next) {
                 found.append(next)
                 continue
             }
+            // An object literal or JSX reads as one line, callbacks and all.
+            if language == .typescript, Self.typeScriptOpaque.contains(next.kind) { continue }
             stack.append(contentsOf: next.children.reversed())
         }
         return found
@@ -867,7 +995,11 @@ private struct SkeletonDistiller {
                 found = true
                 return false
             }
-            found = rust ? rustEffect(node) : pythonEffect(node)
+            switch language {
+            case .rust: found = rustEffect(node)
+            case .python: found = pythonEffect(node)
+            case .typescript: found = typeScriptEffect(node)
+            }
             return !found
         }
         return found
@@ -907,6 +1039,19 @@ private struct SkeletonDistiller {
         }
     }
 
+    func typeScriptEffect(_ node: Node) -> Bool {
+        switch node.kind {
+        case "call_expression":
+            return calleeName(node).map(isEffectName) ?? false
+        case "assignment_expression", "augmented_assignment_expression":
+            return node.field("left")?.kind == "member_expression"
+        case "await_expression", "yield_expression", "return_statement", "break_statement", "continue_statement":
+            return true
+        default:
+            return false
+        }
+    }
+
     func isEffectName(_ name: String) -> Bool {
         Self.effectNames.contains(name) || name.hasPrefix("write")
     }
@@ -919,6 +1064,7 @@ private struct SkeletonDistiller {
         case "scoped_identifier": return callee.field("name").map(text)
         case "field_expression": return callee.field("field").map(text)
         case "attribute": return callee.field("attribute").map(text)
+        case "member_expression": return callee.field("property").map(text)
         default: return nil
         }
     }
@@ -1078,12 +1224,23 @@ private struct SkeletonDistiller {
 
     /// `x.clone()` and friends read as `x`.
     func noiseCall(_ call: Node) -> Edit? {
+        let noise = language == .typescript ? Self.typeScriptNoiseMethods : Self.noiseMethods
         guard call.kind == "call_expression", let function = call.field("function"),
-              function.kind == "field_expression", let field = function.field("field"),
-              let value = function.field("value"), Self.noiseMethods.contains(text(field)),
+              let (value, field) = member(function), noise.contains(text(field)),
               let arguments = call.field("arguments"), arguments.namedChildren.isEmpty
         else { return nil }
         return Edit(range: value.end..<call.end)
+    }
+
+    /// The receiver and name of `a.b`: a Rust field or a TypeScript member expression.
+    func member(_ node: Node) -> (Node, Node)? {
+        let fields = switch node.kind {
+        case "field_expression": ("value", "field")
+        case "member_expression": ("object", "property")
+        default: ("", "")
+        }
+        guard !fields.0.isEmpty, let receiver = node.field(fields.0), let name = node.field(fields.1) else { return nil }
+        return (receiver, name)
     }
 
     /// A chain of three or more method calls keeps its first call and `…`.
@@ -1093,7 +1250,7 @@ private struct SkeletonDistiller {
         var node = call
         while node.kind == "call_expression", var function = node.field("function") {
             if function.kind == "generic_function", let inner = function.field("function") { function = inner }
-            guard function.kind == "field_expression", var receiver = function.field("value") else { break }
+            guard var receiver = member(function)?.0 else { break }
             if noiseCall(node) == nil {
                 links += 1
                 first = node
@@ -1190,7 +1347,7 @@ private struct SkeletonDistiller {
 
     func signature(_ function: SkeletonFunction) -> String {
         let node = function.node
-        if !rust {
+        if language == .python {
             let async = node.children.contains { $0.kind == "async" } ? "async " : ""
             let parameters = node.field("parameters")?.namedChildren.compactMap { parameter -> String? in
                 switch parameter.kind {
@@ -1204,6 +1361,7 @@ private struct SkeletonDistiller {
             } ?? []
             return async + "def " + function.name + "(" + parameters.joined(separator: ", ") + "):"
         }
+        if language == .typescript { return typeScriptSignature(function) }
         var words: [String] = []
         for child in node.children {
             if child.kind == "function_modifiers" {
@@ -1232,23 +1390,99 @@ private struct SkeletonDistiller {
         return text
     }
 
+    /// `function name(params): R`, `static get name(params): R`,
+    /// `const name = (params): R =>`: parameters without types or modifiers,
+    /// no `async`, `export`, accessibility or `readonly`.
+    func typeScriptSignature(_ function: SkeletonFunction) -> String {
+        let node = function.node
+        var callable = node
+        var text: String
+        switch node.kind {
+        case "lexical_declaration", "variable_declaration":
+            callable = node.namedChildren.first { $0.kind == "variable_declarator" }.flatMap(functionValue) ?? node
+            text = (node.children.first.map(self.text) ?? "const") + " " + function.name + " = "
+        case "method_definition", "public_field_definition":
+            text = ""
+            let name = node.field("name")?.start ?? node.end
+            for child in node.children where child.start < name {
+                if ["static", "get", "set"].contains(child.kind) { text += self.text(child) + " " }
+                if child.kind == "*" { text += "*" }
+            }
+            text += function.name
+            if node.kind == "public_field_definition" {
+                callable = functionValue(node) ?? node
+                text += " = "
+            }
+        default:
+            text = "function" + (node.kind == "generator_function_declaration" ? "* " : " ") + function.name
+        }
+        if callable.kind == "function_expression" {
+            text += "function" + (callable.children.contains { $0.kind == "*" } ? "*" : "")
+                + (callable.field("name").map { " " + self.text($0) } ?? "")
+        }
+        if let generics = callable.field("type_parameters") { text += render(generics, generics.start..<generics.end, []) }
+        if let single = callable.field("parameter") {
+            text += inline(single)
+        } else {
+            let parameters = callable.field("parameters")?.namedChildren.compactMap { parameter -> String? in
+                switch parameter.kind {
+                case "required_parameter", "optional_parameter":
+                    guard let pattern = parameter.field("pattern") ?? parameter.field("name"), pattern.kind != "this"
+                    else { return nil }
+                    return inline(pattern) + (parameter.field("value").map { " = " + inline($0) } ?? "")
+                case "comment": return nil
+                default: return inline(parameter)
+                }
+            } ?? []
+            text += "(" + parameters.joined(separator: ", ") + ")"
+        }
+        if let result = callable.field("return_type") { text += render(result, result.start..<result.end, []) }
+        if callable.kind == "arrow_function" { text += " =>" }
+        return fitted(text)
+    }
+
     func helperRow(_ function: SkeletonFunction) -> Row {
-        Row(text: signature(function) + (rust ? " { … }" : " …"), depth: 0, lines: function.lines)
+        if language == .typescript, function.body.kind != "statement_block" {
+            return Row(text: fitted(signature(function) + " " + inline(function.body)), depth: 0, lines: function.lines)
+        }
+        return Row(text: signature(function) + (braces ? " { … }" : " …"), depth: 0, lines: function.lines)
     }
 
     func typeRow(_ node: Node) -> Row {
         let lines = line(node.start)...line(node.end - 1)
         let name = node.field("name").map(text) ?? ""
-        if !rust {
+        if language == .python {
             let bases = node.field("superclasses").map(inline) ?? ""
             return Row(text: "class " + name + bases + ":", depth: 0, lines: lines)
         }
-        let keyword = node.kind == "enum_item" ? "enum" : "struct"
-        let members = node.field("body")?.namedChildren.compactMap { member -> String? in
-            guard ["field_declaration", "enum_variant"].contains(member.kind) else { return nil }
-            return member.field("name").map(text)
-        } ?? []
-        var text = keyword + " " + name
+        var text: String
+        let children: [Node]
+        switch node.kind {
+        case "class_declaration", "abstract_class_declaration":
+            let heritage = node.namedChildren.first { $0.kind == "class_heritage" }.map { " " + inline($0) } ?? ""
+            let keyword = node.kind == "class_declaration" ? "class " : "abstract class "
+            return Row(text: fitted(keyword + name + heritage), depth: 0, lines: lines)
+        case "interface_declaration", "enum_declaration":
+            text = (node.kind == "enum_declaration" ? "enum " : "interface ") + name
+            children = node.field("body")?.namedChildren ?? []
+        case "type_alias_declaration":
+            guard let value = node.field("value"), value.kind == "object_type" else {
+                return Row(text: "type " + name, depth: 0, lines: lines)
+            }
+            text = "type " + name + " ="
+            children = value.namedChildren
+        default:
+            text = (node.kind == "enum_item" ? "enum" : "struct") + " " + name
+            children = node.field("body")?.namedChildren ?? []
+        }
+        let memberKinds: Set<String> = [
+            "field_declaration", "enum_variant", "property_signature", "method_signature", "enum_assignment",
+        ]
+        let members = children.compactMap { member -> String? in
+            if memberKinds.contains(member.kind) { return member.field("name").map(self.text) }
+            // A plain TypeScript enum member is its name.
+            return node.kind == "enum_declaration" && !isComment(member) ? self.text(member) : nil
+        }
         guard !members.isEmpty else { return Row(text: text, depth: 0, lines: lines) }
         text += " {"
         for (index, member) in members.enumerated() {
@@ -1263,7 +1497,60 @@ private struct SkeletonDistiller {
     }
 
     func inline(_ node: Node) -> String {
-        render(node, node.start..<node.end, rust ? rustEdits(in: node) : [])
+        render(node, node.start..<node.end, noiseEdits(in: node))
+    }
+
+    func noiseEdits(in node: Node) -> [Edit] {
+        switch language {
+        case .rust: rustEdits(in: node)
+        case .python: []
+        case .typescript: typeScriptEdits(in: node)
+        }
+    }
+
+    /// Deletions that strip types and `async`/`await` from a TypeScript statement.
+    func typeScriptEdits(in root: Node) -> [Edit] {
+        var keptAwait: Int?
+        if root.kind == "expression_statement", let awaited = root.namedChildren.first,
+           awaited.kind == "await_expression", awaited.namedChildren.first?.kind == "identifier" {
+            keptAwait = awaited.start
+        }
+        var edits: [Edit] = []
+        forEachNode(in: root) { node in
+            // `(await x)` reads as `x`: an await's operand never needs the
+            // parentheses. A statement's own condition keeps them.
+            if !["if_statement", "while_statement", "do_statement", "switch_statement"].contains(node.kind) {
+                for child in node.namedChildren where child.kind == "parenthesized_expression" {
+                    let inner = child.namedChildren.filter { !isComment($0) }
+                    guard inner.count == 1, inner[0].kind == "await_expression", inner[0].start != keptAwait,
+                          child.end - child.start >= 2
+                    else { continue }
+                    edits.append(Edit(range: child.start..<(child.start + 1)))
+                    edits.append(Edit(range: (child.end - 1)..<child.end))
+                }
+            }
+            switch node.kind {
+            case "type_annotation", "type_arguments", "asserts_annotation", "type_predicate_annotation":
+                edits.append(Edit(range: node.start..<node.end))
+                return false
+            case "as_expression", "satisfies_expression", "non_null_expression":
+                if let inner = node.namedChildren.first { edits.append(Edit(range: inner.end..<node.end)) }
+            case "await_expression":
+                if node.start != keptAwait, let inner = node.namedChildren.first {
+                    edits.append(Edit(range: node.start..<inner.start))
+                }
+            case "arrow_function", "function_expression", "for_in_statement":
+                edits += node.children.filter { $0.kind == "async" || $0.kind == "await" }.map { Edit(range: $0.start..<spaceEnd($0.end)) }
+            case "optional_parameter":
+                edits += node.children.filter { $0.kind == "?" }.map { Edit(range: $0.start..<$0.end) }
+            case "call_expression":
+                if let edit = noiseCall(node) ?? chain(node) { edits.append(edit) }
+            default:
+                break
+            }
+            return true
+        }
+        return edits
     }
 
     // MARK: Rendering
@@ -1322,7 +1609,7 @@ private struct SkeletonDistiller {
                     if newline, last == UInt8(ascii: ","), [")", "]", "}"].contains(Character(UnicodeScalar(first))) {
                         out.removeLast()
                         if first == UInt8(ascii: "}") { out.append(0x20) }
-                    } else if newline, "([".utf8.contains(last) || ")].?,;".utf8.contains(first) {
+                    } else if newline, "([".utf8.contains(last) || joinsTight(piece) {
                         // joined without a space
                     } else {
                         out.append(0x20)
@@ -1369,7 +1656,31 @@ private struct SkeletonDistiller {
             stack.append(contentsOf: node.children.reversed())
         }
         flush(upTo: range.upperBound)
-        return (String(decoding: out, as: UTF8.self).trimmedSpaces(), span)
+        let text = String(decoding: out, as: UTF8.self).trimmedSpaces()
+        return (fitted(text), span)
+    }
+
+    /// TypeScript object literals and JSX join into long lines: past
+    /// `maxLine` columns the text is cut at a word boundary and ends in `…`.
+    func fitted(_ text: String) -> String {
+        guard language == .typescript, text.count > Self.maxLine else { return text }
+        var cut = Substring(text.prefix(Self.maxLine - 3))
+        func isWord(_ character: Character?) -> Bool {
+            character?.unicodeScalars.first.map(Scalars.isWord) ?? false
+        }
+        // Half an identifier is not in the source.
+        if isWord(text.dropFirst(cut.count).first) {
+            while isWord(cut.last) { cut = cut.dropLast() }
+        }
+        return String(cut).trimmedSpaces() + "…"
+    }
+
+    /// A piece that follows a line break with no space: a closing bracket, a
+    /// separator, a method on its own line (Rust also `?`; not TypeScript's
+    /// ternary `?` or spread `...`).
+    func joinsTight(_ piece: [UInt8]) -> Bool {
+        guard language == .typescript else { return ")].?,;".utf8.contains(piece[0]) }
+        return ")],;".utf8.contains(piece[0]) || (piece[0] == UInt8(ascii: ".") && !piece.starts(with: "...".utf8))
     }
 
     /// A leaf's bytes; a string over several lines keeps its first line.
@@ -1377,18 +1688,23 @@ private struct SkeletonDistiller {
         let piece = bytes[node.start..<node.end]
         guard let newline = piece.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) else { return Array(piece) }
         var closing = node.end
-        while closing > newline, "\"'#".utf8.contains(bytes[closing - 1]) { closing -= 1 }
+        let closers = language == .typescript ? "\"'`" : "\"'#"
+        while closing > newline, closers.utf8.contains(bytes[closing - 1]) { closing -= 1 }
         var head = Array(bytes[node.start..<newline])
         while let last = head.last, isSpace(last) { head.removeLast() }
         return head + Array("…".utf8) + Array(bytes[closing..<node.end])
     }
 
     func isAtomic(_ kind: String) -> Bool {
-        rust ? ["string_literal", "raw_string_literal", "char_literal"].contains(kind) : kind == "string"
+        switch language {
+        case .rust: ["string_literal", "raw_string_literal", "char_literal"].contains(kind)
+        case .python: kind == "string"
+        case .typescript: kind == "string" || kind == "template_string"
+        }
     }
 
     func isComment(_ node: Node) -> Bool {
-        rust ? node.kind == "line_comment" || node.kind == "block_comment" : node.kind == "comment"
+        language == .rust ? node.kind == "line_comment" || node.kind == "block_comment" : node.kind == "comment"
     }
 
     // MARK: Small helpers

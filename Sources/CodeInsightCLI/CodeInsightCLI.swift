@@ -613,18 +613,22 @@ extension CodeInsight {
 
     struct Overview: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Print the distilled skeleton of a Rust or Python file, each line after its first source line."
+            abstract: "Print the distilled skeleton of a Rust, Python, TypeScript or JavaScript file, each line after its first source line."
         )
 
-        @Argument(help: "Path to a Rust or Python source file.")
+        @Argument(help: "Path to a Rust, Python, TypeScript or JavaScript source file.")
         var file: String
 
         func run() throws {
             let bytes = Array(try Data(contentsOf: URL(fileURLWithPath: file)))
-            guard let language = LanguageMode.classify(path: file)?.language,
-                  let lines = distillSkeleton(bytes: bytes, language: language)
+            let javaScript = ["js", "jsx", "mjs", "cjs"].contains((file as NSString).pathExtension)
+            guard let mode = javaScript ? LanguageMode(language: .javascript) : LanguageMode.classify(path: file),
+                  let lines = distillSkeleton(bytes: bytes, language: mode.language, variant: mode.variant)
             else {
-                throw ValidationError("No skeleton for \(file): only Rust (.rs) and Python (.py) files are distilled.")
+                throw ValidationError(
+                    "No skeleton for \(file): only Rust (.rs), Python (.py), TypeScript (.ts, .tsx) and "
+                        + "JavaScript (.js, .jsx, .mjs, .cjs) files are distilled."
+                )
             }
             let width = max(4, String(lines.compactMap { $0.sourceLines?.lowerBound }.max() ?? 0).count)
             for line in lines {

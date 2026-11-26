@@ -457,7 +457,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     /// Code-like previews: a reader of their own that folds like source.
     private var previewReader: ReaderTextView?
     private var previewSettings = ReaderSettings()
-    /// Overview of a Rust or Python file: the skeleton in a reader of its
+    /// Overview of a Rust, Python or TypeScript file: the skeleton in a reader of its
     /// own, laid over the source reader, which stays the current document.
     private var skeletonReader: ReaderTextView?
     private let skeletonScrollView: NSScrollView = {
@@ -3481,7 +3481,7 @@ extension ReaderViewController {
     var isShowingSkeleton: Bool { !skeletonScrollView.isHidden }
 
     /// The one entry point that shows, replaces in place or hides the
-    /// Overview skeleton. It shows for a Rust or Python file at Overview,
+    /// Overview skeleton. It shows for a Rust, Python or TypeScript file at Overview,
     /// out of focus, whose skeleton is not empty; otherwise the source
     /// reader shows. With `sourceLine` the viewport lands on it (on the
     /// skeleton row the line map picks, or on that source line); without
@@ -3496,7 +3496,7 @@ extension ReaderViewController {
         guard let reader = skeletonReader else { return }
         guard let document = displayedDocument, let file = displayedFile, scrollView?.isHidden == false,
               textView.readingHeightLevel == .overview, !textView.isFocusMode,
-              document.languageMode.language == .rust || document.languageMode.language == .python
+              [.rust, .python, .typescript].contains(document.languageMode.language)
         else { return hideSkeleton(landingOn: sourceLine, returningTo: anchor) }
         // The place to go back to belongs to one content.
         if skeletonReturn?.contentID != document.contentID { skeletonReturn = nil }
@@ -3607,7 +3607,7 @@ extension ReaderViewController {
     /// distils with them.
     private nonisolated static func score(_ document: ReaderDocument, with scoring: OverviewScoring) async -> ScoringOutcome {
         let language = document.languageMode.language
-        guard let questions = SkeletonQuestions(bytes: document.bytes, language: language) else { return .notAsked }
+        guard let questions = SkeletonQuestions(bytes: document.bytes, language: language, variant: document.languageMode.variant) else { return .notAsked }
         do {
             let scores = try await scoring.score(questions)
             scoring.cache.save(scores, contentHash: document.contentID.hex, language: language)
