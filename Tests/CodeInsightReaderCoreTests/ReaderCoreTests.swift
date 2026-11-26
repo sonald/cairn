@@ -13,26 +13,21 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
 
 #if DEBUG
 @Test
-func javascriptAndInvalidTypeScriptVariantFailBeforeParsing() throws {
+func javascriptLoadsAsTSXButKeepsItsUnanalysedMode() throws {
+    let source = "function top() {\n    return <div />;\n}\nclass Box { open() { return 1; } }\n"
+    let loader = DocumentLoader(source: { _ in Array(source.utf8) })
+    let loaded = try loader.load(file: URL(fileURLWithPath: "/fixture.js"), languageMode: LanguageMode(language: .javascript))
+    // `.javascript` is what keeps identifier analysis, the index and Exact off.
+    #expect(loaded.document.languageMode == LanguageMode(language: .javascript))
+    #expect(loaded.document.outlineFacets.map(\.name) == ["top", "Box", "open"])
+    #expect(!loaded.document.foldRegions.isEmpty)
+    #expect(loaded.document.highlightSpans.contains { $0.kind == HighlightKind.keyword })
+}
+
+@Test
+func invalidTypeScriptVariantFailsBeforeParsing() throws {
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
     let loader = DocumentLoader(source: { _ in Array("const x: number = 1\n".utf8) })
-
-    do {
-        _ = try TypeScriptExtractor.$parseObserver.withValue({
-            parseCount.withLock { $0 += 1 }
-        }) {
-            try loader.load(
-                file: URL(fileURLWithPath: "/fixture.js"),
-                languageMode: LanguageMode(language: .javascript)
-            )
-        }
-        Issue.record("DocumentLoader accepted JavaScript")
-    } catch ReaderSyntaxError.unsupportedLanguage(let language) {
-        #expect(language == .javascript)
-    } catch {
-        Issue.record("DocumentLoader returned the wrong error: \(error)")
-    }
-
     do {
         _ = try TypeScriptExtractor.$parseObserver.withValue({
             parseCount.withLock { $0 += 1 }
@@ -115,7 +110,7 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
     )
     let document = ReaderDocument(
         bytes: Array("const x = 1\n".utf8),
-        languageMode: LanguageMode(language: .javascript)
+        languageMode: LanguageMode(language: .typescript, variant: "bad")
     )
 
     let completed = await withCheckedContinuation { continuation in
@@ -125,9 +120,9 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
     }
     switch completed {
     case .success:
-        Issue.record("Detached syntax accepted JavaScript")
+        Issue.record("Detached syntax accepted an invalid TypeScript variant")
     case .failure(.unsupportedLanguage(let language)):
-        #expect(language == .javascript)
+        #expect(language == .typescript)
     case .failure(let error):
         Issue.record("Detached syntax returned the wrong error: \(error)")
     }

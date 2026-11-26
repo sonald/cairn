@@ -78,7 +78,7 @@ public struct DiffCore: Sendable {
         right: [UInt8],
         languageMode: LanguageMode
     ) throws -> Result {
-        try requireSupported(languageMode)
+        try requireSupported(Self.diffMode(languageMode))
         return compareSupported(left: left, right: right)
     }
 
@@ -188,6 +188,7 @@ public struct DiffCore: Sendable {
         right: [UInt8],
         languageMode: LanguageMode
     ) throws -> [FunctionChange] {
+        let languageMode = Self.diffMode(languageMode)
         try requireSupported(languageMode)
         let old = try extractFunctions(left, languageMode: languageMode)
         let new = try extractFunctions(right, languageMode: languageMode)
@@ -383,6 +384,11 @@ public struct DiffCore: Sendable {
         return result.mapValues { functions in
             functions.sorted { $0.facet.range.lowerBound < $1.facet.range.lowerBound }
         }
+    }
+
+    /// JavaScript is compared as TSX, as the reader reads it.
+    private static func diffMode(_ mode: LanguageMode) -> LanguageMode {
+        mode.language == .javascript ? LanguageMode(language: .typescript, variant: "tsx") : mode
     }
 
     private func requireSupported(_ languageMode: LanguageMode) throws {

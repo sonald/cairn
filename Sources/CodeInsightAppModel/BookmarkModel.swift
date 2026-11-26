@@ -198,6 +198,7 @@ package enum BookmarkEligibility: Equatable, Sendable {
         case empty
         case readingSet
         case dependency
+        case unanalyzed
         case comparison
         case miniReader
         case readerNotReady
@@ -209,6 +210,7 @@ package enum BookmarkEligibility: Equatable, Sendable {
             case .empty: localized("model.bookmark.empty")
             case .readingSet: localized("model.bookmark.readingSet")
             case .dependency: localized("model.bookmark.dependency")
+            case .unanalyzed: localized("model.bookmark.unanalyzed")
             case .comparison: localized("model.bookmark.compare")
             case .miniReader: localized("model.bookmark.mini")
             case .readerNotReady: localized("model.bookmark.notReady")

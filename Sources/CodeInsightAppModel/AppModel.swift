@@ -2085,6 +2085,11 @@ public final class AppModel {
         guard let path = Self.relativePath(of: file, under: root) else {
             return .unavailable(.dependency)
         }
+        // Bookmarks anchor to captured snapshot source; files Cairn reads but
+        // does not analyse (JavaScript) have none.
+        guard LanguageMode.classify(path: path, languages: projectLanguages) != nil else {
+            return .unavailable(.unanalyzed)
+        }
         guard let byteOffset = tabStrip.activeTab?.selectionByteOffset ?? selectedByteOffset,
               document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil
         else {
@@ -3439,7 +3444,10 @@ public final class AppModel {
             {
                 return key.languageMode
             }
-            return classified
+            // JavaScript is not analysed but reads as source for its reading
+            // heights; `.javascript` keeps the index and Exact out.
+            return classified ?? (TextFormat.detect(fileName: file.lastPathComponent) == .javascript
+                ? LanguageMode(language: .javascript) : nil)
         }
         guard exactLocationIsInDependency(file.path) else { return nil }
         return dependencyFileLanguageMode(

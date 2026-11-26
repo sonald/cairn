@@ -1,6 +1,5 @@
 import CodeInsightCore
 import CodeInsightReaderCore
-import CodeInsightRustExtractor
 import CodeInsightTypeScriptExtractor
 import Foundation
 import os
@@ -19,44 +18,19 @@ func explicitRustDiffMatchesConvenience() throws {
         == core.functionChanges(left: left, right: right))
 }
 
-#if DEBUG
 @Test
-func javascriptAndBadTypeScriptVariantFailBeforeParsing() throws {
-    let left = Array("fn item() {}\n".utf8)
-    let right = Array("fn item() {}\n".utf8)
-    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+func javascriptComparesAsTSX() throws {
+    let left = Array("function main() {\n  return <div />;\n}\nfunction keep() {}\n".utf8)
+    let right = Array("function main() {\n  return <span />;\n}\nfunction keep() {}\n".utf8)
     let core = DiffCore()
+    let mode = LanguageMode(language: .javascript)
 
-    do {
-        _ = try core.compare(
-            left: left,
-            right: right,
-            languageMode: LanguageMode(language: .javascript)
-        )
-        Issue.record("DiffCore accepted JavaScript line diff")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
-    }
-
-    do {
-        _ = try RustExtractor.$parseObserver.withValue({
-            parseCount.withLock { $0 += 1 }
-        }) {
-            try core.functionChanges(
-                left: left,
-                right: right,
-                languageMode: LanguageMode(language: .javascript)
-            )
-        }
-        Issue.record("DiffCore accepted JavaScript syntax diff")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
-    }
-    #expect(parseCount.withLock { $0 } == 0)
+    #expect(try core.compare(left: left, right: right, languageMode: mode).changeCount > 0)
+    let changes = try core.functionChanges(left: left, right: right, languageMode: mode)
+    #expect(changes.map(\.kind) == [.bodyChanged])
 }
 
+#if DEBUG
 @Test
 func badTypeScriptVariantFailsBeforeComparisonOrParsing() throws {
     let left = Array("const x = 1;\n".utf8)

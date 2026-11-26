@@ -742,8 +742,8 @@ func mixedProjectUnsupportedLanguageFileUsesTextPreviewWithoutActiveLanguageFall
                 == Array(fixture.mainSource.utf8)
     })
 
-    let plainText = "const notes = \"plain\";\n"
-    let unsupported = fixture.root.appendingPathComponent("notes.js")
+    let plainText = "class Notes { String plain = \"plain\"; }\n"
+    let unsupported = fixture.root.appendingPathComponent("Notes.java")
     try plainText.write(to: unsupported, atomically: true, encoding: .utf8)
     fixture.controller.openFileForSelfTest(unsupported)
     #expect(fixture.model.selectedFile?.standardizedFileURL
@@ -753,8 +753,18 @@ func mixedProjectUnsupportedLanguageFileUsesTextPreviewWithoutActiveLanguageFall
         == unsupported.standardizedFileURL)
     #expect(fixture.controller.selfTestLeftReaderBytes == nil)
     #expect(fixture.controller.selfTestReaderPlaceholderText == nil)
-    #expect(fixture.controller.selfTestReaderPreviewKind == "JavaScript")
+    #expect(fixture.controller.selfTestReaderPreviewKind == "Java")
     #expect(fixture.controller.selfTestReaderPreviewText == plainText)
+
+    // JavaScript, not analysed, reads in the source reader as `.javascript`,
+    // never as the active Rust.
+    let script = "const notes = \"plain\";\n"
+    let javaScript = fixture.root.appendingPathComponent("notes.js")
+    try script.write(to: javaScript, atomically: true, encoding: .utf8)
+    fixture.controller.openFileForSelfTest(javaScript)
+    #expect(fixture.model.languageMode(for: javaScript) == LanguageMode(language: .javascript))
+    #expect(fixture.controller.selfTestLeftReaderBytes == Array(script.utf8))
+    #expect(fixture.controller.selfTestReaderPreviewKind == nil)
 }
 
 @MainActor

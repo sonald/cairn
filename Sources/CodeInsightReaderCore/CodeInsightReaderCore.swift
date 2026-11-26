@@ -987,7 +987,7 @@ public struct DocumentLoader: Sendable {
         case .typescript:
             try requireSupportedTypeScriptReaderMode(languageMode)
         case .javascript:
-            throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
+            return
         }
     }
 
@@ -1061,7 +1061,15 @@ public struct DocumentLoader: Sendable {
                 )
             }
         case .javascript:
-            throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
+            // Read as TSX for colour, folds and outline; the document keeps
+            // `.javascript`, so identifier analysis, the index and Exact stay off.
+            return try onLargeStack {
+                try typeScriptReaderHighlightWithFolds(
+                    bytes: bytes,
+                    mode: LanguageMode(language: .typescript, variant: "tsx"),
+                    shouldCancel: shouldCancel
+                )
+            }
         }
     }
 

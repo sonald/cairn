@@ -67,6 +67,7 @@
 "model.bookmark.export.status" = "- 状态：%@";
 "model.bookmark.mini" = "无法在迷你阅读器中添加书签。";
 "model.bookmark.mismatch" = "显示的文件已不再是捕获的快照。";
+"model.bookmark.unanalyzed" = "Cairn 不分析的文件无法添加书签。";
 "model.bookmark.notReady" = "主阅读器尚未准备好为此文件添加书签。";
 "model.bookmark.offset" = "位置无效";
 "model.bookmark.offsetMessage" = "书签位置无效。";

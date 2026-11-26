@@ -211,6 +211,21 @@ struct ReaderSkeletonTests {
         #expect(controller.selfTestSkeletonPendingText == nil)
         #expect(controller.currentReadingPosition().map { Int($0.line) } == restored)
 
+        // JavaScript, not analysed, distils like TypeScript.
+        let script = Array("function main() {\n  helper();\n}\nfunction helper() {\n  return <div />;\n}\n".utf8)
+        controller.display(
+            URL(fileURLWithPath: "/main.jsx"), source: { _ in script }, languageMode: LanguageMode(language: .javascript)
+        )
+        let scriptSkeleton = try #require(distillSkeleton(bytes: script, language: .javascript))
+        #expect(controller.selfTestSkeleton?.text == scriptSkeleton.map(\.text).joined(separator: "\n"))
+        // A minified bundle past the preview's colouring limit stays a plain preview.
+        let bundle = Array(String(repeating: "function f(a){return a};", count: 9_000).utf8)
+        controller.display(
+            URL(fileURLWithPath: "/bundle.min.js"), source: { _ in bundle }, languageMode: LanguageMode(language: .javascript)
+        )
+        #expect(controller.displayedBytes == nil)
+        #expect(!controller.isShowingSkeleton)
+
         // Other languages keep the folded Overview.
         controller.display(
             URL(fileURLWithPath: "/main.go"),

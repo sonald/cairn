@@ -1530,7 +1530,7 @@ func compareModelDoesNotPublishAnOlderModeCompletion() async throws {
     model.update(
         file: file,
         leftSource: { _ in Array("fn target() { 1 }\n".utf8) },
-        languageMode: LanguageMode(language: .javascript)
+        languageMode: LanguageMode(language: .typescript, variant: "bad")
     )
 
     #expect(await testWaitUntil("new mode completion publishes") {

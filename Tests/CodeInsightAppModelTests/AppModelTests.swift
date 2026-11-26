@@ -1155,7 +1155,7 @@ func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async thr
     }
     let unsupported = root.appendingPathComponent("notes.js")
     model.navigate(to: unsupported)
-    #expect(model.languageMode(for: unsupported) == nil)
+    #expect(model.languageMode(for: unsupported) == LanguageMode(language: .javascript))
     guard case let .ready(_, afterUnsupported) = model.projectState else {
         Issue.record("unsupported navigation must not clear active project state")
         return

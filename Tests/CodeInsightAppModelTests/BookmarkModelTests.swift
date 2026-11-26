@@ -842,6 +842,13 @@ func appModelBookmarkEligibilityNamesUnsupportedSurfaces() async throws {
     model.tabStrip.setActiveDocument(ReaderDocument(bytes: captured.bytes), for: dependency)
     #expect(model.bookmarkEligibility() == .unavailable(.dependency))
 
+    // JavaScript reads as source but has no captured snapshot to anchor to.
+    let script = root.appendingPathComponent("src/notes.js")
+    try Data("function notes() {}\n".utf8).write(to: script)
+    model.navigate(to: script, byteOffset: 3)
+    model.tabStrip.setActiveDocument(ReaderDocument(bytes: Array("function notes() {}\n".utf8)), for: script)
+    #expect(model.bookmarkEligibility() == .unavailable(.unanalyzed))
+
     model.navigate(to: file, byteOffset: 3)
     model.tabStrip.setActiveDocument(ReaderDocument(bytes: captured.bytes), for: file)
     _ = model.compare.beginLoading(revision: "comparison")

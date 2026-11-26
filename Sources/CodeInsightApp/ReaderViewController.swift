@@ -2034,7 +2034,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let caseSensitive = findCaseButton.state == .on
         let wholeWord = findWordButton.state == .on
         let wordBoundary = wholeWord
-            ? WordBoundary(allowsDollar: document.languageMode.language == .typescript) : nil
+            ? WordBoundary(allowsDollar: [.typescript, .javascript].contains(document.languageMode.language)) : nil
         let selectedRange = textView.selectedFindMatchRange
         let scanDelay = findScanDelayForTesting
         findStatusLabel.stringValue = localized("main.searching")
@@ -3163,7 +3163,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             return
         }
 
-        guard let languageMode else {
+        // ponytail: minified JavaScript (one huge line) stalls TextKit with
+        // syntax spans; past the preview's colouring limit it stays the plain
+        // preview. Bytes, not UTF-16 units: a few non-ASCII files fall back early.
+        guard let languageMode,
+              languageMode.language != .javascript
+                || (try? source.map { try $0(file) } ?? Array(Data(contentsOf: file, options: .mappedIfSafe)))
+                    .map({ $0.count <= CodeSnippetHighlighter.snippetUTF16Limit }) == true
+        else {
             displayPreview(file, source: source)
             return
         }
@@ -3496,7 +3503,7 @@ extension ReaderViewController {
         guard let reader = skeletonReader else { return }
         guard let document = displayedDocument, let file = displayedFile, scrollView?.isHidden == false,
               textView.readingHeightLevel == .overview, !textView.isFocusMode,
-              [.rust, .python, .typescript].contains(document.languageMode.language)
+              [.rust, .python, .typescript, .javascript].contains(document.languageMode.language)
         else { return hideSkeleton(landingOn: sourceLine, returningTo: anchor) }
         // The place to go back to belongs to one content.
         if skeletonReturn?.contentID != document.contentID { skeletonReturn = nil }

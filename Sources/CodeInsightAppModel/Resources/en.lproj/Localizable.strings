@@ -75,6 +75,7 @@
 "model.bookmark.revisionMessage" = "Bookmark revision is unavailable.";
 "model.bookmark.saved" = "Saved at %@";
 "model.bookmark.selection" = "Choose a source position before creating a bookmark.";
+"model.bookmark.unanalyzed" = "Files Cairn does not analyse cannot be bookmarked.";
 "model.bookmark.unevaluated" = "Not evaluated";
 "model.bookmark.worktree" = "Worktree";
 "model.context.all" = "all";
