@@ -205,7 +205,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>${CAIRN_VERSION:-0.5.0}</string>
+    <string>${CAIRN_VERSION:-0.6.0}</string>
     <key>CFBundleVersion</key>
     <string>${CAIRN_BUILD_VERSION:-1}</string>
     <key>LSMinimumSystemVersion</key>
