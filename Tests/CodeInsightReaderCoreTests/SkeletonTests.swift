@@ -174,24 +174,24 @@ import Testing
         let lines = try #require(distillSkeleton(bytes: bytes, language: .rust))
         // main.rs changes; find the expected source lines in its text.
         let source = sourceLines(bytes)
-        let endpoint = try #require(source.firstIndex { $0.hasPrefix("fn endpoint(") }) + 1
-        let endpointEnd = try #require(source[endpoint...].firstIndex { $0 == "}" }) + 1
+        let adapterKind = try #require(source.firstIndex { $0.hasPrefix("fn adapter_kind(") }) + 1
+        let adapterKindEnd = try #require(source[adapterKind...].firstIndex { $0 == "}" }) + 1
         let mainHeader = try #require(source.firstIndex { $0.hasPrefix("async fn main(") }) + 1
         let texts = lines.map(\.text)
         let signatures = texts.filter { $0.hasPrefix("fn ") && $0.hasSuffix(" {") }
             .map { String($0.dropFirst(3).prefix { $0 != "(" }) }
-        #expect(signatures == ["client", "run_round", "stream_round", "trim", "list_models", "handle", "main"])
+        #expect(signatures == ["endpoint", "client", "run_round", "stream_round", "trim", "list_models", "handle", "main"])
 
         let helpers = lines.filter { $0.text.hasPrefix("fn ") && $0.text.hasSuffix(" { … }") }
         #expect(helpers.map { String($0.text.dropFirst(3).prefix { $0 != "(" }) }
-            == ["endpoint", "adapter_kind", "send", "too_long", "drop_unanswered_calls"])
-        // Types and signature rows run together; a distilled function stands apart.
-        let firstFunction = try #require(lines.firstIndex { $0.text.hasPrefix("fn client(") })
+            == ["adapter_kind", "send", "too_long", "drop_unanswered_calls"])
+        // Type rows run together; a distilled function stands apart from them.
+        let firstFunction = try #require(lines.firstIndex { $0.text.hasPrefix("fn endpoint(") })
         #expect(lines[firstFunction - 1].sourceLines == nil)
         #expect(lines[..<(firstFunction - 1)].allSatisfy { $0.sourceLines != nil })
-        #expect(lines[firstFunction - 2].text == "fn adapter_kind(config) -> AdapterKind { … }")
-        #expect(helpers.first?.text == "fn endpoint(config) -> String { … }")
-        #expect(helpers.first?.sourceLines == endpoint...endpointEnd)
+        // A helper's one row stands for its whole function.
+        #expect(helpers.first?.text == "fn adapter_kind(config) -> AdapterKind { … }")
+        #expect(helpers.first?.sourceLines == adapterKind...adapterKindEnd)
 
         for line in [
             "    let request = serde_json::from_str(line)?;",
