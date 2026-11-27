@@ -163,7 +163,7 @@
 "main.forward" = "前进";
 "main.function" = "函数";
 "main.go.to" = "前往 %@";
-"main.height.full.help" = "完整视图显示整个文件；结构视图折叠函数体；概览把 Rust、Python、TypeScript 和 JavaScript 文件显示为骨架，其他文件仅保留签名和顶层项";
+"main.height.full.help" = "完整视图显示整个文件；结构视图折叠函数体；概览把 Rust、Python、TypeScript、JavaScript 和 Go 文件显示为骨架，其他文件仅保留签名和顶层项";
 "main.overview.distilling" = "正在提炼概览…";
 "main.overview.open.line" = "在完整视图中查看此行";
 "main.overview.refining" = "正在完善概览…";
@@ -171,7 +171,7 @@
 "main.overview.refine.network" = "无法连接 Jev，概览保持本地规则版本。";
 "main.overview.refine.busy" = "Jev 服务繁忙，概览保持本地规则版本。";
 "main.overview.refine.failed" = "Jev 没有给出可用的结果，概览保持本地规则版本。";
-"main.height.overview.help" = "概览把 Rust、Python、TypeScript 和 JavaScript 文件按源码顺序显示为骨架：主线上的函数保留关键语句，其余函数只列签名。点击行号可在完整视图中阅读该行。其他文件仅保留签名和顶层项";
+"main.height.overview.help" = "概览把 Rust、Python、TypeScript、JavaScript 和 Go 文件按源码顺序显示为骨架：主线上的函数保留关键语句，其余函数只列签名。点击行号可在完整视图中阅读该行。其他文件仅保留签名和顶层项";
 "main.hide.definition.context" = "隐藏定义上下文";
 "main.html.preview" = "HTML 预览";
 "main.image.preview" = "图像预览";
@@ -981,7 +981,7 @@
 "settings.jev.key" = "Jev 密钥";
 "settings.jev.key.configured" = "已保存 Jev 密钥。";
 "settings.jev.key.missing" = "尚未保存 Jev 密钥。";
-"settings.jev.privacy" = "填写后，打开 Rust、Python、TypeScript 或 JavaScript 文件的概览时，会把该文件的代码（已去掉注释、文档字符串和空行）发送到 TypeSafe 的 Jev 服务（api.typesafe.ai），由它判断哪些函数和语句重要；本机只保存评分，不保存发送的代码。不填写时，概览只用本地规则，不联网。";
+"settings.jev.privacy" = "填写后，打开 Rust、Python、TypeScript、JavaScript 或 Go 文件的概览时，会把该文件的代码（已去掉注释、文档字符串和空行）发送到 TypeSafe 的 Jev 服务（api.typesafe.ai），由它判断哪些函数和语句重要；本机只保存评分，不保存发送的代码。不填写时，概览只用本地规则，不联网。";
 "settings.ai.consent.revoke" = "忘记已允许的项目";
 "settings.ai.consent.revoke.confirm" = "之后任何项目发送代码前都重新询问？";
 

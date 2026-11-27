@@ -226,10 +226,16 @@ struct ReaderSkeletonTests {
         #expect(controller.displayedBytes == nil)
         #expect(!controller.isShowingSkeleton)
 
-        // Other languages keep the folded Overview.
+        // Go has a skeleton; a file with nothing to distil keeps the folded Overview.
         controller.display(
             URL(fileURLWithPath: "/main.go"),
             source: { _ in Array("package main\n\nfunc main() {}\n".utf8) },
+            languageMode: LanguageMode(language: .go)
+        )
+        #expect(controller.isShowingSkeleton)
+        controller.display(
+            URL(fileURLWithPath: "/doc.go"),
+            source: { _ in Array("package main\n".utf8) },
             languageMode: LanguageMode(language: .go)
         )
         #expect(!controller.isShowingSkeleton)

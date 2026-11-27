@@ -3503,7 +3503,7 @@ extension ReaderViewController {
         guard let reader = skeletonReader else { return }
         guard let document = displayedDocument, let file = displayedFile, scrollView?.isHidden == false,
               textView.readingHeightLevel == .overview, !textView.isFocusMode,
-              [.rust, .python, .typescript, .javascript].contains(document.languageMode.language)
+              [.rust, .python, .typescript, .javascript, .go].contains(document.languageMode.language)
         else { return hideSkeleton(landingOn: sourceLine, returningTo: anchor) }
         // The place to go back to belongs to one content.
         if skeletonReturn?.contentID != document.contentID { skeletonReturn = nil }

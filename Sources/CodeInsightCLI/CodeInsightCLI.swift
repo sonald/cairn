@@ -613,10 +613,10 @@ extension CodeInsight {
 
     struct Overview: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Print the distilled skeleton of a Rust, Python, TypeScript or JavaScript file, each line after its first source line."
+            abstract: "Print the distilled skeleton of a Rust, Python, TypeScript, JavaScript or Go file, each line after its first source line."
         )
 
-        @Argument(help: "Path to a Rust, Python, TypeScript or JavaScript source file.")
+        @Argument(help: "Path to a Rust, Python, TypeScript, JavaScript or Go source file.")
         var file: String
 
         func run() throws {
@@ -626,8 +626,8 @@ extension CodeInsight {
                   let lines = distillSkeleton(bytes: bytes, language: mode.language, variant: mode.variant)
             else {
                 throw ValidationError(
-                    "No skeleton for \(file): only Rust (.rs), Python (.py), TypeScript (.ts, .tsx) and "
-                        + "JavaScript (.js, .jsx, .mjs, .cjs) files are distilled."
+                    "No skeleton for \(file): only Rust (.rs), Python (.py), TypeScript (.ts, .tsx), "
+                        + "JavaScript (.js, .jsx, .mjs, .cjs) and Go (.go) files are distilled."
                 )
             }
             let width = max(4, String(lines.compactMap { $0.sourceLines?.lowerBound }.max() ?? 0).count)

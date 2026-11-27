@@ -48,6 +48,11 @@ import Testing
         let typeScript = Array(typeScriptSample.utf8)
         let expectedTypeScript = try #require(distillSkeleton(bytes: typeScript, language: .typescript))
         #expect(distillSkeleton(bytes: crlf(typeScript), language: .typescript) == expectedTypeScript)
+
+        let go = Array(goSample.utf8)
+        let expectedGo = try #require(distillSkeleton(bytes: go, language: .go))
+        #expect(distillSkeleton(bytes: crlf(go), language: .go) == expectedGo)
+        #expect(distillSkeleton(bytes: unindented(go), language: .go) == expectedGo)
     }
 
     @Test func brokenSourceNeverCrashesAndKeepsTheInvariants() throws {
@@ -57,7 +62,8 @@ import Testing
                                                   ("sample.rs", Array(rustSample.utf8), .rust, nil),
                                                   ("sample.py", Array(pythonSample.utf8), .python, nil),
                                                   ("sample.ts", Array(typeScriptSample.utf8), .typescript, nil),
-                                                  ("sample.tsx", Array(tsxSample.utf8), .typescript, "tsx")] {
+                                                  ("sample.tsx", Array(tsxSample.utf8), .typescript, "tsx"),
+                                                  ("sample.go", Array(goSample.utf8), .go, nil)] {
             for index in 0..<60 {
                 let mutated = mutate(bytes, &generator)
                 let name = "\(label) mutation \(index) (\(mutated.kind))"
@@ -82,7 +88,8 @@ import Testing
         let terms = Array(repeating: "a", count: 5000).joined(separator: " + ")
         for (source, language) in [("fn main() {\n    let x = \(terms);\n    step(x);\n}\nfn step(_: u8) {}\n", LanguageID.rust),
                                    ("def main():\n    x = \(terms)\n    step(x)\n\ndef step(x):\n    pass\n", .python),
-                                   ("function main() {\n    const x = \(terms);\n    step(x);\n}\nfunction step(x) {}\n", .typescript)] {
+                                   ("function main() {\n    const x = \(terms);\n    step(x);\n}\nfunction step(x) {}\n", .typescript),
+                                   ("func main() {\n\tx := \(terms)\n\tstep(x)\n}\nfunc step(x int) {}\n", .go)] {
             let chain = try #require(distillSkeleton(bytes: Array(source.utf8), language: language))
             #expect(mappingIssues(chain, bytes: Array(source.utf8)).isEmpty, "\(language)")
         }
@@ -90,6 +97,7 @@ import Testing
             #expect(distillSkeleton(bytes: empty, language: .rust) == [])
             #expect(distillSkeleton(bytes: empty, language: .python) == [])
             #expect(distillSkeleton(bytes: empty, language: .typescript) == [])
+            #expect(distillSkeleton(bytes: empty, language: .go) == [])
         }
     }
 
@@ -273,6 +281,57 @@ import Testing
         let jsx = try #require(tsxTexts.first { $0.hasPrefix("    return (<section") })
         #expect(jsx.count <= 4 + 120 && jsx.hasSuffix("…"))
     }
+
+    @Test func goReadsMethodsByNameAndKeepsTheSuccessPath() throws {
+        let bytes = Array(goSample.utf8)
+        let lines = try #require(distillSkeleton(bytes: bytes, language: .go))
+        let texts = lines.map(\.text)
+        #expect(texts.filter { !$0.isEmpty && !$0.hasPrefix(" ") && $0 != "}" } == [
+            "type Mode",
+            "type Options struct { Width, Height, Label, Base, 宽度 }",
+            "type Runner interface { Run, Stringer, Close }",
+            "Pair struct { Left, Right }",
+            "Name",
+            "type Engine struct { options, total, out }",
+            "func main() {",
+            "func init() {",
+            "func NewEngine(options) (*Engine[string], error) { … }",
+            "func Feed(line) error {",
+            "func loop() {",
+            "func measure(line) (int, error) { … }",
+            "func check(n) error { … }",
+            "func flush() { … }",
+            "func Close() error { … }",
+            "func lines(path, rest) []string { … }",
+            "func register(name, options) { … }",
+            "func Reload() []string {",
+            "func load() ([]string, error) { … }",
+            "func ExampleConfig() *Options { … }",
+        ])
+        for line in [
+            "    e := NewEngine(Options{Width: 80})",
+            "    go e.loop()",
+            "    defer e.Close()",
+            "    register(`engine…`, Options{})",
+            "    n := e.measure(line)",
+            "    e.check(n)",
+            "    e.out <- line",
+            "                e.Feed(line)",
+            // A check that does not return keeps its error.
+            "    data, err := e.load()",
+            "    if err != nil { data = lines(\"fallback\") }",
+        ] {
+            #expect(texts.contains(line), "\(line)")
+        }
+        // Exits on an error go; so do returns of only an error.
+        #expect(texts.filter { $0.contains("err != nil") } == ["    if err != nil { data = lines(\"fallback\") }"])
+        #expect(!texts.contains { $0.contains("errors.New") || $0.contains("errNegative") })
+        // A case's own line maps to that source line.
+        let source = sourceLines(bytes)
+        let fast = try #require(source.firstIndex { $0.contains("case \"fast\":") }) + 1
+        let caseRow = try #require(lines.first { $0.text == "        case \"fast\": e.total += n" })
+        #expect(caseRow.sourceLines == fast...(fast + 1))
+    }
 }
 
 /// Scores from a service only choose among what the rules already offer:
@@ -414,7 +473,20 @@ import Testing
         function step(url: string, n: number) {}
         function log(url: string) {}
         """#.utf8)
-        for (bytes, language) in [(rust, LanguageID.rust), (python, .python), (typeScript, .typescript)] {
+        let go = Array(#"""
+        // SENTINEL package doc
+        package main
+
+        func main() {
+            // SENTINEL line comment
+            url := "https://example.com/#x" // SENTINEL trailing
+            step(url /* SENTINEL inline */, 2)
+            log(url)
+        }
+        func step(url string, n int) {}
+        func log(url string)         {}
+        """#.utf8)
+        for (bytes, language) in [(rust, LanguageID.rust), (python, .python), (typeScript, .typescript), (go, .go)] {
             let questions = try #require(SkeletonQuestions(bytes: bytes, language: language))
             let state = questions.state
             for phrase in ["SENTINEL", "Module docstring", "A wrapper.", "Fill the text", "Remember that wrapping ran",
@@ -449,7 +521,6 @@ import Testing
             let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant), "\(label)")
             #expect(questions.requestBody.count <= SkeletonQuestions.maxRequestBytes)
         }
-        #expect(SkeletonQuestions(bytes: Array("package main\n".utf8), language: .go) == nil)
     }
 }
 
@@ -546,6 +617,7 @@ private func inputs() throws -> [(label: String, bytes: [UInt8], language: Langu
     let rust = try mainRs()
     let python = Array(pythonSample.utf8)
     let typeScript = Array(typeScriptSample.utf8)
+    let go = Array(goSample.utf8)
     return [
         ("main.rs", rust, .rust, nil),
         ("main.rs crlf", crlf(rust), .rust, nil),
@@ -556,6 +628,8 @@ private func inputs() throws -> [(label: String, bytes: [UInt8], language: Langu
         ("sample.ts", typeScript, .typescript, nil),
         ("sample.ts crlf", crlf(typeScript), .typescript, nil),
         ("sample.tsx", Array(tsxSample.utf8), .typescript, "tsx"),
+        ("sample.go", go, .go, nil),
+        ("sample.go crlf", crlf(go), .go, nil),
     ]
 }
 
@@ -888,4 +962,151 @@ export default class Panel extends React.Component<Props> {
         return send(event.type);
     }
 }
+"""#
+
+/// Methods on a generic receiver, receiver calls, struct and interface
+/// types (grouped too), switches, `if err != nil` exits, a goroutine,
+/// test-shaped functions and non-ASCII text.
+private let goSample = #"""
+// Package engine is a sample.
+package engine
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+// Mode is a kind.
+type Mode int
+
+type Options struct {
+	Width, Height int
+	Label         string `json:"label"`
+	*Base
+	宽度 int
+}
+
+type Runner interface {
+	Run(line string) error
+	fmt.Stringer
+	Close()
+}
+
+type (
+	Pair[T any] struct{ Left, Right T }
+	Name        = string
+)
+
+type Engine[T any] struct {
+	options Options
+	total   int
+	out     chan string
+}
+
+func main() {
+	e, err := NewEngine(Options{Width: 80})
+	if err != nil {
+		fmt.Println("bad", err)
+		return
+	}
+	go e.loop()
+	defer e.Close()
+	for _, line := range lines("x") {
+		e.Feed(line)
+	}
+}
+
+func init() {
+	register(`engine
+二`, &Options{})
+}
+
+func NewEngine(options Options) (*Engine[string], error) {
+	if options.Width <= 0 {
+		return nil, errors.New("bad width")
+	}
+	return &Engine[string]{options: options, out: make(chan string)}, nil
+}
+
+func (e *Engine[T]) Feed(line string) error {
+	n, err := e.measure(line)
+	if err != nil {
+		return fmt.Errorf("measure: %w", err)
+	}
+	if err := e.check(n); err != nil {
+		return err
+	}
+	if n > 99 {
+		return errors.New("too long")
+	}
+	if n < 0 {
+		return errNegative
+	}
+	switch e.options.Label {
+	case "fast":
+		e.total += n
+	case "slow", "慢":
+		e.flush()
+		fallthrough
+	default:
+		fmt.Println("odd", line)
+	}
+	e.out <- line
+	return nil
+}
+
+func (e *Engine[T]) loop() {
+	for {
+		select {
+		case line, ok := <-e.out:
+			if !ok {
+				return
+			}
+			e.Feed(line)
+		default:
+			break
+		}
+	}
+}
+
+func (e Engine[T]) measure(line string) (int, error) {
+	switch v := any(line).(type) {
+	case string:
+		return len(v), nil
+	default:
+		return 0, errors.New("中文 é 😀")
+	}
+}
+
+func (e *Engine[T]) check(n int) error { return nil }
+func (e *Engine[T]) flush()            { e.total = 0 }
+func (e *Engine[T]) Close() error      { close(e.out); return nil }
+
+func lines(path string, rest ...string) []string {
+	return []string{path + "😀"}
+}
+
+func register(name string, options *Options) {}
+
+func (e *Engine[T]) Reload() []string {
+	data, err := e.load()
+	if err != nil {
+		data = lines("fallback")
+	}
+	return data
+}
+
+func (e *Engine[T]) load() ([]string, error) { return nil, nil }
+
+func ExampleConfig() *Options { return &Options{} }
+
+func TestFeed(t *testing.T) {
+	e, _ := NewEngine(Options{Width: 1})
+	e.Feed("a")
+}
+
+func BenchmarkFeed(b *testing.B) {}
+
+func Example() {}
 """#
