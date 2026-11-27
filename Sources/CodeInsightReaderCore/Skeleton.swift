@@ -352,6 +352,9 @@ private struct SkeletonDistiller {
     /// Whether a statement the rules drop is kept by its score.
     func keptByScore(_ statement: SkeletonStatement) -> Bool {
         guard let current, !docstrings.contains(statement.node.start..<statement.node.end) else { return false }
+        // A returning `if err != nil` stays dropped: scores near 0.5 kept
+        // about half of them, so the error plumbing came and went.
+        if errorCheck(statement.node) != nil { return false }
         if let asked {
             asked.statements.append((current, statement))
             return true

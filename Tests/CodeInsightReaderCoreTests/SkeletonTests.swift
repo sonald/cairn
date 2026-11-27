@@ -326,6 +326,13 @@ import Testing
         // Exits on an error go; so do returns of only an error.
         #expect(texts.filter { $0.contains("err != nil") } == ["    if err != nil { data = lines(\"fallback\") }"])
         #expect(!texts.contains { $0.contains("errors.New") || $0.contains("errNegative") })
+        // A returning error check is never asked about, so no score brings it back.
+        let questions = try #require(SkeletonQuestions(bytes: bytes, language: .go))
+        let allKept = try #require(distillSkeleton(
+            bytes: bytes, language: .go, scores: Dictionary(uniqueKeysWithValues: questions.questions.map { ($0.id, 1.0) })
+        ))
+        #expect(allKept.map(\.text).filter { $0.contains("err != nil") } == ["    if err != nil { data = lines(\"fallback\") }"])
+        #expect(!questions.questions.contains { $0.instructions.contains("`if err != nil") })
         // A case's own line maps to that source line.
         let source = sourceLines(bytes)
         let fast = try #require(source.firstIndex { $0.contains("case \"fast\":") }) + 1
