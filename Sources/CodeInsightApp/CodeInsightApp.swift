@@ -682,7 +682,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             alert.messageText = localized("app.remote.title")
             alert.informativeText = problem ?? localized("app.remote.detail")
             let open = alert.addButton(withTitle: localized("app.open.action"))
-            alert.addButton(withTitle: localized("app.cancel")).keyEquivalent = "\u{1b}"
+            alert.addButton(withTitle: localized("app.cancel")).applyKeyChord(KeyChord(modifiers: [], key: .special(.escape)))
             let field = NSTextField(string: text)
             field.placeholderString = localized("app.remote.placeholder")
             field.frame = NSRect(x: 0, y: 0, width: 320, height: 24)
