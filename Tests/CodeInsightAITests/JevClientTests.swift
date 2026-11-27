@@ -142,6 +142,8 @@ import Testing
         #expect(JevScoreCache(directory: directory).scores(contentHash: "abc", language: .rust) == scores)
         #expect(cache.scores(contentHash: "abd", language: .rust) == nil)
         #expect(cache.scores(contentHash: "abc", language: .python) == nil)
+        // `.tsx` parses the same bytes with another grammar, so its scores are its own.
+        #expect(cache.scores(contentHash: "abc", language: .rust, variant: "tsx") == nil)
         #expect(JevScoreCache(directory: directory, ruleVersion: SkeletonQuestions.ruleVersion + 1)
             .scores(contentHash: "abc", language: .rust) == nil)
 

@@ -87,7 +87,8 @@ public struct JevClient: Sendable {
     }
 }
 
-/// Jev scores on disk, by file content, language, rule version and model.
+/// Jev scores on disk, by file content, language and its grammar variant
+/// (`.tsx` against `.ts`), rule version and model.
 /// Only the scores are stored: never code, skeleton text or questions.
 public struct JevScoreCache: Sendable {
     public let directory: URL
@@ -103,19 +104,21 @@ public struct JevScoreCache: Sendable {
         self.ruleVersion = ruleVersion
     }
 
-    public func scores(contentHash: String, language: LanguageID) -> [String: Double]? {
-        guard let data = try? Data(contentsOf: fileURL(contentHash, language)) else { return nil }
+    public func scores(contentHash: String, language: LanguageID, variant: String? = nil) -> [String: Double]? {
+        guard let data = try? Data(contentsOf: fileURL(contentHash, language, variant)) else { return nil }
         return try? JSONDecoder().decode([String: Double].self, from: data)
     }
 
-    public func save(_ scores: [String: Double], contentHash: String, language: LanguageID) {
+    public func save(_ scores: [String: Double], contentHash: String, language: LanguageID, variant: String? = nil) {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         guard let data = try? JSONEncoder().encode(scores) else { return }
-        try? data.write(to: fileURL(contentHash, language), options: .atomic)
+        try? data.write(to: fileURL(contentHash, language, variant), options: .atomic)
     }
 
-    private func fileURL(_ contentHash: String, _ language: LanguageID) -> URL {
-        let key = [contentHash, "\(language)", String(ruleVersion), SkeletonQuestions.model].joined(separator: "\n")
+    private func fileURL(_ contentHash: String, _ language: LanguageID, _ variant: String?) -> URL {
+        // No variant keeps the key it had before variants counted.
+        let key = ([contentHash, "\(language)", String(ruleVersion), SkeletonQuestions.model] + (variant.map { [$0] } ?? []))
+            .joined(separator: "\n")
         let name = SHA256.hash(data: Data(key.utf8)).map { String(format: "%02x", $0) }.joined()
         return directory.appendingPathComponent(name + ".json")
     }

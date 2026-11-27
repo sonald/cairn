@@ -353,8 +353,9 @@ private struct SkeletonDistiller {
     func keptByScore(_ statement: SkeletonStatement) -> Bool {
         guard let current, !docstrings.contains(statement.node.start..<statement.node.end) else { return false }
         // A returning `if err != nil` stays dropped: scores near 0.5 kept
-        // about half of them, so the error plumbing came and went.
-        if errorCheck(statement.node) != nil { return false }
+        // about half of them, so the error plumbing came and went. One with
+        // an initializer reads as that call, which is work to score.
+        if let check = errorCheck(statement.node), check.initializer == nil { return false }
         if let asked {
             asked.statements.append((current, statement))
             return true
@@ -862,8 +863,10 @@ private struct SkeletonDistiller {
         var result = RenderedBody()
         let all = statements(of: body)
         result.holdsOnlyValue = all.count == 1 && all[0].isValue
+        let declarations = declarationsUsedByScore(all)
         for (index, statement) in all.enumerated() {
-            guard statement.isValue || keeps(statement.node) || keptByScore(statement) else { continue }
+            guard statement.isValue || keeps(statement.node) || keptByScore(statement) || declarations.contains(index)
+            else { continue }
             let checked = index + 1 < all.count && errorCheck(all[index + 1].node) != nil
             let (rows, compound) = renderStatement(statement, depth: depth, extra: checked ? errorBinding(statement.node) : [])
             result.rows += rows
@@ -871,6 +874,60 @@ private struct SkeletonDistiller {
             if rows.count == 1, !compound { result.simpleStatements += 1 }
         }
         return result
+    }
+
+    /// The dropped statements that declare a name a statement kept only by
+    /// its score uses, and in turn the names those use, so a kept line
+    /// never reads a variable the skeleton does not show.
+    // ponytail: siblings in one body only; a use in a nested block does not reach out.
+    func declarationsUsedByScore(_ all: [SkeletonStatement]) -> Set<Int> {
+        guard asked == nil, !scores.isEmpty else { return [] }
+        var uses = Set<String>()
+        var found = Set<Int>()
+        for index in all.indices.reversed() {
+            let statement = all[index]
+            if statement.isValue || keeps(statement.node) { continue }
+            let scored = keptByScore(statement)
+            let declared = declaredNames(statement.node)
+            guard scored || !declared.isDisjoint(with: uses) else { continue }
+            if !scored { found.insert(index) }
+            // The nearest declaration answers a use; earlier ones of the same name stay dropped.
+            uses = uses.subtracting(declared).union(names(in: statement.node).subtracting(declared))
+        }
+        return found
+    }
+
+    /// The local names a statement declares: `let`, `const`, `x :=`, `x = …` in Python.
+    func declaredNames(_ node: Node) -> Set<String> {
+        var targets: [Node] = []
+        switch language {
+        case .rust:
+            if node.kind == "let_declaration", let pattern = node.field("pattern") { targets = [pattern] }
+        case .python:
+            if node.kind == "expression_statement", let assignment = node.namedChildren.first,
+               assignment.kind == "assignment", let left = assignment.field("left") { targets = [left] }
+        case .typescript:
+            if node.kind == "lexical_declaration" || node.kind == "variable_declaration" {
+                targets = node.namedChildren.filter { $0.kind == "variable_declarator" }.compactMap { $0.field("name") }
+            }
+        case .go:
+            if node.kind == "short_var_declaration", let left = node.field("left") { targets = [left] }
+            if node.kind == "var_declaration" {
+                targets = node.namedChildren.filter { $0.kind == "var_spec" }.compactMap { $0.field("name") }
+            }
+        }
+        return targets.reduce(into: Set<String>()) { $0.formUnion(names(in: $1)) }
+    }
+
+    /// Every identifier written in a node.
+    func names(in node: Node) -> Set<String> {
+        var found = Set<String>()
+        forEachNode(in: node) { child in
+            if ["identifier", "shorthand_property_identifier", "shorthand_property_identifier_pattern"]
+                .contains(child.kind) { found.insert(text(child)) }
+            return true
+        }
+        return found
     }
 
     /// Renders one kept statement: one line, or its clause lines with each

@@ -3547,7 +3547,7 @@ extension ReaderViewController {
             return entry
         }
         if scoring, let entry = cached(scored: true) { return entry }
-        let scores = scoring ? overviewScoring?.cache.scores(contentHash: document.contentID.hex, language: language) : nil
+        let scores = scoring ? overviewScoring?.cache.scores(contentHash: document.contentID.hex, language: language, variant: document.languageMode.variant) : nil
         if scores == nil, let entry = cached(scored: false) { return entry }
         guard FileTier(lineCount: document.lineTable.lineStarts.count) == .regular else {
             awaitSkeleton(for: document, scores: scores, landingOn: sourceLine, marksLanding: marksLanding)
@@ -3617,7 +3617,7 @@ extension ReaderViewController {
         guard let questions = SkeletonQuestions(bytes: document.bytes, language: language, variant: document.languageMode.variant) else { return .notAsked }
         do {
             let scores = try await scoring.score(questions)
-            scoring.cache.save(scores, contentHash: document.contentID.hex, language: language)
+            scoring.cache.save(scores, contentHash: document.contentID.hex, language: language, variant: document.languageMode.variant)
             return .scored(SkeletonOverview(source: document, scores: scores))
         } catch is CancellationError {
             return .cancelled

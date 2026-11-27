@@ -226,6 +226,31 @@ import Testing
         #expect(lines.contains { $0.text == "    return \"\\n\".join(self.wrap(text))" && $0.sourceLines == 13...13 })
     }
 
+    @Test func aStatementKeptByItsScoreBringsTheDeclarationsItReads() throws {
+        // Entries are always distilled, so `main` is.
+        let samples: [(String, LanguageID, String, [Int])] = [
+            ("function main(events) {\n    let seen = new Set(events);\n    let seen = new Set(events);\n"
+                + "    const other = seen.size + 1;\n    const unused = 2;\n    console.log(other);\n}\n",
+             .typescript, "console.log(other)", [1, 3, 4, 6, 7]),
+            ("def main(events):\n    seen = set(events)\n    seen = set(events)\n    other = len(seen) + 1\n"
+                + "    unused = 2\n    print(other)\n",
+             .python, "print(other)", [1, 3, 4, 6]),
+            ("package p\n\nfunc main() {\n\tseen := len(os.Args)\n\tseen := len(os.Args)\n"
+                + "\tother := seen + 1\n\tunused := 2\n\tfmt.Println(other)\n}\n",
+             .go, "fmt.Println(other)", [3, 5, 6, 8, 9]),
+        ]
+        for (source, language, use, expected) in samples {
+            let bytes = Array(source.utf8)
+            let questions = try #require(SkeletonQuestions(bytes: bytes, language: language), "\(language)")
+            let used = try #require(questions.questions.first { $0.instructions.contains(use) }, "\(language)")
+            let lines = try #require(distillSkeleton(bytes: bytes, language: language, scores: [used.id: 1]))
+            let kept = lines.compactMap(\.sourceLines?.lowerBound)
+            // The use, the declaration it reads, and the one that declaration reads; not the
+            // unused name, nor the earlier declaration the nearer one replaces.
+            #expect(kept == expected, "\(language): \(lines.map(\.text))")
+        }
+    }
+
     @Test func typeScriptReadsAsSignaturesAndKeyStatementsWithoutTypes() throws {
         let bytes = Array(typeScriptSample.utf8)
         let lines = try #require(distillSkeleton(bytes: bytes, language: .typescript))
@@ -333,6 +358,12 @@ import Testing
         ))
         #expect(allKept.map(\.text).filter { $0.contains("err != nil") } == ["    if err != nil { data = lines(\"fallback\") }"])
         #expect(!questions.questions.contains { $0.instructions.contains("`if err != nil") })
+        // One with an initializer reads as that call, which a score may keep.
+        let locked = Array("package p\n\nfunc main() {\n\tif err := mu.Lock(); err != nil {\n\t\treturn\n\t}\n}\n".utf8)
+        let lockQuestions = try #require(SkeletonQuestions(bytes: locked, language: .go))
+        let lock = try #require(lockQuestions.questions.first { $0.instructions.contains("mu.Lock()") })
+        #expect(try #require(distillSkeleton(bytes: locked, language: .go, scores: [lock.id: 1])).map(\.text)
+            .contains("    mu.Lock()"))
         // A case's own line maps to that source line.
         let source = sourceLines(bytes)
         let fast = try #require(source.firstIndex { $0.contains("case \"fast\":") }) + 1
@@ -403,10 +434,15 @@ import Testing
         for (label, bytes, language, variant) in try inputs() {
             let questions = try #require(SkeletonQuestions(bytes: bytes, language: language, variant: variant))
             let ones = Dictionary(questions.questions.map { ($0.id, 1.0) }) { first, _ in first }
-            let kept = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: ones))
             for _ in 0..<40 {
                 let question = questions.questions[generator.next(questions.questions.count)]
+                // Later statements kept by their scores would bring a declaration back; lower them on both sides.
                 var scores = ones
+                for later in questions.questions where question.id.hasPrefix("s") && later.id.hasPrefix("s")
+                    && later.lines.lowerBound > question.lines.lowerBound {
+                    scores[later.id] = 0
+                }
+                let kept = try #require(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores))
                 scores[question.id] = 0
                 #expect(distillSkeleton(bytes: bytes, language: language, variant: variant, scores: scores) != kept,
                         "\(label): \(question.id) changes nothing")
